@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "542895519847",
+    "project_id": "campusbite-7d7c6",
+    "storage_bucket": "campusbite-7d7c6.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:542895519847:android:d15fdd777822353e007cc2",
+        "android_client_info": {
+          "package_name": "com.campusbite.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC_TyxSSj8Kmj-fmSbzrP0FxHyeP0OD1RQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
