@@ -6,6 +6,7 @@ import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import com.campusbite.app.ui.screens.auth.LoginScreen
+import com.campusbite.app.ui.screens.auth.RegisterScreen
 import com.campusbite.app.ui.screens.splash.SplashScreen
 
 @Composable
@@ -41,7 +42,16 @@ fun NavGraph(navController: NavHostController) {
             )
         }
         composable(Routes.REGISTER) {
-            // RegisterScreen will go here
+            RegisterScreen(
+                onNavigateToHome = {
+                    navController.navigate(Routes.HOME) {
+                        popUpTo(Routes.REGISTER) { inclusive = true }
+                    }
+                },
+                onNavigateToLogin = {
+                    navController.popBackStack()
+                }
+            )
         }
         composable(Routes.HOME) {
             // HomeScreen will go here
