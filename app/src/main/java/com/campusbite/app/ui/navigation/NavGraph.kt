@@ -5,6 +5,8 @@ import androidx.compose.runtime.Composable
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import com.campusbite.app.ui.screens.auth.LoginScreen
+import com.campusbite.app.ui.screens.splash.SplashScreen
 
 @Composable
 fun NavGraph(navController: NavHostController) {
@@ -13,10 +15,30 @@ fun NavGraph(navController: NavHostController) {
         startDestination = Routes.SPLASH
     ) {
         composable(Routes.SPLASH) {
-            // SplashScreen will go here
+            SplashScreen(
+                onNavigateToHome = {
+                    navController.navigate(Routes.HOME) {
+                        popUpTo(Routes.SPLASH) { inclusive = true }
+                    }
+                },
+                onNavigateToLogin = {
+                    navController.navigate(Routes.LOGIN) {
+                        popUpTo(Routes.SPLASH) { inclusive = true }
+                    }
+                }
+            )
         }
         composable(Routes.LOGIN) {
-            // LoginScreen will go here
+            LoginScreen(
+                onNavigateToHome = {
+                    navController.navigate(Routes.HOME) {
+                        popUpTo(Routes.LOGIN) { inclusive = true }
+                    }
+                },
+                onNavigateToRegister = {
+                    navController.navigate(Routes.REGISTER)
+                }
+            )
         }
         composable(Routes.REGISTER) {
             // RegisterScreen will go here
