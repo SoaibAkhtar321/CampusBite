@@ -7,6 +7,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import com.campusbite.app.ui.screens.auth.LoginScreen
 import com.campusbite.app.ui.screens.auth.RegisterScreen
+import com.campusbite.app.ui.screens.home.HomeScreen
 import com.campusbite.app.ui.screens.splash.SplashScreen
 
 @Composable
@@ -70,6 +71,9 @@ fun NavGraph(navController: NavHostController) {
         }
         composable(Routes.ADMIN_DASHBOARD) {
             // AdminDashboardScreen will go here
+        }
+        composable(Routes.HOME) {
+            HomeScreen()
         }
     }
 }

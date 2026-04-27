@@ -9,19 +9,45 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.hilt.navigation.compose.hiltViewModel
 import com.campusbite.app.ui.theme.Orange
 import com.campusbite.app.ui.theme.TextPrimary
 import com.campusbite.app.ui.theme.TextSecondary
+import com.campusbite.app.ui.viewmodel.AuthState
+import com.campusbite.app.ui.viewmodel.AuthViewModel
 
 @Composable
 fun LoginScreen(
     onNavigateToHome: () -> Unit,
-    onNavigateToRegister: () -> Unit
+    onNavigateToRegister: () -> Unit,
+    viewModel: AuthViewModel = hiltViewModel()
 ) {
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
+    var showPassword by remember { mutableStateOf(false) }
+    var showConfirmPassword by remember { mutableStateOf(false) }
+
+    val authState by viewModel.authState.collectAsState()
+
+    LaunchedEffect(authState) {
+        if (authState is AuthState.Success) {
+            viewModel.resetState()
+            onNavigateToHome()
+        }
+    }
+
+    val textFieldColors = OutlinedTextFieldDefaults.colors(
+        focusedTextColor = TextPrimary,
+        unfocusedTextColor = TextPrimary,
+        focusedBorderColor = Orange,
+        unfocusedBorderColor = TextSecondary,
+        focusedLabelColor = Orange,
+        unfocusedLabelColor = TextSecondary,
+        cursorColor = Orange
+    )
 
     Column(
         modifier = Modifier
@@ -54,15 +80,7 @@ fun LoginScreen(
             singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
             modifier = Modifier.fillMaxWidth(),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedTextColor = TextPrimary,
-                unfocusedTextColor = TextPrimary,
-                focusedBorderColor = Orange,
-                unfocusedBorderColor = TextSecondary,
-                focusedLabelColor = Orange,
-                unfocusedLabelColor = TextSecondary,
-                cursorColor = Orange
-            )
+            colors = textFieldColors
         )
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -72,27 +90,47 @@ fun LoginScreen(
             onValueChange = { password = it },
             label = { Text("Password") },
             singleLine = true,
-            visualTransformation = PasswordVisualTransformation(),
+            visualTransformation = if (showPassword) VisualTransformation.None
+            else PasswordVisualTransformation(),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
             modifier = Modifier.fillMaxWidth(),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedTextColor = TextPrimary,
-                unfocusedTextColor = TextPrimary,
-                focusedBorderColor = Orange,
-                unfocusedBorderColor = TextSecondary,
-                focusedLabelColor = Orange,
-                unfocusedLabelColor = TextSecondary,
-                cursorColor = Orange
-            )
+            colors = textFieldColors,
+            trailingIcon = {
+                IconButton(onClick = { showPassword = !showPassword }) {
+                    Text(
+                        text = if (showPassword) "Hide" else "Show",
+                        fontSize = 12.sp,
+                        color = Orange
+                    )
+                }
+            }
         )
 
         Spacer(modifier = Modifier.height(24.dp))
 
+        if (authState is AuthState.Error) {
+            Text(
+                text = (authState as AuthState.Error).message,
+                color = MaterialTheme.colorScheme.error,
+                fontSize = 13.sp,
+                modifier = Modifier.padding(bottom = 8.dp)
+            )
+        }
+
         Button(
-            onClick = { onNavigateToHome() },
-            modifier = Modifier.fillMaxWidth()
+            onClick = { viewModel.login(email, password) },
+            modifier = Modifier.fillMaxWidth(),
+            enabled = authState !is AuthState.Loading
         ) {
-            Text("Login")
+            if (authState is AuthState.Loading) {
+                CircularProgressIndicator(
+                    color = MaterialTheme.colorScheme.onPrimary,
+                    modifier = Modifier.size(20.dp),
+                    strokeWidth = 2.dp
+                )
+            } else {
+                Text("Login")
+            }
         }
 
         Spacer(modifier = Modifier.height(16.dp))
