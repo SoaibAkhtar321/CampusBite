@@ -11,16 +11,23 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
+import androidx.hilt.navigation.compose.hiltViewModel
+import com.campusbite.app.ui.viewmodel.AuthViewModel
 import kotlinx.coroutines.delay
 
 @Composable
 fun SplashScreen(
     onNavigateToHome: () -> Unit,
-    onNavigateToLogin: () -> Unit
+    onNavigateToLogin: () -> Unit,
+    viewModel: AuthViewModel = hiltViewModel()
 ) {
     LaunchedEffect(Unit) {
         delay(2000)
-        onNavigateToLogin()
+        if (viewModel.isLoggedIn) {
+            onNavigateToHome()
+        } else {
+            onNavigateToLogin()
+        }
     }
 
     Box(
