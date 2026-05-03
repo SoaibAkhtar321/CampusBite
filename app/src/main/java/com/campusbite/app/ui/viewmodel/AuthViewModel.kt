@@ -23,10 +23,17 @@ class AuthViewModel @Inject constructor(
         viewModelScope.launch {
             _authState.value = AuthState.Loading
             val result = authRepository.login(email, password)
-            _authState.value = if (result.isSuccess) {
-                AuthState.Success
+            if (result.isSuccess) {
+                val role = authRepository.getUserRole()
+                _authState.value = if (role == "staff") {
+                    AuthState.StaffSuccess
+                } else {
+                    AuthState.Success
+                }
             } else {
-                AuthState.Error(result.exceptionOrNull()?.message ?: "Login failed")
+                _authState.value = AuthState.Error(
+                    result.exceptionOrNull()?.message ?: "Login failed"
+                )
             }
         }
     }
@@ -48,14 +55,31 @@ class AuthViewModel @Inject constructor(
         _authState.value = AuthState.Idle
     }
 
+
+
+
     fun resetState() {
         _authState.value = AuthState.Idle
     }
+
+    suspend fun getUserRole(): String {
+        return authRepository.getUserRole()
+    }
+    private val _userRole = MutableStateFlow("student")
+    val userRole: StateFlow<String> = _userRole
+
+    fun checkUserRole() {
+        viewModelScope.launch {
+            _userRole.value = authRepository.getUserRole()
+        }
+    }
+
 }
 
 sealed class AuthState {
     object Idle : AuthState()
     object Loading : AuthState()
     object Success : AuthState()
+    object StaffSuccess : AuthState()
     data class Error(val message: String) : AuthState()
 }

@@ -30,9 +30,10 @@ import com.campusbite.app.ui.viewmodel.HomeViewModel
 fun HomeScreen(
     onNavigateToShopDetail: (String) -> Unit = {},
     onNavigateToCart: () -> Unit = {},
+    onLogout: () -> Unit = {},
     viewModel: HomeViewModel = hiltViewModel(),
     cartViewModel: CartViewModel = hiltViewModel()
-) {
+){
     val shops by viewModel.shops.collectAsState()
     val isDataReady by viewModel.isDataReady.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
@@ -51,6 +52,22 @@ fun HomeScreen(
                 .background(MaterialTheme.colorScheme.background)
         ) {
             // Top bar
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "CampusBite", fontSize = 22.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onBackground
+                )
+                TextButton(onClick = onLogout) {
+                    Text("Logout", color = Orange, fontSize = 13.sp)
+                }
+            }
             Row(
                 modifier = Modifier
                     .fillMaxWidth()

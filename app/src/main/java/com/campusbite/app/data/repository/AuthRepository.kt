@@ -38,4 +38,13 @@ class AuthRepository @Inject constructor(
     fun logout() {
         auth.signOut()
     }
+    suspend fun getUserRole(): String {
+        return try {
+            val uid = auth.currentUser?.uid ?: return "student"
+            val snapshot = firestore.collection("users").document(uid).get().await()
+            snapshot.getString("role") ?: "student"
+        } catch (e: Exception) {
+            "student"
+        }
+    }
 }

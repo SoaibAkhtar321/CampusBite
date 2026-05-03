@@ -19,12 +19,15 @@ import kotlinx.coroutines.delay
 fun SplashScreen(
     onNavigateToHome: () -> Unit,
     onNavigateToLogin: () -> Unit,
+    onNavigateToStaff: () -> Unit,
     viewModel: AuthViewModel = hiltViewModel()
 ) {
     LaunchedEffect(Unit) {
         delay(2000)
         if (viewModel.isLoggedIn) {
-            onNavigateToHome()
+            val role = viewModel.getUserRole()
+            if (role == "staff") onNavigateToStaff()
+            else onNavigateToHome()
         } else {
             onNavigateToLogin()
         }

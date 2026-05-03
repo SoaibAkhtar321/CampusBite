@@ -19,12 +19,13 @@ import com.campusbite.app.ui.theme.TextSecondary
 import com.campusbite.app.ui.viewmodel.AuthState
 import com.campusbite.app.ui.viewmodel.AuthViewModel
 
-@Composable
+@Composable    
 fun LoginScreen(
     onNavigateToHome: () -> Unit,
     onNavigateToRegister: () -> Unit,
+    onNavigateToStaff: () -> Unit = {},
     viewModel: AuthViewModel = hiltViewModel()
-) {
+){
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var showPassword by remember { mutableStateOf(false) }
@@ -33,9 +34,16 @@ fun LoginScreen(
     val authState by viewModel.authState.collectAsState()
 
     LaunchedEffect(authState) {
-        if (authState is AuthState.Success) {
-            viewModel.resetState()
-            onNavigateToHome()
+        when (authState) {
+            is AuthState.Success -> {
+                viewModel.resetState()
+                onNavigateToHome()
+            }
+            is AuthState.StaffSuccess -> {
+                viewModel.resetState()
+                onNavigateToStaff()
+            }
+            else -> {}
         }
     }
 

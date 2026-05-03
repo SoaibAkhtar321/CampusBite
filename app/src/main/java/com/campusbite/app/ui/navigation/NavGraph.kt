@@ -1,18 +1,25 @@
 package com.campusbite.app.ui.navigation
 
 import androidx.compose.runtime.Composable
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import com.campusbite.app.ui.screens.admin.AdminDashboardScreen
 import com.campusbite.app.ui.screens.auth.LoginScreen
 import com.campusbite.app.ui.screens.auth.RegisterScreen
 import com.campusbite.app.ui.screens.home.HomeScreen
 import com.campusbite.app.ui.screens.order.CartScreen
 import com.campusbite.app.ui.screens.order.OrderStatusScreen
 import com.campusbite.app.ui.screens.splash.SplashScreen
+import com.campusbite.app.ui.viewmodel.AuthViewModel
+import com.campusbite.app.ui.viewmodel.CartViewModel
 
 @Composable
 fun NavGraph(navController: NavHostController) {
+    val authViewModel: AuthViewModel = hiltViewModel()
+    val cartViewModel: CartViewModel = hiltViewModel()
+
     NavHost(
         navController = navController,
         startDestination = Routes.SPLASH
@@ -28,6 +35,11 @@ fun NavGraph(navController: NavHostController) {
                     navController.navigate(Routes.LOGIN) {
                         popUpTo(Routes.SPLASH) { inclusive = true }
                     }
+                },
+                onNavigateToStaff = {
+                    navController.navigate(Routes.ADMIN_DASHBOARD) {
+                        popUpTo(Routes.SPLASH) { inclusive = true }
+                    }
                 }
             )
         }
@@ -40,6 +52,11 @@ fun NavGraph(navController: NavHostController) {
                 },
                 onNavigateToRegister = {
                     navController.navigate(Routes.REGISTER)
+                },
+                onNavigateToStaff = {
+                    navController.navigate(Routes.ADMIN_DASHBOARD) {
+                        popUpTo(Routes.LOGIN) { inclusive = true }
+                    }
                 }
             )
         }
@@ -59,7 +76,14 @@ fun NavGraph(navController: NavHostController) {
             HomeScreen(
                 onNavigateToCart = {
                     navController.navigate(Routes.CART)
-                }
+                },
+                onLogout = {
+                    authViewModel.logout()
+                    navController.navigate(Routes.LOGIN) {
+                        popUpTo(0) { inclusive = true }
+                    }
+                },
+                cartViewModel = cartViewModel
             )
         }
         composable(Routes.SEARCH) {
@@ -75,7 +99,8 @@ fun NavGraph(navController: NavHostController) {
                     navController.navigate(Routes.orderStatus(orderId)) {
                         popUpTo(Routes.CART) { inclusive = true }
                     }
-                }
+                },
+                cartViewModel = cartViewModel
             )
         }
         composable(Routes.ORDER_STATUS) { backStackEntry ->
@@ -90,7 +115,14 @@ fun NavGraph(navController: NavHostController) {
             )
         }
         composable(Routes.ADMIN_DASHBOARD) {
-            // AdminDashboardScreen will go here
+            AdminDashboardScreen(
+                onLogout = {
+                    authViewModel.logout()
+                    navController.navigate(Routes.LOGIN) {
+                        popUpTo(0) { inclusive = true }
+                    }
+                }
+            )
         }
     }
 }
