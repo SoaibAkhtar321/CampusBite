@@ -7,8 +7,9 @@ data class Order(
     val shopId: String = "",
     val items: List<OrderItem> = emptyList(),
     val totalPrice: Double = 0.0,
-    val status: String = "pending", // pending, preparing, ready, picked_up
+    val status: String = "pending",
     val pickupSlot: String = "",
+    val paymentMethod: String = "Cash on Delivery",
     val createdAt: Long = 0L
 )
 

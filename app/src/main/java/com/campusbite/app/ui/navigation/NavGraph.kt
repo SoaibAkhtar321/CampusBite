@@ -1,6 +1,5 @@
 package com.campusbite.app.ui.navigation
 
-
 import androidx.compose.runtime.Composable
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
@@ -8,6 +7,8 @@ import androidx.navigation.compose.composable
 import com.campusbite.app.ui.screens.auth.LoginScreen
 import com.campusbite.app.ui.screens.auth.RegisterScreen
 import com.campusbite.app.ui.screens.home.HomeScreen
+import com.campusbite.app.ui.screens.order.CartScreen
+import com.campusbite.app.ui.screens.order.OrderStatusScreen
 import com.campusbite.app.ui.screens.splash.SplashScreen
 
 @Composable
@@ -55,7 +56,11 @@ fun NavGraph(navController: NavHostController) {
             )
         }
         composable(Routes.HOME) {
-            // HomeScreen will go here
+            HomeScreen(
+                onNavigateToCart = {
+                    navController.navigate(Routes.CART)
+                }
+            )
         }
         composable(Routes.SEARCH) {
             // SearchScreen will go here
@@ -64,16 +69,28 @@ fun NavGraph(navController: NavHostController) {
             // ShopDetailScreen will go here
         }
         composable(Routes.CART) {
-            // CartScreen will go here
+            CartScreen(
+                onNavigateBack = { navController.popBackStack() },
+                onOrderPlaced = { orderId ->
+                    navController.navigate(Routes.orderStatus(orderId)) {
+                        popUpTo(Routes.CART) { inclusive = true }
+                    }
+                }
+            )
         }
-        composable(Routes.ORDER_STATUS) {
-            // OrderStatusScreen will go here
+        composable(Routes.ORDER_STATUS) { backStackEntry ->
+            val orderId = backStackEntry.arguments?.getString("orderId") ?: ""
+            OrderStatusScreen(
+                orderId = orderId,
+                onNavigateHome = {
+                    navController.navigate(Routes.HOME) {
+                        popUpTo(Routes.HOME) { inclusive = true }
+                    }
+                }
+            )
         }
         composable(Routes.ADMIN_DASHBOARD) {
             // AdminDashboardScreen will go here
-        }
-        composable(Routes.HOME) {
-            HomeScreen()
         }
     }
 }
