@@ -1,16 +1,15 @@
-
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
-    id("com.google.gms.google-services")   // Firebase
-    id("com.google.dagger.hilt.android")   // Hilt
-    kotlin("kapt")                     // Correct KTS way to write kapt
+    alias(libs.plugins.google.services)
+    alias(libs.plugins.hilt.android)
+    kotlin("kapt")
 }
 
 android {
     namespace = "com.campusbite.app"
-    compileSdk = 35 // SDK 36 is in preview; 35 is recommended for stability
+    compileSdk = 35
 
     defaultConfig {
         applicationId = "com.campusbite.app"
@@ -22,32 +21,23 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
-    buildTypes {
-        release {
-            isMinifyEnabled = false
-            proguardFiles(
-                getDefaultProguardFile("proguard-android-optimize.txt"),
-                "proguard-rules.pro"
-            )
-        }
-    }
-
-    // UPDATED: Modern Android requires Java 17
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+
     kotlinOptions {
         jvmTarget = "17"
     }
+
     buildFeatures {
         compose = true
     }
 }
 
 dependencies {
-    // Core (Using Version Catalog)
     implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.core.splashscreen)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
 
@@ -57,29 +47,23 @@ dependencies {
     implementation(libs.androidx.ui.graphics)
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
-    implementation(libs.androidx.ui.text)
-    debugImplementation(libs.androidx.ui.tooling)
-    debugImplementation(libs.androidx.ui.test.manifest)
-
-    // Navigation & Lifecycle (Standard strings)
-    implementation("androidx.navigation:navigation-compose:2.8.3")
-    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.6")
 
     // Firebase
-    implementation(platform("com.google.firebase:firebase-bom:33.5.1"))
-    implementation("com.google.firebase:firebase-auth-ktx")
-    implementation("com.google.firebase:firebase-firestore-ktx")
+    implementation(platform(libs.firebase.bom))
+    implementation("com.google.firebase:firebase-auth")
+    implementation("com.google.firebase:firebase-firestore")
+    implementation("com.google.firebase:firebase-messaging")
 
-    // Hilt (Dependency Injection)
+    // Hilt
     implementation("com.google.dagger:hilt-android:2.51.1")
     kapt("com.google.dagger:hilt-compiler:2.51.1")
     implementation("androidx.hilt:hilt-navigation-compose:1.2.0")
 
-    // Coil (Image Loading)
+    // Navigation & Others
+    implementation("androidx.navigation:navigation-compose:2.8.3")
     implementation("io.coil-kt:coil-compose:2.7.0")
-
-    // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
 
-    implementation("androidx.core:core-splashscreen:1.0.1")
+
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
 }

@@ -40,6 +40,7 @@ fun HomeScreen(
     val selectedCategory by viewModel.selectedCategory.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
     val cartItems by cartViewModel.cartItems.collectAsState()
+    val showDialog by cartViewModel.showShopConflict.collectAsState()
     val filteredItems by remember(searchQuery, selectedCategory) {
         derivedStateOf { viewModel.getFilteredItems() }
     }

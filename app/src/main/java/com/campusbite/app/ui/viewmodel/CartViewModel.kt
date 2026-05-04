@@ -17,6 +17,12 @@ class CartViewModel @Inject constructor() : ViewModel() {
     private val _currentShopId = MutableStateFlow<String?>(null)
     val currentShopId: StateFlow<String?> = _currentShopId
 
+    // NEW: for shop conflict handling
+    private val _showShopConflict = MutableStateFlow(false)
+    val showShopConflict: StateFlow<Boolean> = _showShopConflict
+
+    private var pendingItem: MenuItem? = null
+
     val totalPrice: Double
         get() = _cartItems.value.sumOf { it.price * it.quantity }
 
@@ -24,8 +30,17 @@ class CartViewModel @Inject constructor() : ViewModel() {
         get() = _cartItems.value.sumOf { it.quantity }
 
     fun addItem(menuItem: MenuItem) {
+
+        // CHECK: different shop
+        if (_currentShopId.value != null && _currentShopId.value != menuItem.shopId) {
+            pendingItem = menuItem
+            _showShopConflict.value = true
+            return
+        }
+
         val currentItems = _cartItems.value.toMutableList()
         val existingItem = currentItems.find { it.itemId == menuItem.itemId }
+
         if (existingItem != null) {
             val index = currentItems.indexOf(existingItem)
             currentItems[index] = existingItem.copy(quantity = existingItem.quantity + 1)
@@ -35,25 +50,46 @@ class CartViewModel @Inject constructor() : ViewModel() {
                     itemId = menuItem.itemId,
                     name = menuItem.name,
                     price = menuItem.price,
-                    quantity = 1
+                    quantity = 1,
+                    shopId = menuItem.shopId   // IMPORTANT
                 )
             )
         }
+
         _cartItems.value = currentItems
         _currentShopId.value = menuItem.shopId
+    }
+
+    // When user clicks "Clear & Continue"
+    fun confirmClearCartAndAdd() {
+        clearCart()
+        pendingItem?.let {
+            addItem(it)
+        }
+        pendingItem = null
+        _showShopConflict.value = false
+    }
+
+    //  When user clicks "Cancel"
+    fun dismissShopConflict() {
+        pendingItem = null
+        _showShopConflict.value = false
     }
 
     fun removeItem(itemId: String) {
         val currentItems = _cartItems.value.toMutableList()
         val existingItem = currentItems.find { it.itemId == itemId }
+
         if (existingItem != null) {
             if (existingItem.quantity > 1) {
                 val index = currentItems.indexOf(existingItem)
-                currentItems[index] = existingItem.copy(quantity = existingItem.quantity - 1)
+                currentItems[index] =
+                    existingItem.copy(quantity = existingItem.quantity - 1)
             } else {
                 currentItems.remove(existingItem)
             }
         }
+
         if (currentItems.isEmpty()) _currentShopId.value = null
         _cartItems.value = currentItems
     }
