@@ -30,10 +30,11 @@ import com.campusbite.app.ui.viewmodel.HomeViewModel
 fun HomeScreen(
     onNavigateToShopDetail: (String) -> Unit = {},
     onNavigateToCart: () -> Unit = {},
+    onNavigateToOrderHistory: () -> Unit = {},
     onLogout: () -> Unit = {},
     viewModel: HomeViewModel = hiltViewModel(),
     cartViewModel: CartViewModel = hiltViewModel()
-){
+) {
     val shops by viewModel.shops.collectAsState()
     val isDataReady by viewModel.isDataReady.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
@@ -41,6 +42,7 @@ fun HomeScreen(
     val searchQuery by viewModel.searchQuery.collectAsState()
     val cartItems by cartViewModel.cartItems.collectAsState()
     val showDialog by cartViewModel.showShopConflict.collectAsState()
+
     val filteredItems by remember(searchQuery, selectedCategory) {
         derivedStateOf { viewModel.getFilteredItems() }
     }
@@ -61,26 +63,29 @@ fun HomeScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    "CampusBite", fontSize = 22.sp,
+                    "CampusBite",
+                    fontSize = 22.sp,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onBackground
                 )
+
                 TextButton(onClick = onLogout) {
                     Text("Logout", color = Orange, fontSize = 13.sp)
                 }
             }
-            Row(
+
+            // My Orders button
+            Button(
+                onClick = onNavigateToOrderHistory,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(16.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                    .padding(horizontal = 16.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Orange)
             ) {
-                Text(
-                    "CampusBite", fontSize = 22.sp,
-                    fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onBackground
-                )
+                Text("My Orders")
             }
+
+            Spacer(modifier = Modifier.height(12.dp))
 
             // Search bar
             OutlinedTextField(
@@ -114,16 +119,21 @@ fun HomeScreen(
             } else {
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(bottom = if (cartItems.isNotEmpty()) 80.dp else 0.dp)
+                    contentPadding = PaddingValues(
+                        bottom = if (cartItems.isNotEmpty()) 80.dp else 0.dp
+                    )
                 ) {
-                    // Shop cards
                     item {
                         Text(
-                            "Shops", fontSize = 16.sp, fontWeight = FontWeight.Bold,
+                            "Shops",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
                             color = TextPrimary,
                             modifier = Modifier.padding(horizontal = 16.dp)
                         )
+
                         Spacer(modifier = Modifier.height(8.dp))
+
                         LazyRow(
                             contentPadding = PaddingValues(horizontal = 16.dp),
                             horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -135,17 +145,21 @@ fun HomeScreen(
                                 )
                             }
                         }
+
                         Spacer(modifier = Modifier.height(16.dp))
                     }
 
-                    // Category chips
                     item {
                         Text(
-                            "Menu", fontSize = 16.sp, fontWeight = FontWeight.Bold,
+                            "Menu",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
                             color = TextPrimary,
                             modifier = Modifier.padding(horizontal = 16.dp)
                         )
+
                         Spacer(modifier = Modifier.height(8.dp))
+
                         LazyRow(
                             contentPadding = PaddingValues(horizontal = 16.dp),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -158,20 +172,25 @@ fun HomeScreen(
                                 )
                             }
                         }
+
                         Spacer(modifier = Modifier.height(12.dp))
                     }
 
-                    // Menu items grouped by shop
                     val groupedItems = filteredItems.groupBy { it.shopId }
+
                     groupedItems.forEach { (shopId, items) ->
                         val shopName = viewModel.getShopName(shopId)
+
                         item {
                             Text(
-                                shopName, fontSize = 15.sp, fontWeight = FontWeight.Bold,
+                                shopName,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
                                 color = Orange,
                                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
                             )
                         }
+
                         items(items) { menuItem ->
                             MenuItemCard(
                                 menuItem = menuItem,
@@ -185,8 +204,8 @@ fun HomeScreen(
             }
         }
 
-        // Floating cart button
         val itemCount = cartViewModel.itemCount
+
         if (itemCount > 0) {
             Button(
                 onClick = onNavigateToCart,

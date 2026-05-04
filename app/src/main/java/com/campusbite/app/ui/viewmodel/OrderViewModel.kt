@@ -4,6 +4,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.campusbite.app.data.model.Order
 import com.campusbite.app.data.repository.OrderRepository
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FirebaseFirestore
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -20,6 +22,8 @@ class OrderViewModel @Inject constructor(
 
     private val _currentOrder = MutableStateFlow<Order?>(null)
     val currentOrder: StateFlow<Order?> = _currentOrder
+    private val _userOrders = MutableStateFlow<List<Order>>(emptyList())
+    val userOrders: StateFlow<List<Order>> = _userOrders
 
     fun placeOrder(order: Order) {
         viewModelScope.launch {
@@ -50,6 +54,21 @@ class OrderViewModel @Inject constructor(
         orderRepository.listenToOrder(orderId) { order ->
             _currentOrder.value = order
         }
+    }
+    fun loadUserOrders() {
+        val uid = FirebaseAuth.getInstance().currentUser?.uid ?: return
+
+        FirebaseFirestore.getInstance()
+            .collection("orders")
+            .whereEqualTo("studentId", uid)
+            .addSnapshotListener { snapshot, _ ->
+
+                val list = snapshot?.documents?.mapNotNull {
+                    it.toObject(Order::class.java)
+                } ?: emptyList()
+
+                _userOrders.value = list.sortedByDescending { it.createdAt }
+            }
     }
 }
 

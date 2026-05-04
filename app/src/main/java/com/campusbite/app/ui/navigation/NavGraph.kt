@@ -10,6 +10,7 @@ import com.campusbite.app.ui.screens.auth.LoginScreen
 import com.campusbite.app.ui.screens.auth.RegisterScreen
 import com.campusbite.app.ui.screens.home.HomeScreen
 import com.campusbite.app.ui.screens.order.CartScreen
+import com.campusbite.app.ui.screens.order.OrderHistoryScreen
 import com.campusbite.app.ui.screens.order.OrderStatusScreen
 import com.campusbite.app.ui.screens.splash.SplashScreen
 import com.campusbite.app.ui.viewmodel.AuthViewModel
@@ -77,6 +78,9 @@ fun NavGraph(navController: NavHostController) {
                 onNavigateToCart = {
                     navController.navigate(Routes.CART)
                 },
+                onNavigateToOrderHistory = {
+                    navController.navigate(Routes.ORDER_HISTORY)
+                },
                 onLogout = {
                     authViewModel.logout()
                     navController.navigate(Routes.LOGIN) {
@@ -114,6 +118,10 @@ fun NavGraph(navController: NavHostController) {
                 }
             )
         }
+        composable(Routes.ORDER_HISTORY) {
+            OrderHistoryScreen()
+        }
+
         composable(Routes.ADMIN_DASHBOARD) {
             AdminDashboardScreen(
                 onLogout = {
