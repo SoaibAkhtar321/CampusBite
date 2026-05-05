@@ -90,42 +90,92 @@ class OrderViewModel @Inject constructor(
             _isLoadingSlots.value = true
 
             try {
-                val shopDoc = firestore.collection("shops")
-                    .document(shopId)
+
+                android.util.Log.d("SLOT_DEBUG", "======================")
+                android.util.Log.d("SLOT_DEBUG", "shopId = $shopId")
+
+                val shopSnapshot = firestore.collection("shops")
+                    .whereEqualTo("shopId", shopId)
                     .get()
                     .await()
 
-                val shop = shopDoc.toObject(Shop::class.java)
+                val shop = shopSnapshot.documents
+                    .firstOrNull()
+                    ?.toObject(Shop::class.java)
+                android.util.Log.d("SLOT_DEBUG", "shop = $shop")
+                android.util.Log.d("SLOT_DEBUG", "isOpen = ${shop?.isOpen}")
+                android.util.Log.d(
+                    "SLOT_DEBUG",
+                    "maxOrdersPerSlot = ${shop?.maxOrdersPerSlot}"
+                )
+                android.util.Log.d(
+                    "SLOT_DEBUG",
+                    "closedSlots = ${shop?.closedSlots}"
+                )
 
                 if (shop == null || !shop.isOpen) {
+                    android.util.Log.d(
+                        "SLOT_DEBUG",
+                        "Shop closed OR null"
+                    )
+
                     _selectedShop.value = shop
                     _availableSlots.value = emptyList()
-                    _isLoadingSlots.value = false
                     return@launch
                 }
 
                 _selectedShop.value = shop
 
-                val displayFormatter = DateTimeFormatter.ofPattern("hh:mm a")
+                val displayFormatter =
+                    DateTimeFormatter.ofPattern("hh:mm a")
 
                 val today = LocalDate.now().toString()
-                val now = LocalTime.now()
 
-                val earliestTime = now.plusMinutes(cartPrepTimeMinutes.toLong())
+                android.util.Log.d("SLOT_DEBUG", "today = $today")
+
+                val now = java.time.LocalDateTime.now()
+
+                android.util.Log.d("SLOT_DEBUG", "now = $now")
+
+                val earliestTime =
+                    now.plusMinutes(cartPrepTimeMinutes.toLong())
+
+                android.util.Log.d(
+                    "SLOT_DEBUG",
+                    "earliestTime = $earliestTime"
+                )
 
                 val generatedSlots = mutableListOf<String>()
 
-                var slot = roundToNextSlot(earliestTime, 15)
+                var slot =
+                    roundToNextSlotDateTime(earliestTime, 15)
+
                 val endTime = now.plusHours(3)
 
+                android.util.Log.d(
+                    "SLOT_DEBUG",
+                    "endTime = $endTime"
+                )
+
                 while (slot.isBefore(endTime)) {
-                    generatedSlots.add(slot.format(displayFormatter))
+
+                    val formatted =
+                        slot.toLocalTime().format(displayFormatter)
+
+                    generatedSlots.add(formatted)
+
                     slot = slot.plusMinutes(15)
                 }
+
+                android.util.Log.d(
+                    "SLOT_DEBUG",
+                    "generatedSlots = $generatedSlots"
+                )
 
                 val available = mutableListOf<String>()
 
                 for (slotText in generatedSlots) {
+
                     val count = firestore.collection("orders")
                         .whereEqualTo("shopId", shopId)
                         .whereEqualTo("pickupDate", today)
@@ -133,6 +183,11 @@ class OrderViewModel @Inject constructor(
                         .get()
                         .await()
                         .size()
+
+                    android.util.Log.d(
+                        "SLOT_DEBUG",
+                        "slot = $slotText | count = $count | max = ${shop.maxOrdersPerSlot} | closed = ${shop.closedSlots.contains(slotText)}"
+                    )
 
                     if (
                         !shop.closedSlots.contains(slotText) &&
@@ -142,18 +197,34 @@ class OrderViewModel @Inject constructor(
                     }
                 }
 
+                android.util.Log.d(
+                    "SLOT_DEBUG",
+                    "availableSlots = $available"
+                )
+
                 _availableSlots.value = available
 
             } catch (e: Exception) {
+
+                android.util.Log.e(
+                    "SLOT_DEBUG",
+                    "ERROR = ${e.message}",
+                    e
+                )
+
                 e.printStackTrace()
                 _availableSlots.value = emptyList()
+
             } finally {
                 _isLoadingSlots.value = false
             }
         }
     }
 
-    private fun roundToNextSlot(time: LocalTime, intervalMinutes: Int): LocalTime {
+    private fun roundToNextSlotDateTime(
+        time: java.time.LocalDateTime,
+        intervalMinutes: Int
+    ): java.time.LocalDateTime {
         val minute = time.minute
         val remainder = minute % intervalMinutes
         val minutesToAdd = if (remainder == 0) 0 else intervalMinutes - remainder
