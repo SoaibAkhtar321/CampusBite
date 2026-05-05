@@ -10,7 +10,8 @@ data class Order(
     val status: String = "pending",
     val pickupSlot: String = "",
     val paymentMethod: String = "Cash on Delivery",
-    val createdAt: Long = 0L
+    val createdAt: Long = 0L,
+    val pickupDate: String = ""
 )
 
 data class OrderItem(
@@ -18,5 +19,6 @@ data class OrderItem(
     val name: String = "",
     val price: Double = 0.0,
     val quantity: Int = 1,
+    val prepTimeMinutes: Int = 0,
     val shopId: String = ""
 )

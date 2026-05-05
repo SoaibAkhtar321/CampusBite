@@ -25,6 +25,8 @@ import com.campusbite.app.ui.theme.OrangeLight
 import com.campusbite.app.ui.theme.TextPrimary
 import com.campusbite.app.ui.viewmodel.CartViewModel
 import com.campusbite.app.ui.viewmodel.HomeViewModel
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
 
 @Composable
 fun HomeScreen(
@@ -221,6 +223,38 @@ fun HomeScreen(
                     fontWeight = FontWeight.Bold
                 )
             }
+        }
+        if (showDialog) {
+            AlertDialog(
+                onDismissRequest = {
+                    cartViewModel.dismissShopConflict()
+                },
+                title = {
+                    Text("Order from one shop at a time")
+                },
+                text = {
+                    Text("Your cart already has items from another shop. Clear cart and add this item?")
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            cartViewModel.confirmClearCartAndAdd()
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Orange)
+                    ) {
+                        Text("Clear & Continue")
+                    }
+                },
+                dismissButton = {
+                    TextButton(
+                        onClick = {
+                            cartViewModel.dismissShopConflict()
+                        }
+                    ) {
+                        Text("Cancel")
+                    }
+                }
+            )
         }
     }
 }

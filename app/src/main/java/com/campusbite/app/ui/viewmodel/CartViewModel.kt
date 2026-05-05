@@ -51,7 +51,9 @@ class CartViewModel @Inject constructor() : ViewModel() {
                     name = menuItem.name,
                     price = menuItem.price,
                     quantity = 1,
+                    prepTimeMinutes = menuItem.prepTimeMinutes,
                     shopId = menuItem.shopId   // IMPORTANT
+
                 )
             )
         }
