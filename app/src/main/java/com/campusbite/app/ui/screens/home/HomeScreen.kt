@@ -27,6 +27,7 @@ import com.campusbite.app.ui.viewmodel.CartViewModel
 import com.campusbite.app.ui.viewmodel.HomeViewModel
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.TextButton
+import androidx.activity.compose.BackHandler
 
 @Composable
 fun HomeScreen(
@@ -44,6 +45,10 @@ fun HomeScreen(
     val searchQuery by viewModel.searchQuery.collectAsState()
     val cartItems by cartViewModel.cartItems.collectAsState()
     val showDialog by cartViewModel.showShopConflict.collectAsState()
+    var showExitDialog by remember { mutableStateOf(false) }
+    BackHandler(enabled = cartItems.isNotEmpty()) {
+        showExitDialog = true
+    }
 
     val filteredItems by remember(searchQuery, selectedCategory) {
         derivedStateOf { viewModel.getFilteredItems() }
@@ -110,6 +115,40 @@ fun HomeScreen(
             )
 
             Spacer(modifier = Modifier.height(16.dp))
+            if (showExitDialog) {
+                AlertDialog(
+                    onDismissRequest = {
+                        showExitDialog = false
+                    },
+                    title = {
+                        Text("Items in cart")
+                    },
+                    text = {
+                        Text("You have selected items. Do you want to continue to cart or cancel this order?")
+                    },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                showExitDialog = false
+                                onNavigateToCart()
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Orange)
+                        ) {
+                            Text("Go to Cart")
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(
+                            onClick = {
+                                cartViewModel.clearCart()
+                                showExitDialog = false
+                            }
+                        ) {
+                            Text("Cancel Order")
+                        }
+                    }
+                )
+            }
 
             if (isLoading || !isDataReady) {
                 Box(
@@ -196,7 +235,7 @@ fun HomeScreen(
                         items(items) { menuItem ->
                             MenuItemCard(
                                 menuItem = menuItem,
-                                quantity = cartViewModel.getItemQuantity(menuItem.itemId),
+                                quantity = cartItems.find { it.itemId == menuItem.itemId }?.quantity ?: 0,
                                 onAddClick = { cartViewModel.addItem(menuItem) },
                                 onRemoveClick = { cartViewModel.removeItem(menuItem.itemId) }
                             )
@@ -349,40 +388,56 @@ fun MenuItemCard(
                 if (quantity == 0) {
                     Button(
                         onClick = onAddClick,
-                        modifier = Modifier.height(30.dp),
-                        contentPadding = PaddingValues(horizontal = 12.dp),
+                        modifier = Modifier.height(32.dp),
+                        contentPadding = PaddingValues(horizontal = 14.dp),
+                        shape = RoundedCornerShape(10.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = Orange)
                     ) {
-                        Text("Add", fontSize = 12.sp)
+                        Text(
+                            "Add",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
                     }
                 } else {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    Card(
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(containerColor = Orange)
                     ) {
-                        IconButton(
-                            onClick = onRemoveClick,
-                            modifier = Modifier.size(28.dp)
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
+                            TextButton(
+                                onClick = onRemoveClick,
+                                contentPadding = PaddingValues(0.dp)
+                            ) {
+                                Text(
+                                    "-",
+                                    color = MaterialTheme.colorScheme.onPrimary,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 18.sp
+                                )
+                            }
+
                             Text(
-                                "-", fontSize = 18.sp,
-                                color = Orange, fontWeight = FontWeight.Bold
+                                text = quantity.toString(),
+                                color = MaterialTheme.colorScheme.onPrimary,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 8.dp)
                             )
-                        }
-                        Text(
-                            text = "$quantity",
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = TextPrimary
-                        )
-                        IconButton(
-                            onClick = onAddClick,
-                            modifier = Modifier.size(28.dp)
-                        ) {
-                            Text(
-                                "+", fontSize = 18.sp,
-                                color = Orange, fontWeight = FontWeight.Bold
-                            )
+
+                            TextButton(
+                                onClick = onAddClick,
+                                contentPadding = PaddingValues(0.dp)
+                            ) {
+                                Text(
+                                    "+",
+                                    color = MaterialTheme.colorScheme.onPrimary,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 18.sp
+                                )
+                            }
                         }
                     }
                 }

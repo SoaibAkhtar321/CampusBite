@@ -15,6 +15,7 @@ import com.campusbite.app.ui.screens.order.OrderStatusScreen
 import com.campusbite.app.ui.screens.splash.SplashScreen
 import com.campusbite.app.ui.viewmodel.AuthViewModel
 import com.campusbite.app.ui.viewmodel.CartViewModel
+import com.campusbite.app.ui.screens.shop.ShopDetailScreen
 
 @Composable
 fun NavGraph(navController: NavHostController) {
@@ -75,6 +76,9 @@ fun NavGraph(navController: NavHostController) {
         }
         composable(Routes.HOME) {
             HomeScreen(
+                onNavigateToShopDetail = { shopId ->
+                    navController.navigate(Routes.shopDetail(shopId))
+                },
                 onNavigateToCart = {
                     navController.navigate(Routes.CART)
                 },
@@ -93,8 +97,19 @@ fun NavGraph(navController: NavHostController) {
         composable(Routes.SEARCH) {
             // SearchScreen will go here
         }
-        composable(Routes.SHOP_DETAIL) {
-            // ShopDetailScreen will go here
+        composable(Routes.SHOP_DETAIL) { backStackEntry ->
+            val shopId = backStackEntry.arguments?.getString("shopId") ?: ""
+
+            ShopDetailScreen(
+                shopId = shopId,
+                onNavigateBack = {
+                    navController.popBackStack()
+                },
+                onNavigateToCart = {
+                    navController.navigate(Routes.CART)
+                },
+                cartViewModel = cartViewModel
+            )
         }
         composable(Routes.CART) {
             CartScreen(
