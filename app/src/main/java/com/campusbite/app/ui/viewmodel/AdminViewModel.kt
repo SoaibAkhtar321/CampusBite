@@ -28,6 +28,11 @@ class AdminViewModel @Inject constructor(
 
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading
+    private val _shopOpen = MutableStateFlow(true)
+    val shopOpen: StateFlow<Boolean> = _shopOpen
+
+    private val _closedSlots = MutableStateFlow<List<String>>(emptyList())
+    val closedSlots: StateFlow<List<String>> = _closedSlots
 
     private var shopId: String = ""
 
@@ -44,6 +49,7 @@ class AdminViewModel @Inject constructor(
                 shopId = userDoc.getString("shopId") ?: ""
 
                 if (shopId.isNotEmpty()) {
+                    loadShopControls()
                     listenToOrders()
                 }
             } catch (e: Exception) {
@@ -64,6 +70,78 @@ class AdminViewModel @Inject constructor(
                 _orders.value = orderList.sortedBy { it.createdAt }
                 _isLoading.value = false
             }
+    }
+    private fun loadShopControls() {
+
+        firestore.collection("shops")
+            .whereEqualTo("shopId", shopId)
+            .addSnapshotListener { snapshot, _ ->
+
+                val shop = snapshot?.documents
+                    ?.firstOrNull()
+
+                _shopOpen.value =
+                    shop?.getBoolean("isOpen") ?: true
+
+                _closedSlots.value =
+                    shop?.get("closedSlots") as? List<String>
+                        ?: emptyList()
+            }
+    }
+
+    fun toggleShopOpen(isOpen: Boolean) {
+
+        viewModelScope.launch {
+
+            try {
+
+                val shopDoc = firestore.collection("shops")
+                    .whereEqualTo("shopId", shopId)
+                    .get()
+                    .await()
+                    .documents
+                    .firstOrNull()
+
+                shopDoc?.reference
+                    ?.update("isOpen", isOpen)
+                    ?.await()
+
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
+    fun toggleSlot(slot: String) {
+
+        viewModelScope.launch {
+
+            try {
+
+                val shopDoc = firestore.collection("shops")
+                    .whereEqualTo("shopId", shopId)
+                    .get()
+                    .await()
+                    .documents
+                    .firstOrNull()
+
+                val current =
+                    _closedSlots.value.toMutableList()
+
+                if (current.contains(slot)) {
+                    current.remove(slot)
+                } else {
+                    current.add(slot)
+                }
+
+                shopDoc?.reference
+                    ?.update("closedSlots", current)
+                    ?.await()
+
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
     }
 
     fun updateOrderStatus(orderId: String, newStatus: String) {
