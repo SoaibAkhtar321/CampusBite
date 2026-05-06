@@ -16,11 +16,23 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import javax.inject.Inject
+import android.Manifest
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
+import com.campusbite.app.R
+import dagger.hilt.android.qualifiers.ApplicationContext
 
 @HiltViewModel
 class AdminViewModel @Inject constructor(
     private val firestore: FirebaseFirestore,
-    private val auth: FirebaseAuth
+    private val auth: FirebaseAuth,
+    @ApplicationContext private val appContext: Context
 ) : ViewModel() {
 
     private val _orders = MutableStateFlow<List<Order>>(emptyList())
@@ -35,6 +47,9 @@ class AdminViewModel @Inject constructor(
     val closedSlots: StateFlow<List<String>> = _closedSlots
 
     private var shopId: String = ""
+
+    private val knownOrderIds = mutableSetOf<String>()
+    private var hasLoadedInitialOrders = false
 
     init {
         loadShopIdAndOrders()
@@ -63,11 +78,32 @@ class AdminViewModel @Inject constructor(
             .whereEqualTo("shopId", shopId)
             .whereNotEqualTo("status", "picked_up")
             .addSnapshotListener { snapshot, _ ->
+
                 val orderList = snapshot?.documents?.mapNotNull {
                     it.toObject(Order::class.java)
                 } ?: emptyList()
 
-                _orders.value = orderList.sortedBy { it.createdAt }
+                val sortedOrders = orderList.sortedBy { it.createdAt }
+
+                if (!hasLoadedInitialOrders) {
+                    knownOrderIds.clear()
+                    knownOrderIds.addAll(sortedOrders.map { it.orderId })
+                    hasLoadedInitialOrders = true
+                } else {
+                    val newPendingOrders = sortedOrders.filter { order ->
+                        order.status == "pending" &&
+                                order.orderId !in knownOrderIds
+                    }
+
+                    newPendingOrders.forEach { order ->
+                        showNewOrderNotification(order)
+                    }
+
+                    knownOrderIds.clear()
+                    knownOrderIds.addAll(sortedOrders.map { it.orderId })
+                }
+
+                _orders.value = sortedOrders
                 _isLoading.value = false
             }
     }
@@ -185,7 +221,51 @@ class AdminViewModel @Inject constructor(
             }
         }
     }
+    private fun showNewOrderNotification(order: Order) {
+        val channelId = "staff_order_updates"
 
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                channelId,
+                "Staff Order Updates",
+                NotificationManager.IMPORTANCE_HIGH
+            )
+
+            val manager = appContext.getSystemService(NotificationManager::class.java)
+            manager.createNotificationChannel(channel)
+        }
+
+        val itemSummary = order.items.joinToString {
+            "${it.name} x${it.quantity}"
+        }
+
+        val notification = NotificationCompat.Builder(appContext, channelId)
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setContentTitle("New Order Received")
+            .setContentText(itemSummary.ifEmpty { "You have a new order" })
+            .setStyle(
+                NotificationCompat.BigTextStyle()
+                    .bigText("New order received: $itemSummary")
+            )
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setAutoCancel(true)
+            .build()
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (
+                ContextCompat.checkSelfPermission(
+                    appContext,
+                    Manifest.permission.POST_NOTIFICATIONS
+                ) == PackageManager.PERMISSION_GRANTED
+            ) {
+                NotificationManagerCompat.from(appContext)
+                    .notify(order.orderId.hashCode(), notification)
+            }
+        } else {
+            NotificationManagerCompat.from(appContext)
+                .notify(order.orderId.hashCode(), notification)
+        }
+    }
     private fun sendNotification(token: String) {
         val client = OkHttpClient()
 

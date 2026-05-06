@@ -16,10 +16,25 @@ import kotlinx.coroutines.tasks.await
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
+import com.campusbite.app.R
+import dagger.hilt.android.qualifiers.ApplicationContext
+import okhttp3.internal.notify
+import java.util.jar.Manifest
+
+
 @HiltViewModel
 class OrderViewModel @Inject constructor(
     private val orderRepository: OrderRepository,
-    private val firestore: FirebaseFirestore
+    private val firestore: FirebaseFirestore,
+    @ApplicationContext private val appContext: Context
 ) : ViewModel() {
 
     private val _orderState = MutableStateFlow<OrderState>(OrderState.Idle)
@@ -44,7 +59,7 @@ class OrderViewModel @Inject constructor(
             if (result.isSuccess) {
                 val orderId = result.getOrNull() ?: ""
                 _orderState.value = OrderState.Success(orderId)
-                listenToOrder(orderId)
+                listenToOrderById(orderId)
             } else {
                 _orderState.value = OrderState.Error(
                     result.exceptionOrNull()?.message ?: "Failed to place order"
@@ -52,21 +67,67 @@ class OrderViewModel @Inject constructor(
             }
         }
     }
+    private fun showOrderReadyNotification(orderId: String) {
+        val channelId = "order_updates"
 
-    private fun listenToOrder(orderId: String) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                channelId,
+                "Order Updates",
+                NotificationManager.IMPORTANCE_HIGH
+            )
+
+            val manager = appContext.getSystemService(NotificationManager::class.java)
+            manager.createNotificationChannel(channel)
+        }
+
+        val notification = NotificationCompat.Builder(appContext, channelId)
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setContentTitle("Order Ready 🎉")
+            .setContentText("Your food is ready for pickup.")
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setAutoCancel(true)
+            .build()
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (
+                ContextCompat.checkSelfPermission(
+                    appContext,
+                    android.Manifest.permission.POST_NOTIFICATIONS
+                ) == PackageManager.PERMISSION_GRANTED
+            ) {
+                NotificationManagerCompat.from(appContext)
+                    .notify(orderId.hashCode(), notification)
+            }
+        } else {
+            NotificationManagerCompat.from(appContext)
+                .notify(orderId.hashCode(), notification)
+        }
+    }
+
+    fun listenToOrderById(orderId: String) {
         orderRepository.listenToOrder(orderId) { order ->
+            val previousStatus = _currentOrder.value?.status
+
             _currentOrder.value = order
+
+            if (
+                previousStatus != "ready" &&
+                order?.status == "ready"
+            ) {
+                showOrderReadyNotification(orderId)
+            }
         }
     }
 
     fun resetState() {
         _orderState.value = OrderState.Idle
     }
-    fun listenToOrderById(orderId: String) {
-        orderRepository.listenToOrder(orderId) { order ->
-            _currentOrder.value = order
-        }
-    }
+//    fun listenToOrderById(orderId: String) {
+//        orderRepository.listenToOrder(orderId) { order ->
+//            _currentOrder.value = order
+//        }
+//    }
     fun loadUserOrders() {
         val uid = FirebaseAuth.getInstance().currentUser?.uid ?: return
 

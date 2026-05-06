@@ -66,4 +66,9 @@ dependencies {
 
 
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+
+    implementation(platform(libs.firebase.bom))
+    implementation("com.google.firebase:firebase-auth")
+    implementation("com.google.firebase:firebase-firestore")
+    implementation("com.google.firebase:firebase-messaging")
 }
