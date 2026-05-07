@@ -9,5 +9,6 @@ data class Shop(
 
     val isOpen: Boolean = true,
     val maxOrdersPerSlot: Int = 5,
-    val closedSlots: List<String> = emptyList()
+    val closedSlots: List<String> = emptyList(),
+    val closingTime: String = "23:59"
 )

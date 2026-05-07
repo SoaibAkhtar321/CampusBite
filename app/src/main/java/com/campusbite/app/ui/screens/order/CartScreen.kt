@@ -35,6 +35,7 @@ fun CartScreen(
     val selectedShop by orderViewModel.selectedShop.collectAsState()
     val isLoadingSlots by orderViewModel.isLoadingSlots.collectAsState()
     val currentShopId by cartViewModel.currentShopId.collectAsState()
+    val slotMessage by orderViewModel.slotMessage.collectAsState()
 
     var selectedSlot by remember { mutableStateOf("") }
     var selectedPayment by remember { mutableStateOf("Cash on Delivery") }
@@ -181,9 +182,14 @@ fun CartScreen(
 
                         availableSlots.isEmpty() -> {
                             Text(
-                                text = "No pickup slots available right now.",
+                                text = if (slotMessage.isNotBlank()) {
+                                    slotMessage
+                                } else {
+                                    "No pickup slots available right now."
+                                },
                                 fontSize = 13.sp,
-                                color = MaterialTheme.colorScheme.error
+                                color = MaterialTheme.colorScheme.error,
+                                fontWeight = FontWeight.Bold
                             )
                         }
 
@@ -213,12 +219,22 @@ fun CartScreen(
                 item {
                     Spacer(modifier = Modifier.height(8.dp))
 
+                    if (orderState is OrderState.Error) {
+                        Text(
+                            text = (orderState as OrderState.Error).message,
+                            color = MaterialTheme.colorScheme.error,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
                     Text(
-                        "Payment Method",
+                        text = "Payment Method",
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onBackground
                     )
+
 
                     Spacer(modifier = Modifier.height(8.dp))
 

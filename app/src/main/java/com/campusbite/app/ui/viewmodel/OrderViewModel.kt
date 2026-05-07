@@ -51,18 +51,46 @@ class OrderViewModel @Inject constructor(
     val selectedShop: StateFlow<Shop?> = _selectedShop
     private val _isLoadingSlots = MutableStateFlow(false)
     val isLoadingSlots: StateFlow<Boolean> = _isLoadingSlots
+    private val _slotMessage = MutableStateFlow("")
+    val slotMessage: StateFlow<String> = _slotMessage
 
     fun placeOrder(order: Order) {
         viewModelScope.launch {
             _orderState.value = OrderState.Loading
-            val result = orderRepository.placeOrder(order)
-            if (result.isSuccess) {
-                val orderId = result.getOrNull() ?: ""
-                _orderState.value = OrderState.Success(orderId)
-                listenToOrderById(orderId)
-            } else {
+
+            try {
+                val shopSnapshot = firestore.collection("shops")
+                    .whereEqualTo("shopId", order.shopId)
+                    .get()
+                    .await()
+
+                val shopDoc = shopSnapshot.documents.firstOrNull()
+                val isOpen = shopDoc?.getBoolean("isOpen") ?: false
+
+                if (!isOpen) {
+                    _orderState.value = OrderState.Error(
+                        "This shop is currently not accepting orders."
+                    )
+                    return@launch
+                }
+
+                val result = orderRepository.placeOrder(order)
+
+                if (result.isSuccess) {
+                    val orderId = result.getOrNull() ?: ""
+
+                    _orderState.value = OrderState.Success(orderId)
+
+                    listenToOrderById(orderId)
+                } else {
+                    _orderState.value = OrderState.Error(
+                        result.exceptionOrNull()?.message ?: "Failed to place order"
+                    )
+                }
+
+            } catch (e: Exception) {
                 _orderState.value = OrderState.Error(
-                    result.exceptionOrNull()?.message ?: "Failed to place order"
+                    e.message ?: "Failed to place order"
                 )
             }
         }
@@ -148,7 +176,9 @@ class OrderViewModel @Inject constructor(
         cartPrepTimeMinutes: Int
     ) {
         viewModelScope.launch {
+
             _isLoadingSlots.value = true
+            _slotMessage.value = ""
 
             try {
 
@@ -163,6 +193,7 @@ class OrderViewModel @Inject constructor(
                 val shop = shopSnapshot.documents
                     .firstOrNull()
                     ?.toObject(Shop::class.java)
+
                 android.util.Log.d("SLOT_DEBUG", "shop = $shop")
                 android.util.Log.d("SLOT_DEBUG", "isOpen = ${shop?.isOpen}")
                 android.util.Log.d(
@@ -175,6 +206,7 @@ class OrderViewModel @Inject constructor(
                 )
 
                 if (shop == null || !shop.isOpen) {
+
                     android.util.Log.d(
                         "SLOT_DEBUG",
                         "Shop closed OR null"
@@ -182,6 +214,10 @@ class OrderViewModel @Inject constructor(
 
                     _selectedShop.value = shop
                     _availableSlots.value = emptyList()
+
+                    _slotMessage.value =
+                        "This shop is currently closed."
+
                     return@launch
                 }
 
@@ -190,42 +226,78 @@ class OrderViewModel @Inject constructor(
                 val displayFormatter =
                     DateTimeFormatter.ofPattern("hh:mm a")
 
-                val today = LocalDate.now().toString()
+                val closingFormatter =
+                    DateTimeFormatter.ofPattern("HH:mm")
 
-                android.util.Log.d("SLOT_DEBUG", "today = $today")
+                val today = LocalDate.now().toString()
 
                 val now = java.time.LocalDateTime.now()
 
-                android.util.Log.d("SLOT_DEBUG", "now = $now")
-
                 val earliestTime =
                     now.plusMinutes(cartPrepTimeMinutes.toLong())
-
-                android.util.Log.d(
-                    "SLOT_DEBUG",
-                    "earliestTime = $earliestTime"
-                )
 
                 val generatedSlots = mutableListOf<String>()
 
                 var slot =
                     roundToNextSlotDateTime(earliestTime, 15)
 
-                val endTime = now.plusHours(3)
+                val maxWindowEnd = now.plusHours(3)
 
-                android.util.Log.d(
-                    "SLOT_DEBUG",
-                    "endTime = $endTime"
-                )
+                val shopClosingDateTime =
+                    getShopClosingDateTime(
+                        now = now,
+                        closingTime = shop.closingTime,
+                        formatter = closingFormatter
+                    )
 
-                while (slot.isBefore(endTime)) {
+                val endTime =
+                    if (shopClosingDateTime.isBefore(maxWindowEnd)) {
+                        shopClosingDateTime
+                    } else {
+                        maxWindowEnd
+                    }
 
-                    val formatted =
-                        slot.toLocalTime().format(displayFormatter)
+                android.util.Log.d("CLOSING_DEBUG", "===================")
+                android.util.Log.d("CLOSING_DEBUG", "now = $now")
+                android.util.Log.d("CLOSING_DEBUG", "earliestTime = $earliestTime")
+                android.util.Log.d("CLOSING_DEBUG", "initial slot = $slot")
+                android.util.Log.d("CLOSING_DEBUG", "shopClosingDateTime = $shopClosingDateTime")
+                android.util.Log.d("CLOSING_DEBUG", "endTime = $endTime")
+                android.util.Log.d("CLOSING_DEBUG", "closingTime = ${shop.closingTime}")
 
-                    generatedSlots.add(formatted)
+                while (
+                    slot.isBefore(endTime) &&
+                    slot.plusMinutes(cartPrepTimeMinutes.toLong()).isBefore(endTime)
+                ) {
+
+                    android.util.Log.d(
+                        "CLOSING_DEBUG",
+                        "Adding slot = $slot"
+                    )
+
+                    generatedSlots.add(
+                        slot.toLocalTime()
+                            .format(displayFormatter)
+                    )
 
                     slot = slot.plusMinutes(15)
+                }
+
+                android.util.Log.d(
+                    "CLOSING_DEBUG",
+                    "generatedSlots = $generatedSlots"
+                )
+
+                if (generatedSlots.isEmpty()) {
+
+                    _availableSlots.value = emptyList()
+
+                    _slotMessage.value =
+                        "Shop closing time is ${
+                            formatClosingTime(shop.closingTime)
+                        }. No further pickup slots are available."
+
+                    return@launch
                 }
 
                 android.util.Log.d(
@@ -265,6 +337,25 @@ class OrderViewModel @Inject constructor(
 
                 _availableSlots.value = available
 
+                _slotMessage.value = when {
+
+                    available.isEmpty() -> {
+                        "Shop closing time is ${
+                            formatClosingTime(shop.closingTime)
+                        }. No further pickup slots are available."
+                    }
+
+                    shopClosingDateTime.isBefore(maxWindowEnd) -> {
+                        "Shop closing time is ${
+                            formatClosingTime(shop.closingTime)
+                        }. Slots after that are unavailable."
+                    }
+
+                    else -> {
+                        ""
+                    }
+                }
+
             } catch (e: Exception) {
 
                 android.util.Log.e(
@@ -274,9 +365,14 @@ class OrderViewModel @Inject constructor(
                 )
 
                 e.printStackTrace()
+
                 _availableSlots.value = emptyList()
 
+                _slotMessage.value =
+                    "Failed to load pickup slots."
+
             } finally {
+
                 _isLoadingSlots.value = false
             }
         }
@@ -294,6 +390,41 @@ class OrderViewModel @Inject constructor(
             .plusMinutes(minutesToAdd.toLong())
             .withSecond(0)
             .withNano(0)
+    }
+    private fun getShopClosingDateTime(
+        now: java.time.LocalDateTime,
+        closingTime: String,
+        formatter: DateTimeFormatter
+    ): java.time.LocalDateTime {
+
+        val closingLocalTime = try {
+            java.time.LocalTime.parse(closingTime, formatter)
+        } catch (e: Exception) {
+            java.time.LocalTime.of(23, 59)
+        }
+
+        var closingDateTime = java.time.LocalDateTime.of(
+            now.toLocalDate(),
+            closingLocalTime
+        )
+
+        if (closingDateTime.isBefore(now)) {
+            closingDateTime = closingDateTime.plusDays(1)
+        }
+
+        return closingDateTime
+    }
+
+    private fun formatClosingTime(closingTime: String): String {
+        return try {
+            val inputFormatter = DateTimeFormatter.ofPattern("HH:mm")
+            val outputFormatter = DateTimeFormatter.ofPattern("hh:mm a")
+
+            val time = java.time.LocalTime.parse(closingTime, inputFormatter)
+            time.format(outputFormatter)
+        } catch (e: Exception) {
+            closingTime
+        }
     }
 }
 
