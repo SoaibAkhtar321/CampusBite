@@ -1,5 +1,6 @@
 package com.campusbite.app.ui.screens.home
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -8,9 +9,14 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.FilterList
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -25,16 +31,13 @@ import com.campusbite.app.ui.theme.OrangeLight
 import com.campusbite.app.ui.theme.TextPrimary
 import com.campusbite.app.ui.viewmodel.CartViewModel
 import com.campusbite.app.ui.viewmodel.HomeViewModel
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.TextButton
-import androidx.activity.compose.BackHandler
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
     onNavigateToShopDetail: (String) -> Unit = {},
     onNavigateToCart: () -> Unit = {},
-    onNavigateToOrderHistory: () -> Unit = {},
-    onLogout: () -> Unit = {},
+    onNavigateToProfile: () -> Unit = {}, // UPDATED PARAMETER NAME
     viewModel: HomeViewModel = hiltViewModel(),
     cartViewModel: CartViewModel = hiltViewModel()
 ) {
@@ -43,14 +46,20 @@ fun HomeScreen(
     val isLoading by viewModel.isLoading.collectAsState()
     val selectedCategory by viewModel.selectedCategory.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
+    val priceRange by viewModel.priceRange.collectAsState()
+
     val cartItems by cartViewModel.cartItems.collectAsState()
     val showDialog by cartViewModel.showShopConflict.collectAsState()
+
     var showExitDialog by remember { mutableStateOf(false) }
+    var showFilterSheet by remember { mutableStateOf(false) }
+    val sheetState = rememberModalBottomSheetState()
+
     BackHandler(enabled = cartItems.isNotEmpty()) {
         showExitDialog = true
     }
 
-    val filteredItems by remember(searchQuery, selectedCategory) {
+    val filteredItems by remember(searchQuery, selectedCategory, priceRange) {
         derivedStateOf { viewModel.getFilteredItems() }
     }
 
@@ -61,7 +70,7 @@ fun HomeScreen(
                 .statusBarsPadding()
                 .background(MaterialTheme.colorScheme.background)
         ) {
-            // Top bar
+            // --- TOP BAR ---
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -76,94 +85,69 @@ fun HomeScreen(
                     color = MaterialTheme.colorScheme.onBackground
                 )
 
-                TextButton(onClick = onLogout) {
-                    Text("Logout", color = Orange, fontSize = 13.sp)
+                IconButton(onClick = onNavigateToProfile) {
+                    Icon(
+                        imageVector = Icons.Default.Person,
+                        contentDescription = "Profile",
+                        tint = Orange
+                    )
                 }
             }
 
-            // My Orders button
-            Button(
-                onClick = onNavigateToOrderHistory,
+            // --- SEARCH & FILTER ---
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Orange)
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("My Orders")
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // Search bar
-            OutlinedTextField(
-                value = searchQuery,
-                onValueChange = { viewModel.updateSearchQuery(it) },
-                placeholder = { Text("Search dish or shop...") },
-                leadingIcon = {
-                    Icon(Icons.Default.Search, contentDescription = null, tint = Orange)
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp),
-                shape = RoundedCornerShape(12.dp),
-                singleLine = true,
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = Orange,
-                    unfocusedBorderColor = MaterialTheme.colorScheme.outline,
-                    cursorColor = Orange
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { viewModel.updateSearchQuery(it) },
+                    placeholder = { Text("Search dish or shop...", fontSize = 14.sp) },
+                    leadingIcon = {
+                        Icon(Icons.Default.Search, contentDescription = null, tint = Orange)
+                    },
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(12.dp),
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Orange,
+                        unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                        cursorColor = Orange
+                    )
                 )
-            )
+
+                Spacer(modifier = Modifier.width(8.dp))
+
+                IconButton(
+                    onClick = { showFilterSheet = true },
+                    modifier = Modifier
+                        .size(52.dp)
+                        .background(OrangeLight, RoundedCornerShape(12.dp))
+                ) {
+                    Icon(
+                        Icons.Default.FilterList,
+                        contentDescription = "Filter",
+                        tint = Orange
+                    )
+                }
+            }
 
             Spacer(modifier = Modifier.height(16.dp))
-            if (showExitDialog) {
-                AlertDialog(
-                    onDismissRequest = {
-                        showExitDialog = false
-                    },
-                    title = {
-                        Text("Items in cart")
-                    },
-                    text = {
-                        Text("You have selected items. Do you want to continue to cart or cancel this order?")
-                    },
-                    confirmButton = {
-                        Button(
-                            onClick = {
-                                showExitDialog = false
-                                onNavigateToCart()
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = Orange)
-                        ) {
-                            Text("Go to Cart")
-                        }
-                    },
-                    dismissButton = {
-                        TextButton(
-                            onClick = {
-                                cartViewModel.clearCart()
-                                showExitDialog = false
-                            }
-                        ) {
-                            Text("Cancel Order")
-                        }
-                    }
-                )
-            }
 
             if (isLoading || !isDataReady) {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator(color = Orange)
                 }
             } else {
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(
-                        bottom = if (cartItems.isNotEmpty()) 80.dp else 0.dp
+                        bottom = if (cartItems.isNotEmpty()) 80.dp else 16.dp
                     )
                 ) {
+                    // --- SHOPS SECTION ---
                     item {
                         Text(
                             "Shops",
@@ -172,24 +156,19 @@ fun HomeScreen(
                             color = TextPrimary,
                             modifier = Modifier.padding(horizontal = 16.dp)
                         )
-
                         Spacer(modifier = Modifier.height(8.dp))
-
                         LazyRow(
                             contentPadding = PaddingValues(horizontal = 16.dp),
                             horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
                             items(shops) { shop ->
-                                ShopCard(
-                                    shop = shop,
-                                    onClick = { onNavigateToShopDetail(shop.shopId) }
-                                )
+                                ShopCard(shop = shop, onClick = { onNavigateToShopDetail(shop.shopId) })
                             }
                         }
-
                         Spacer(modifier = Modifier.height(16.dp))
                     }
 
+                    // --- CATEGORIES & ACTIVE FILTERS ---
                     item {
                         Text(
                             "Menu",
@@ -198,7 +177,6 @@ fun HomeScreen(
                             color = TextPrimary,
                             modifier = Modifier.padding(horizontal = 16.dp)
                         )
-
                         Spacer(modifier = Modifier.height(8.dp))
 
                         LazyRow(
@@ -214,14 +192,47 @@ fun HomeScreen(
                             }
                         }
 
+                        if (viewModel.isFilterActive()) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            TextButton(
+                                onClick = { viewModel.resetFilters() },
+                                modifier = Modifier.padding(horizontal = 8.dp)
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "Clear Filters",
+                                        modifier = Modifier.size(16.dp),
+                                        tint = Orange
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = "Clear All Filters",
+                                        color = Orange,
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                }
+                            }
+                        }
                         Spacer(modifier = Modifier.height(12.dp))
                     }
 
+                    // --- MENU ITEMS ---
                     val groupedItems = filteredItems.groupBy { it.shopId }
+                    if (filteredItems.isEmpty()) {
+                        item {
+                            Box(
+                                Modifier.fillMaxWidth().padding(32.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("No items match your filters", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
 
                     groupedItems.forEach { (shopId, items) ->
                         val shopName = viewModel.getShopName(shopId)
-
                         item {
                             Text(
                                 shopName,
@@ -231,7 +242,6 @@ fun HomeScreen(
                                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
                             )
                         }
-
                         items(items) { menuItem ->
                             MenuItemCard(
                                 menuItem = menuItem,
@@ -245,8 +255,8 @@ fun HomeScreen(
             }
         }
 
+        // --- CART BUTTON ---
         val itemCount = cartViewModel.itemCount
-
         if (itemCount > 0) {
             Button(
                 onClick = onNavigateToCart,
@@ -254,7 +264,8 @@ fun HomeScreen(
                     .fillMaxWidth()
                     .padding(16.dp)
                     .align(Alignment.BottomCenter),
-                colors = ButtonDefaults.buttonColors(containerColor = Orange)
+                colors = ButtonDefaults.buttonColors(containerColor = Orange),
+                elevation = ButtonDefaults.buttonElevation(defaultElevation = 8.dp)
             ) {
                 Text(
                     text = "$itemCount item${if (itemCount > 1) "s" else ""} | View Cart • ₹${cartViewModel.totalPrice.toInt()}",
@@ -263,34 +274,134 @@ fun HomeScreen(
                 )
             }
         }
+
+        // --- PRICE FILTER SHEET ---
+        if (showFilterSheet) {
+            ModalBottomSheet(
+                onDismissRequest = { showFilterSheet = false },
+                sheetState = sheetState,
+                containerColor = MaterialTheme.colorScheme.surface
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 24.dp, end = 24.dp, bottom = 40.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Budget Filters", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                        TextButton(onClick = { viewModel.resetFilters() }) {
+                            Text("Reset", color = Orange, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(20.dp))
+
+                    Text("Quick Select", style = MaterialTheme.typography.labelMedium, color = Orange)
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    val quickFilters = listOf(
+                        "Under ₹50" to 0f..50f,
+                        "₹50 - ₹150" to 50f..150f,
+                        "Above ₹150" to 150f..500f
+                    )
+
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(quickFilters) { (label, range) ->
+                            FilterChip(
+                                selected = priceRange == range,
+                                onClick = { viewModel.updatePriceRange(range) },
+                                label = { Text(label) },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = Orange,
+                                    selectedLabelColor = MaterialTheme.colorScheme.onPrimary
+                                )
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(24.dp))
+
+                    Text(
+                        text = "Custom Range: ₹${priceRange.start.toInt()} - ₹${priceRange.endInclusive.toInt()}",
+                        style = MaterialTheme.typography.bodyLarge, color = TextPrimary, fontWeight = FontWeight.Bold
+                    )
+
+                    RangeSlider(
+                        value = priceRange,
+                        onValueChange = { viewModel.updatePriceRange(it) },
+                        valueRange = 0f..500f,
+                        colors = SliderDefaults.colors(
+                            activeTrackColor = Orange,
+                            thumbColor = Orange,
+                            inactiveTrackColor = OrangeLight
+                        )
+                    )
+
+                    Spacer(modifier = Modifier.height(32.dp))
+
+                    Button(
+                        onClick = { showFilterSheet = false },
+                        modifier = Modifier.fillMaxWidth().height(50.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Orange),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text("Show Results", fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+
+        // --- SHOP CONFLICT DIALOG ---
         if (showDialog) {
             AlertDialog(
-                onDismissRequest = {
-                    cartViewModel.dismissShopConflict()
-                },
-                title = {
-                    Text("Order from one shop at a time")
-                },
-                text = {
-                    Text("Your cart already has items from another shop. Clear cart and add this item?")
-                },
+                onDismissRequest = { cartViewModel.dismissShopConflict() },
+                title = { Text("Order from one shop at a time") },
+                text = { Text("Your cart already has items from another shop. Clear cart and add this item?") },
                 confirmButton = {
                     Button(
-                        onClick = {
-                            cartViewModel.confirmClearCartAndAdd()
-                        },
+                        onClick = { cartViewModel.confirmClearCartAndAdd() },
                         colors = ButtonDefaults.buttonColors(containerColor = Orange)
                     ) {
                         Text("Clear & Continue")
                     }
                 },
                 dismissButton = {
+                    TextButton(onClick = { cartViewModel.dismissShopConflict() }) {
+                        Text("Cancel")
+                    }
+                }
+            )
+        }
+
+        // --- EXIT CART DIALOG ---
+        if (showExitDialog) {
+            AlertDialog(
+                onDismissRequest = { showExitDialog = false },
+                title = { Text("Items in cart") },
+                text = { Text("You have selected items. Do you want to continue to cart or cancel this order?") },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            showExitDialog = false
+                            onNavigateToCart()
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Orange)
+                    ) {
+                        Text("Go to Cart")
+                    }
+                },
+                dismissButton = {
                     TextButton(
                         onClick = {
-                            cartViewModel.dismissShopConflict()
+                            cartViewModel.clearCart()
+                            showExitDialog = false
                         }
                     ) {
-                        Text("Cancel")
+                        Text("Cancel Order")
                     }
                 }
             )
@@ -301,25 +412,17 @@ fun HomeScreen(
 @Composable
 fun ShopCard(shop: Shop, onClick: () -> Unit) {
     Card(
-        modifier = Modifier
-            .width(130.dp)
-            .clickable { onClick() },
+        modifier = Modifier.width(130.dp).clickable { onClick() },
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(containerColor = OrangeLight)
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
-            Text(
-                text = shop.name,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Bold,
-                color = TextPrimary
-            )
+            Text(text = shop.name, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
             Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = if (shop.isOpen) "Open" else "Closed",
                 fontSize = 11.sp,
-                color = if (shop.isOpen) MaterialTheme.colorScheme.primary
-                else MaterialTheme.colorScheme.error
+                color = if (shop.isOpen) Orange else MaterialTheme.colorScheme.error
             )
         }
     }
@@ -342,7 +445,6 @@ fun CategoryChip(category: String, isSelected: Boolean, onClick: () -> Unit) {
     }
 }
 
-
 @Composable
 fun MenuItemCard(
     menuItem: MenuItem,
@@ -351,39 +453,22 @@ fun MenuItemCard(
     onRemoveClick: () -> Unit = {}
 ) {
     Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 4.dp),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
         shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
     ) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(12.dp),
+            modifier = Modifier.fillMaxWidth().padding(12.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = menuItem.name, fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
+                Text(text = menuItem.name, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
                 Spacer(modifier = Modifier.height(2.dp))
-                Text(
-                    text = "Ready in ${menuItem.prepTimeMinutes} min",
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                Text(text = "Ready in ${menuItem.prepTimeMinutes} min", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Column(horizontalAlignment = Alignment.End) {
-                Text(
-                    text = "₹${menuItem.price.toInt()}",
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Orange
-                )
+                Text(text = "₹${menuItem.price.toInt()}", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Orange)
                 Spacer(modifier = Modifier.height(4.dp))
                 if (quantity == 0) {
                     Button(
@@ -393,51 +478,19 @@ fun MenuItemCard(
                         shape = RoundedCornerShape(10.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = Orange)
                     ) {
-                        Text(
-                            "Add",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold
-                        )
+                        Text("Add", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
                 } else {
-                    Card(
-                        shape = RoundedCornerShape(12.dp),
-                        colors = CardDefaults.cardColors(containerColor = Orange)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.background(Orange, RoundedCornerShape(10.dp)).height(32.dp)
                     ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            TextButton(
-                                onClick = onRemoveClick,
-                                contentPadding = PaddingValues(0.dp)
-                            ) {
-                                Text(
-                                    "-",
-                                    color = MaterialTheme.colorScheme.onPrimary,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 18.sp
-                                )
-                            }
-
-                            Text(
-                                text = quantity.toString(),
-                                color = MaterialTheme.colorScheme.onPrimary,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(horizontal = 8.dp)
-                            )
-
-                            TextButton(
-                                onClick = onAddClick,
-                                contentPadding = PaddingValues(0.dp)
-                            ) {
-                                Text(
-                                    "+",
-                                    color = MaterialTheme.colorScheme.onPrimary,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 18.sp
-                                )
-                            }
+                        IconButton(onClick = onRemoveClick, modifier = Modifier.size(32.dp)) {
+                            Text("-", color = MaterialTheme.colorScheme.onPrimary, fontWeight = FontWeight.Bold)
+                        }
+                        Text(text = quantity.toString(), color = MaterialTheme.colorScheme.onPrimary, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        IconButton(onClick = onAddClick, modifier = Modifier.size(32.dp)) {
+                            Text("+", color = MaterialTheme.colorScheme.onPrimary, fontWeight = FontWeight.Bold)
                         }
                     }
                 }

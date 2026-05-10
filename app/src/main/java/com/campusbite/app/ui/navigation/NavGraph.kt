@@ -17,6 +17,7 @@ import com.campusbite.app.ui.viewmodel.AuthViewModel
 import com.campusbite.app.ui.viewmodel.CartViewModel
 import com.campusbite.app.ui.screens.shop.ShopDetailScreen
 //import com.campusbite.app.ui.screens.order.OrderHistoryScreen
+import com.campusbite.app.ui.screens.profile.ProfileScreen
 
 @Composable
 fun NavGraph(navController: NavHostController) {
@@ -44,6 +45,21 @@ fun NavGraph(navController: NavHostController) {
                         popUpTo(Routes.SPLASH) { inclusive = true }
                     }
                 }
+            )
+        }
+        // In your NavHost
+        composable("profile") {
+            ProfileScreen(
+                onNavigateToOrderHistory = {
+                    navController.navigate(Routes.ORDER_HISTORY)
+                },
+                onLogout = {
+                    authViewModel.logout()
+                    navController.navigate(Routes.LOGIN) {
+                        popUpTo(Routes.HOME) { inclusive = true }
+                    }
+                },
+                onBack = { navController.popBackStack() }
             )
         }
         composable(Routes.LOGIN) {
@@ -83,14 +99,9 @@ fun NavGraph(navController: NavHostController) {
                 onNavigateToCart = {
                     navController.navigate(Routes.CART)
                 },
-                onNavigateToOrderHistory = {
-                    navController.navigate(Routes.ORDER_HISTORY)
-                },
-                onLogout = {
-                    authViewModel.logout()
-                    navController.navigate(Routes.LOGIN) {
-                        popUpTo(0) { inclusive = true }
-                    }
+                onNavigateToProfile = {
+                    // Navigate to the profile screen we added above
+                    navController.navigate("profile")
                 },
                 cartViewModel = cartViewModel
             )
