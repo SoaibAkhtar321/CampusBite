@@ -1,21 +1,5 @@
 package com.campusbite.app.ui.viewmodel
 
-import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
-import com.campusbite.app.data.model.Order
-import com.campusbite.app.data.repository.OrderRepository
-import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.firestore.FirebaseFirestore
-import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.launch
-import javax.inject.Inject
-import com.campusbite.app.data.model.Shop
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.tasks.await
-import java.time.LocalDate
-import java.time.LocalTime
-import java.time.format.DateTimeFormatter
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
@@ -24,11 +8,24 @@ import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
 import com.campusbite.app.R
+import com.campusbite.app.data.model.Order
+import com.campusbite.app.data.model.Shop
+import com.campusbite.app.data.repository.OrderRepository
+import com.google.firebase.firestore.FirebaseFirestore
+import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
-import okhttp3.internal.notify
-import java.util.jar.Manifest
-
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
+import java.time.LocalDate
+import java.time.LocalDateTime
+import java.time.LocalTime
+import java.time.format.DateTimeFormatter
+import javax.inject.Inject
 
 @HiltViewModel
 class OrderViewModel @Inject constructor(
@@ -36,23 +33,28 @@ class OrderViewModel @Inject constructor(
     private val firestore: FirebaseFirestore,
     @ApplicationContext private val appContext: Context
 ) : ViewModel() {
+    data class SlotUiState(
+        val slots: List<String> = emptyList(),
+        val message: String = "",
+        val isLoading: Boolean = false
+    )
 
+    private val _slotUiState = MutableStateFlow(SlotUiState())
+    val slotUiState: StateFlow<SlotUiState> = _slotUiState
     private val _orderState = MutableStateFlow<OrderState>(OrderState.Idle)
     val orderState: StateFlow<OrderState> = _orderState
 
     private val _currentOrder = MutableStateFlow<Order?>(null)
     val currentOrder: StateFlow<Order?> = _currentOrder
-    private val _userOrders = MutableStateFlow<List<Order>>(emptyList())
-    val userOrders: StateFlow<List<Order>> = _userOrders
-    private val _availableSlots = MutableStateFlow<List<String>>(emptyList())
-    val availableSlots: StateFlow<List<String>> = _availableSlots
 
     private val _selectedShop = MutableStateFlow<Shop?>(null)
     val selectedShop: StateFlow<Shop?> = _selectedShop
-    private val _isLoadingSlots = MutableStateFlow(false)
-    val isLoadingSlots: StateFlow<Boolean> = _isLoadingSlots
-    private val _slotMessage = MutableStateFlow("")
-    val slotMessage: StateFlow<String> = _slotMessage
+
+
+
+
+    private val _userOrders = MutableStateFlow<List<Order>>(emptyList())
+    val userOrders: StateFlow<List<Order>> = _userOrders
 
     fun placeOrder(order: Order) {
         viewModelScope.launch {
@@ -95,6 +97,240 @@ class OrderViewModel @Inject constructor(
             }
         }
     }
+
+    fun listenToOrderById(orderId: String) {
+        orderRepository.listenToOrder(orderId) { order ->
+            val previousStatus = _currentOrder.value?.status
+
+            _currentOrder.value = order
+
+            if (
+                previousStatus != "ready" &&
+                order?.status == "ready"
+            ) {
+                showOrderReadyNotification(orderId)
+            }
+        }
+    }
+
+    fun resetState() {
+        _orderState.value = OrderState.Idle
+    }
+
+    fun loadAvailableSlots(
+        shopId: String,
+        cartPrepTimeMinutes: Int
+    ) {
+        viewModelScope.launch {
+
+            _slotUiState.value = SlotUiState(isLoading = true)
+
+            try {
+                val shopSnapshot = firestore.collection("shops")
+                    .whereEqualTo("shopId", shopId)
+                    .get()
+                    .await()
+
+                val shop = shopSnapshot.documents
+                    .firstOrNull()
+                    ?.toObject(Shop::class.java)
+
+                if (shop == null) {
+                    _selectedShop.value = null
+
+                    _slotUiState.value = SlotUiState(
+                        message = "Shop details not found."
+                    )
+
+                    return@launch
+                }
+
+                if (!shop.isOpen) {
+                    _selectedShop.value = shop
+
+                    _slotUiState.value = SlotUiState(
+                        message = "This shop is currently closed."
+                    )
+
+                    return@launch
+                }
+
+                _selectedShop.value = shop
+
+                val displayFormatter = DateTimeFormatter.ofPattern("hh:mm a")
+                val closingFormatter = DateTimeFormatter.ofPattern("HH:mm")
+
+                val today = LocalDate.now().toString()
+                val now = LocalDateTime.now()
+
+                val earliestTime = now.plusMinutes(cartPrepTimeMinutes.toLong())
+                var slot = roundToNextSlotDateTime(earliestTime, 15)
+
+                val maxWindowEnd = now.plusHours(3)
+
+                val shopClosingDateTime = getShopClosingDateTime(
+                    now = now,
+                    closingTime = shop.closingTime,
+                    formatter = closingFormatter
+                )
+
+                val endTime = if (shopClosingDateTime.isBefore(maxWindowEnd)) {
+                    shopClosingDateTime
+                } else {
+                    maxWindowEnd
+                }
+
+                val generatedSlots = mutableListOf<String>()
+
+                while (slot.isBefore(endTime)) {
+                    generatedSlots.add(
+                        slot.toLocalTime().format(displayFormatter)
+                    )
+
+                    slot = slot.plusMinutes(15)
+                }
+
+                if (generatedSlots.isEmpty()) {
+                    _slotUiState.value = SlotUiState(
+                        message = "Shop closing time is ${
+                            formatClosingTime(shop.closingTime)
+                        }. No further pickup slots are available."
+                    )
+
+                    return@launch
+                }
+
+                val available = mutableListOf<String>()
+
+                for (slotText in generatedSlots) {
+                    val count = firestore.collection("orders")
+                        .whereEqualTo("shopId", shopId)
+                        .whereEqualTo("pickupDate", today)
+                        .whereEqualTo("pickupSlot", slotText)
+                        .get()
+                        .await()
+                        .size()
+
+                    if (
+                        !shop.closedSlots.contains(slotText) &&
+                        count < shop.maxOrdersPerSlot
+                    ) {
+                        available.add(slotText)
+                    }
+                }
+
+                _slotUiState.value = SlotUiState(
+                    slots = available,
+                    message = when {
+                        available.isEmpty() -> {
+                            "All pickup slots are full, closed, or unavailable right now."
+                        }
+
+                        shopClosingDateTime.isBefore(maxWindowEnd) -> {
+                            "Shop closing time is ${
+                                formatClosingTime(shop.closingTime)
+                            }. Slots after that are unavailable."
+                        }
+
+                        else -> {
+                            ""
+                        }
+                    }
+                )
+
+            } catch (e: Exception) {
+                e.printStackTrace()
+
+                _slotUiState.value = SlotUiState(
+                    message = "Failed to load pickup slots."
+                )
+
+            } finally {
+                if (_slotUiState.value.isLoading) {
+                    _slotUiState.value = _slotUiState.value.copy(
+                        isLoading = false
+                    )
+                }
+            }
+        }
+    }
+
+    private fun roundToNextSlotDateTime(
+        time: LocalDateTime,
+        intervalMinutes: Int
+    ): LocalDateTime {
+        val minute = time.minute
+        val remainder = minute % intervalMinutes
+        val minutesToAdd = if (remainder == 0) {
+            0
+        } else {
+            intervalMinutes - remainder
+        }
+
+        return time
+            .plusMinutes(minutesToAdd.toLong())
+            .withSecond(0)
+            .withNano(0)
+    }
+
+    private fun getShopClosingDateTime(
+        now: LocalDateTime,
+        closingTime: String,
+        formatter: DateTimeFormatter
+    ): LocalDateTime {
+        val closingLocalTime = try {
+            LocalTime.parse(closingTime, formatter)
+        } catch (e: Exception) {
+            LocalTime.of(23, 59)
+        }
+
+        var closingDateTime = LocalDateTime.of(
+            now.toLocalDate(),
+            closingLocalTime
+        )
+
+        if (closingDateTime.isBefore(now)) {
+            closingDateTime = closingDateTime.plusDays(1)
+        }
+
+        return closingDateTime
+    }
+
+    private fun formatClosingTime(closingTime: String): String {
+        return try {
+            val inputFormatter = DateTimeFormatter.ofPattern("HH:mm")
+            val outputFormatter = DateTimeFormatter.ofPattern("hh:mm a")
+
+            val time = LocalTime.parse(closingTime, inputFormatter)
+            time.format(outputFormatter)
+
+        } catch (e: Exception) {
+            closingTime
+        }
+    }
+    fun loadUserOrders(userId: String) {
+        viewModelScope.launch {
+            try {
+                val snapshot = firestore.collection("orders")
+                    .whereEqualTo("studentId", userId)
+                    .get()
+                    .await()
+
+                val orders = snapshot.documents.mapNotNull {
+                    it.toObject(Order::class.java)
+                }.sortedByDescending {
+                    it.createdAt
+                }
+
+                _userOrders.value = orders
+
+            } catch (e: Exception) {
+                e.printStackTrace()
+                _userOrders.value = emptyList()
+            }
+        }
+    }
+
     private fun showOrderReadyNotification(orderId: String) {
         val channelId = "order_updates"
 
@@ -132,301 +368,12 @@ class OrderViewModel @Inject constructor(
                 .notify(orderId.hashCode(), notification)
         }
     }
-
-    fun listenToOrderById(orderId: String) {
-        orderRepository.listenToOrder(orderId) { order ->
-            val previousStatus = _currentOrder.value?.status
-
-            _currentOrder.value = order
-
-            if (
-                previousStatus != "ready" &&
-                order?.status == "ready"
-            ) {
-                showOrderReadyNotification(orderId)
-            }
-        }
-    }
-
-    fun resetState() {
-        _orderState.value = OrderState.Idle
-    }
-//    fun listenToOrderById(orderId: String) {
-//        orderRepository.listenToOrder(orderId) { order ->
-//            _currentOrder.value = order
-//        }
-//    }
-    fun loadUserOrders() {
-        val uid = FirebaseAuth.getInstance().currentUser?.uid ?: return
-
-        FirebaseFirestore.getInstance()
-            .collection("orders")
-            .whereEqualTo("studentId", uid)
-            .addSnapshotListener { snapshot, _ ->
-
-                val list = snapshot?.documents?.mapNotNull {
-                    it.toObject(Order::class.java)
-                } ?: emptyList()
-
-                _userOrders.value = list.sortedByDescending { it.createdAt }
-            }
-    }
-    fun loadAvailableSlots(
-        shopId: String,
-        cartPrepTimeMinutes: Int
-    ) {
-        viewModelScope.launch {
-
-            _isLoadingSlots.value = true
-            _slotMessage.value = ""
-
-            try {
-
-                android.util.Log.d("SLOT_DEBUG", "======================")
-                android.util.Log.d("SLOT_DEBUG", "shopId = $shopId")
-
-                val shopSnapshot = firestore.collection("shops")
-                    .whereEqualTo("shopId", shopId)
-                    .get()
-                    .await()
-
-                val shop = shopSnapshot.documents
-                    .firstOrNull()
-                    ?.toObject(Shop::class.java)
-
-                android.util.Log.d("SLOT_DEBUG", "shop = $shop")
-                android.util.Log.d("SLOT_DEBUG", "isOpen = ${shop?.isOpen}")
-                android.util.Log.d(
-                    "SLOT_DEBUG",
-                    "maxOrdersPerSlot = ${shop?.maxOrdersPerSlot}"
-                )
-                android.util.Log.d(
-                    "SLOT_DEBUG",
-                    "closedSlots = ${shop?.closedSlots}"
-                )
-
-                if (shop == null || !shop.isOpen) {
-
-                    android.util.Log.d(
-                        "SLOT_DEBUG",
-                        "Shop closed OR null"
-                    )
-
-                    _selectedShop.value = shop
-                    _availableSlots.value = emptyList()
-
-                    _slotMessage.value =
-                        "This shop is currently closed."
-
-                    return@launch
-                }
-
-                _selectedShop.value = shop
-
-                val displayFormatter =
-                    DateTimeFormatter.ofPattern("hh:mm a")
-
-                val closingFormatter =
-                    DateTimeFormatter.ofPattern("HH:mm")
-
-                val today = LocalDate.now().toString()
-
-                val now = java.time.LocalDateTime.now()
-
-                val earliestTime =
-                    now.plusMinutes(cartPrepTimeMinutes.toLong())
-
-                val generatedSlots = mutableListOf<String>()
-
-                var slot =
-                    roundToNextSlotDateTime(earliestTime, 15)
-
-                val maxWindowEnd = now.plusHours(3)
-
-                val shopClosingDateTime =
-                    getShopClosingDateTime(
-                        now = now,
-                        closingTime = shop.closingTime,
-                        formatter = closingFormatter
-                    )
-
-                val endTime =
-                    if (shopClosingDateTime.isBefore(maxWindowEnd)) {
-                        shopClosingDateTime
-                    } else {
-                        maxWindowEnd
-                    }
-
-                android.util.Log.d("CLOSING_DEBUG", "===================")
-                android.util.Log.d("CLOSING_DEBUG", "now = $now")
-                android.util.Log.d("CLOSING_DEBUG", "earliestTime = $earliestTime")
-                android.util.Log.d("CLOSING_DEBUG", "initial slot = $slot")
-                android.util.Log.d("CLOSING_DEBUG", "shopClosingDateTime = $shopClosingDateTime")
-                android.util.Log.d("CLOSING_DEBUG", "endTime = $endTime")
-                android.util.Log.d("CLOSING_DEBUG", "closingTime = ${shop.closingTime}")
-
-                while (
-                    slot.isBefore(endTime) &&
-                    slot.plusMinutes(cartPrepTimeMinutes.toLong()).isBefore(endTime)
-                ) {
-
-                    android.util.Log.d(
-                        "CLOSING_DEBUG",
-                        "Adding slot = $slot"
-                    )
-
-                    generatedSlots.add(
-                        slot.toLocalTime()
-                            .format(displayFormatter)
-                    )
-
-                    slot = slot.plusMinutes(15)
-                }
-
-                android.util.Log.d(
-                    "CLOSING_DEBUG",
-                    "generatedSlots = $generatedSlots"
-                )
-
-                if (generatedSlots.isEmpty()) {
-
-                    _availableSlots.value = emptyList()
-
-                    _slotMessage.value =
-                        "Shop closing time is ${
-                            formatClosingTime(shop.closingTime)
-                        }. No further pickup slots are available."
-
-                    return@launch
-                }
-
-                android.util.Log.d(
-                    "SLOT_DEBUG",
-                    "generatedSlots = $generatedSlots"
-                )
-
-                val available = mutableListOf<String>()
-
-                for (slotText in generatedSlots) {
-
-                    val count = firestore.collection("orders")
-                        .whereEqualTo("shopId", shopId)
-                        .whereEqualTo("pickupDate", today)
-                        .whereEqualTo("pickupSlot", slotText)
-                        .get()
-                        .await()
-                        .size()
-
-                    android.util.Log.d(
-                        "SLOT_DEBUG",
-                        "slot = $slotText | count = $count | max = ${shop.maxOrdersPerSlot} | closed = ${shop.closedSlots.contains(slotText)}"
-                    )
-
-                    if (
-                        !shop.closedSlots.contains(slotText) &&
-                        count < shop.maxOrdersPerSlot
-                    ) {
-                        available.add(slotText)
-                    }
-                }
-
-                android.util.Log.d(
-                    "SLOT_DEBUG",
-                    "availableSlots = $available"
-                )
-
-                _availableSlots.value = available
-
-                _slotMessage.value = when {
-
-                    available.isEmpty() -> {
-                        "Shop closing time is ${
-                            formatClosingTime(shop.closingTime)
-                        }. No further pickup slots are available."
-                    }
-
-                    shopClosingDateTime.isBefore(maxWindowEnd) -> {
-                        "Shop closing time is ${
-                            formatClosingTime(shop.closingTime)
-                        }. Slots after that are unavailable."
-                    }
-
-                    else -> {
-                        ""
-                    }
-                }
-
-            } catch (e: Exception) {
-
-                android.util.Log.e(
-                    "SLOT_DEBUG",
-                    "ERROR = ${e.message}",
-                    e
-                )
-
-                e.printStackTrace()
-
-                _availableSlots.value = emptyList()
-
-                _slotMessage.value =
-                    "Failed to load pickup slots."
-
-            } finally {
-
-                _isLoadingSlots.value = false
-            }
-        }
-    }
-
-    private fun roundToNextSlotDateTime(
-        time: java.time.LocalDateTime,
-        intervalMinutes: Int
-    ): java.time.LocalDateTime {
-        val minute = time.minute
-        val remainder = minute % intervalMinutes
-        val minutesToAdd = if (remainder == 0) 0 else intervalMinutes - remainder
-
-        return time
-            .plusMinutes(minutesToAdd.toLong())
-            .withSecond(0)
-            .withNano(0)
-    }
-    private fun getShopClosingDateTime(
-        now: java.time.LocalDateTime,
-        closingTime: String,
-        formatter: DateTimeFormatter
-    ): java.time.LocalDateTime {
-
-        val closingLocalTime = try {
-            java.time.LocalTime.parse(closingTime, formatter)
-        } catch (e: Exception) {
-            java.time.LocalTime.of(23, 59)
-        }
-
-        var closingDateTime = java.time.LocalDateTime.of(
-            now.toLocalDate(),
-            closingLocalTime
-        )
-
-        if (closingDateTime.isBefore(now)) {
-            closingDateTime = closingDateTime.plusDays(1)
-        }
-
-        return closingDateTime
-    }
-
-    private fun formatClosingTime(closingTime: String): String {
-        return try {
-            val inputFormatter = DateTimeFormatter.ofPattern("HH:mm")
-            val outputFormatter = DateTimeFormatter.ofPattern("hh:mm a")
-
-            val time = java.time.LocalTime.parse(closingTime, inputFormatter)
-            time.format(outputFormatter)
-        } catch (e: Exception) {
-            closingTime
-        }
-    }
 }
+data class SlotUiState(
+    val slots: List<String> = emptyList(),
+    val message: String = "",
+    val isLoading: Boolean = false
+)
 
 sealed class OrderState {
     object Idle : OrderState()
