@@ -127,7 +127,8 @@ fun HomeScreen(
                         .background(OrangeLight, RoundedCornerShape(12.dp))
                 ) {
                     Icon(
-                        Icons.Default.FilterList,
+                        // Direct reference bypassing resolution issues
+                        imageVector = androidx.compose.material.icons.Icons.Filled.FilterList,
                         contentDescription = "Filter",
                         tint = Orange
                     )

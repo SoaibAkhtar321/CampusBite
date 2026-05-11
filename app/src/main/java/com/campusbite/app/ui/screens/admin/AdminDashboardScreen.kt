@@ -4,6 +4,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -15,11 +17,10 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.campusbite.app.ui.theme.Orange
 import com.campusbite.app.ui.viewmodel.AdminViewModel
 
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AdminDashboardScreen(
-    onLogout: () -> Unit,
+    onNavigateToProfile: () -> Unit, // Kept this for profile access
     viewModel: AdminViewModel = hiltViewModel()
 ) {
     val orders by viewModel.orders.collectAsState()
@@ -27,16 +28,20 @@ fun AdminDashboardScreen(
     val shopOpen by viewModel.shopOpen.collectAsState()
     val closedSlots by viewModel.closedSlots.collectAsState()
 
-
-
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("Staff Panel", fontWeight = FontWeight.Bold) },
                 actions = {
-                    TextButton(onClick = onLogout) {
-                        Text("Logout", color = Orange)
+                    // Profile Icon Button remains
+                    IconButton(onClick = onNavigateToProfile) {
+                        Icon(
+                            imageVector = Icons.Default.Person,
+                            contentDescription = "Profile",
+                            tint = Orange
+                        )
                     }
+                    // Logout TextButton has been removed from here
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.background
@@ -57,18 +62,13 @@ fun AdminDashboardScreen(
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 item {
-
                     Card(
                         shape = RoundedCornerShape(12.dp),
                         colors = CardDefaults.cardColors(
                             containerColor = MaterialTheme.colorScheme.surface
                         )
                     ) {
-
-                        Column(
-                            modifier = Modifier.padding(16.dp)
-                        ) {
-
+                        Column(modifier = Modifier.padding(16.dp)) {
                             Text(
                                 text = "Shop Controls",
                                 fontWeight = FontWeight.Bold,
@@ -79,34 +79,22 @@ fun AdminDashboardScreen(
 
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement =
-                                    Arrangement.SpaceBetween,
-                                verticalAlignment =
-                                    Alignment.CenterVertically
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-
                                 Column {
                                     Text(
-                                        text = if (shopOpen)
-                                            "Accepting Orders"
-                                        else
-                                            "Shop Closed",
-
+                                        text = if (shopOpen) "Accepting Orders" else "Shop Closed",
                                         fontWeight = FontWeight.Bold
                                     )
-
                                     Text(
-                                        text =
-                                            "Toggle customer ordering",
+                                        text = "Toggle customer ordering",
                                         fontSize = 12.sp
                                     )
                                 }
-
                                 Switch(
                                     checked = shopOpen,
-                                    onCheckedChange = {
-                                        viewModel.toggleShopOpen(it)
-                                    }
+                                    onCheckedChange = { viewModel.toggleShopOpen(it) }
                                 )
                             }
 
@@ -119,53 +107,32 @@ fun AdminDashboardScreen(
 
                             Spacer(modifier = Modifier.height(8.dp))
 
-                            val sampleSlots = listOf(
-                                "06:00 PM",
-                                "06:15 PM",
-                                "06:30 PM",
-                                "06:45 PM"
-                            )
-
+                            val sampleSlots = listOf("06:00 PM", "06:15 PM", "06:30 PM", "06:45 PM")
                             sampleSlots.forEach { slot ->
-
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement =
-                                        Arrangement.SpaceBetween,
-                                    verticalAlignment =
-                                        Alignment.CenterVertically
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-
                                     Text(slot)
-
                                     Button(
-                                        onClick = {
-                                            viewModel.toggleSlot(slot)
-                                        },
-                                        colors =
-                                            ButtonDefaults.buttonColors(
-                                                containerColor =
-                                                    if (closedSlots.contains(slot))
-                                                        MaterialTheme.colorScheme.error
-                                                    else
-                                                        Orange
-                                            )
-                                    ) {
-
-                                        Text(
-                                            if (closedSlots.contains(slot))
-                                                "Closed"
+                                        onClick = { viewModel.toggleSlot(slot) },
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = if (closedSlots.contains(slot))
+                                                MaterialTheme.colorScheme.error
                                             else
-                                                "Open"
+                                                Orange
                                         )
+                                    ) {
+                                        Text(if (closedSlots.contains(slot)) "Closed" else "Open")
                                     }
                                 }
-
                                 Spacer(modifier = Modifier.height(8.dp))
                             }
                         }
                     }
                 }
+
                 if (orders.isEmpty()) {
                     item {
                         Box(
@@ -180,13 +147,15 @@ fun AdminDashboardScreen(
                         }
                     }
                 }
+
                 items(orders) { order ->
                     Card(
                         shape = RoundedCornerShape(12.dp),
                         colors = CardDefaults.cardColors(
                             containerColor = MaterialTheme.colorScheme.surface
                         )
-                    ) {                        Column(modifier = Modifier.padding(14.dp)) {
+                    ) {
+                        Column(modifier = Modifier.padding(14.dp)) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween
@@ -246,31 +215,12 @@ fun AdminDashboardScreen(
                                     }
                                 }
                                 "ready" -> {
-
-                                    Column {
-
-                                        Text(
-                                            "Ready for pickup",
-                                            fontSize = 13.sp,
-                                            color = MaterialTheme.colorScheme.primary
-                                        )
-
-                                        Spacer(modifier = Modifier.height(8.dp))
-
-                                        Button(
-                                            onClick = {
-                                                viewModel.updateOrderStatus(
-                                                    order.orderId,
-                                                    "picked_up"
-                                                )
-                                            },
-                                            modifier = Modifier.fillMaxWidth(),
-                                            colors = ButtonDefaults.buttonColors(
-                                                containerColor = Orange
-                                            )
-                                        ) {
-                                            Text("Mark as Picked Up")
-                                        }
+                                    Button(
+                                        onClick = { viewModel.updateOrderStatus(order.orderId, "picked_up") },
+                                        modifier = Modifier.fillMaxWidth(),
+                                        colors = ButtonDefaults.buttonColors(containerColor = Orange)
+                                    ) {
+                                        Text("Mark as Picked Up")
                                     }
                                 }
                             }

@@ -7,10 +7,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.ChevronRight
-import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.SupportAgent
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -27,7 +27,7 @@ import com.campusbite.app.ui.theme.Orange
 import com.campusbite.app.ui.theme.OrangeLight
 import com.campusbite.app.ui.viewmodel.ProfileViewModel
 
-@OptIn(ExperimentalMaterial3Api::class) // FIX 1: Resolves Experimental API error
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ProfileScreen(
     onNavigateToOrderHistory: () -> Unit,
@@ -40,19 +40,27 @@ fun ProfileScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("My Profile", fontWeight = FontWeight.Bold) },
+                title = {
+                    Text(
+                        text = "My Profile",
+                        fontWeight = FontWeight.Bold
+                    )
+                },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                        Icon(
+                            imageVector = Icons.Filled.ArrowBack,
+                            contentDescription = "Back"
+                        )
                     }
                 },
-                // Optional: styling the top bar to match your theme
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.background
                 )
             )
         }
     ) { padding ->
+
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -60,7 +68,6 @@ fun ProfileScreen(
                 .padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Profile Header
             Box(
                 modifier = Modifier
                     .size(100.dp)
@@ -68,7 +75,7 @@ fun ProfileScreen(
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
-                    imageVector = Icons.Default.Person,
+                    imageVector = Icons.Filled.Person,
                     contentDescription = null,
                     modifier = Modifier.size(50.dp),
                     tint = Orange
@@ -77,31 +84,40 @@ fun ProfileScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // User Details
             Text(
                 text = user?.name ?: "Loading...",
                 fontSize = 20.sp,
                 fontWeight = FontWeight.Bold
             )
-            Text(text = user?.email ?: "", color = Color.Gray)
 
-            // FIX 2: If 'phoneNumber' still fails, check your User model
-            // and change this to user?.phone if that is what you named it.
-            Text(text = user?.phoneNumber ?: "No Phone Linked", color = Color.Gray)
+            Text(
+                text = user?.email ?: "",
+                color = Color.Gray
+            )
+
+            Text(
+                text = user?.phoneNumber ?: "No Phone Linked",
+                color = Color.Gray
+            )
 
             Spacer(modifier = Modifier.height(32.dp))
 
-            // Options List
-            ProfileOptionItem("Order History", Icons.Default.History) {
-                onNavigateToOrderHistory()
-            }
-            ProfileOptionItem("Refunds & Support", Icons.Default.SupportAgent) {
-                /* Navigate to Refunds */
-            }
+            ProfileOptionItem(
+                title = "Order History",
+                icon = Icons.Filled.List,
+                onClick = onNavigateToOrderHistory
+            )
+
+            ProfileOptionItem(
+                title = "Refunds & Support",
+                icon = Icons.Filled.Info,
+                onClick = {
+                    // TODO: Navigate to Refunds & Support screen
+                }
+            )
 
             Spacer(modifier = Modifier.weight(1f))
 
-            // Logout Button
             Button(
                 onClick = onLogout,
                 modifier = Modifier.fillMaxWidth(),
@@ -112,14 +128,21 @@ fun ProfileScreen(
                 shape = RoundedCornerShape(12.dp),
                 elevation = null
             ) {
-                Text("Logout", fontWeight = FontWeight.Bold)
+                Text(
+                    text = "Logout",
+                    fontWeight = FontWeight.Bold
+                )
             }
         }
     }
 }
 
 @Composable
-fun ProfileOptionItem(title: String, icon: ImageVector, onClick: () -> Unit) {
+private fun ProfileOptionItem(
+    title: String,
+    icon: ImageVector,
+    onClick: () -> Unit
+) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -134,16 +157,23 @@ fun ProfileOptionItem(title: String, icon: ImageVector, onClick: () -> Unit) {
             modifier = Modifier.padding(16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(icon, contentDescription = null, tint = Orange)
+            Icon(
+                imageVector = icon,
+                contentDescription = title,
+                tint = Orange
+            )
+
             Spacer(modifier = Modifier.width(16.dp))
+
             Text(
                 text = title,
                 fontWeight = FontWeight.Medium,
                 modifier = Modifier.weight(1f),
                 color = MaterialTheme.colorScheme.onSurface
             )
+
             Icon(
-                imageVector = Icons.Default.ChevronRight,
+                imageVector = Icons.Filled.KeyboardArrowRight,
                 contentDescription = null,
                 tint = Color.Gray,
                 modifier = Modifier.size(20.dp)
