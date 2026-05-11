@@ -17,7 +17,6 @@ class CartViewModel @Inject constructor() : ViewModel() {
     private val _currentShopId = MutableStateFlow<String?>(null)
     val currentShopId: StateFlow<String?> = _currentShopId
 
-    // NEW: for shop conflict handling
     private val _showShopConflict = MutableStateFlow(false)
     val showShopConflict: StateFlow<Boolean> = _showShopConflict
 
@@ -30,8 +29,6 @@ class CartViewModel @Inject constructor() : ViewModel() {
         get() = _cartItems.value.sumOf { it.quantity }
 
     fun addItem(menuItem: MenuItem) {
-
-        // CHECK: different shop
         if (_currentShopId.value != null && _currentShopId.value != menuItem.shopId) {
             pendingItem = menuItem
             _showShopConflict.value = true
@@ -52,8 +49,8 @@ class CartViewModel @Inject constructor() : ViewModel() {
                     price = menuItem.price,
                     quantity = 1,
                     prepTimeMinutes = menuItem.prepTimeMinutes,
-                    shopId = menuItem.shopId   // IMPORTANT
-
+                    shopId = menuItem.shopId,
+                    cookingNote = ""
                 )
             )
         }
@@ -62,17 +59,23 @@ class CartViewModel @Inject constructor() : ViewModel() {
         _currentShopId.value = menuItem.shopId
     }
 
-    // When user clicks "Clear & Continue"
+    // Update cooking preference note for a specific item
+    fun updateCookingNote(itemId: String, note: String) {
+        val currentItems = _cartItems.value.toMutableList()
+        val index = currentItems.indexOfFirst { it.itemId == itemId }
+        if (index != -1) {
+            currentItems[index] = currentItems[index].copy(cookingNote = note)
+            _cartItems.value = currentItems
+        }
+    }
+
     fun confirmClearCartAndAdd() {
         clearCart()
-        pendingItem?.let {
-            addItem(it)
-        }
+        pendingItem?.let { addItem(it) }
         pendingItem = null
         _showShopConflict.value = false
     }
 
-    //  When user clicks "Cancel"
     fun dismissShopConflict() {
         pendingItem = null
         _showShopConflict.value = false
@@ -85,8 +88,7 @@ class CartViewModel @Inject constructor() : ViewModel() {
         if (existingItem != null) {
             if (existingItem.quantity > 1) {
                 val index = currentItems.indexOf(existingItem)
-                currentItems[index] =
-                    existingItem.copy(quantity = existingItem.quantity - 1)
+                currentItems[index] = existingItem.copy(quantity = existingItem.quantity - 1)
             } else {
                 currentItems.remove(existingItem)
             }
@@ -101,15 +103,12 @@ class CartViewModel @Inject constructor() : ViewModel() {
         _currentShopId.value = null
     }
 
-    fun isItemInCart(itemId: String): Boolean {
-        return _cartItems.value.any { it.itemId == itemId }
-    }
+    fun isItemInCart(itemId: String): Boolean =
+        _cartItems.value.any { it.itemId == itemId }
 
-    fun getItemQuantity(itemId: String): Int {
-        return _cartItems.value.find { it.itemId == itemId }?.quantity ?: 0
-    }
+    fun getItemQuantity(itemId: String): Int =
+        _cartItems.value.find { it.itemId == itemId }?.quantity ?: 0
 
-    fun isDifferentShop(shopId: String): Boolean {
-        return _currentShopId.value != null && _currentShopId.value != shopId
-    }
+    fun isDifferentShop(shopId: String): Boolean =
+        _currentShopId.value != null && _currentShopId.value != shopId
 }

@@ -1,6 +1,17 @@
 package com.campusbite.app.ui.screens.order
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -15,21 +26,26 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.Divider
-import androidx.compose.material3.FilterChip
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.RadioButton
-import androidx.compose.material3.RadioButtonDefaults
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -38,22 +54,36 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.campusbite.app.data.model.Order
+import com.campusbite.app.data.model.OrderItem
+import com.campusbite.app.ui.screens.home.shimmerEffect
 import com.campusbite.app.ui.theme.Orange
 import com.campusbite.app.ui.viewmodel.CartViewModel
 import com.campusbite.app.ui.viewmodel.OrderState
 import com.campusbite.app.ui.viewmodel.OrderViewModel
 import java.time.LocalDate
-import androidx.compose.material3.ExperimentalMaterial3Api
+
+// ---------------------------------------------------------------------------
+// Dark-mode-safe colour helpers
+// These replace the hardcoded TextPrimary / TextSecondary / OrangeLight tokens
+// that were invisible on dark surfaces.
+// ---------------------------------------------------------------------------
+private val Orange_10 = Orange.copy(alpha = 0.12f)   // replaces OrangeLight on any surface
 
 @OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
@@ -63,10 +93,8 @@ fun CartScreen(
     cartViewModel: CartViewModel = hiltViewModel(),
     orderViewModel: OrderViewModel = hiltViewModel()
 ) {
-
     val cartItems by cartViewModel.cartItems.collectAsState()
     val currentShopId by cartViewModel.currentShopId.collectAsState()
-
     val orderState by orderViewModel.orderState.collectAsState()
     val selectedShop by orderViewModel.selectedShop.collectAsState()
     val slotUiState by orderViewModel.slotUiState.collectAsState()
@@ -75,20 +103,17 @@ fun CartScreen(
     val slotMessage = slotUiState.message
 
     var selectedSlot by remember { mutableStateOf("") }
-    var selectedPayment by remember {
-        mutableStateOf("Cash on Delivery")
-    }
+
+    val expandedNoteItemId = remember { mutableStateOf<String?>(null) }
+    val noteDrafts = remember { mutableStateMapOf<String, String>() }
 
     val shopId = currentShopId ?: ""
-    val cartPrepTime =
-        cartItems.maxOfOrNull { it.prepTimeMinutes } ?: 0
+    val cartPrepTime = cartItems.maxOfOrNull { it.prepTimeMinutes } ?: 0
+    val focusManager = LocalFocusManager.current
 
     LaunchedEffect(shopId, cartPrepTime, cartItems.size) {
-
         if (shopId.isNotEmpty() && cartItems.isNotEmpty()) {
-
             selectedSlot = ""
-
             orderViewModel.loadAvailableSlots(
                 shopId = shopId,
                 cartPrepTimeMinutes = cartPrepTime
@@ -97,43 +122,32 @@ fun CartScreen(
     }
 
     LaunchedEffect(orderState) {
-
         if (orderState is OrderState.Success) {
-
-            val orderId =
-                (orderState as OrderState.Success).orderId
-
+            val orderId = (orderState as OrderState.Success).orderId
             cartViewModel.clearCart()
             orderViewModel.resetState()
-
             onOrderPlaced(orderId)
         }
     }
 
     Scaffold(
         topBar = {
-
             TopAppBar(
                 title = {
                     Text(
                         text = "Your Cart",
-                        fontWeight = FontWeight.Bold
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 20.sp
                     )
                 },
-
                 navigationIcon = {
-
-                    IconButton(
-                        onClick = onNavigateBack
-                    ) {
-
+                    IconButton(onClick = onNavigateBack) {
                         Icon(
                             imageVector = Icons.Default.ArrowBack,
                             contentDescription = "Back"
                         )
                     }
                 },
-
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.background
                 )
@@ -146,160 +160,77 @@ fun CartScreen(
                 .fillMaxSize()
                 .padding(padding)
         ) {
-
             LazyColumn(
                 modifier = Modifier.weight(1f),
                 contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
 
+                // ── CART ITEMS ────────────────────────────────────────────────
                 items(cartItems) { item ->
-
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(14.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surface
-                        )
-                    ) {
-
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(14.dp),
-
-                            horizontalArrangement =
-                                Arrangement.SpaceBetween,
-
-                            verticalAlignment =
-                                Alignment.CenterVertically
-                        ) {
-
-                            Column(
-                                modifier = Modifier.weight(1f)
-                            ) {
-
-                                Text(
-                                    text = item.name,
-                                    fontSize = 15.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-
-                                Spacer(
-                                    modifier = Modifier.height(4.dp)
-                                )
-
-                                Text(
-                                    text = "₹${item.price.toInt()} x ${item.quantity}",
-                                    fontSize = 13.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-
-                                Spacer(
-                                    modifier = Modifier.height(4.dp)
-                                )
-
-                                Text(
-                                    text = "Prep time: ${item.prepTimeMinutes} min",
-                                    fontSize = 12.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
+                    CartItemCard(
+                        item = item,
+                        isNoteExpanded = expandedNoteItemId.value == item.itemId,
+                        noteDraft = noteDrafts[item.itemId] ?: item.cookingNote,
+                        onToggleNote = {
+                            focusManager.clearFocus()
+                            expandedNoteItemId.value =
+                                if (expandedNoteItemId.value == item.itemId) null
+                                else item.itemId
+                            if (noteDrafts[item.itemId] == null) {
+                                noteDrafts[item.itemId] = item.cookingNote
                             }
-
-                            Text(
-                                text = "₹${(item.price * item.quantity).toInt()}",
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Orange
+                        },
+                        onNoteDraftChange = { draft ->
+                            noteDrafts[item.itemId] = draft
+                        },
+                        onNoteSaved = {
+                            cartViewModel.updateCookingNote(
+                                item.itemId,
+                                noteDrafts[item.itemId] ?: ""
                             )
+                            expandedNoteItemId.value = null
+                            focusManager.clearFocus()
                         }
-                    }
+                    )
                 }
 
+                // ── PICKUP SLOT SECTION ───────────────────────────────────────
                 item {
-
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    Text(
-                        text = "Select Pickup Slot",
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-
+                    Spacer(modifier = Modifier.height(6.dp))
+                    SectionLabel(text = "Select Pickup Slot")
                     Spacer(modifier = Modifier.height(12.dp))
 
                     when {
-
                         isLoadingSlots -> {
-
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(20.dp),
-                                    strokeWidth = 2.dp,
-                                    color = Orange
-                                )
-
-                                Spacer(
-                                    modifier = Modifier.width(8.dp)
-                                )
-
-                                Text(
-                                    text = "Loading available slots...",
-                                    fontSize = 13.sp,
-                                    color = MaterialTheme.colorScheme.onBackground
-                                )
-                            }
+                            SlotShimmer()
                         }
 
                         availableSlots.isNotEmpty() -> {
-
                             FlowRow(
-                                horizontalArrangement =
-                                    Arrangement.spacedBy(8.dp),
-
-                                verticalArrangement =
-                                    Arrangement.spacedBy(8.dp)
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-
                                 availableSlots.forEach { slot ->
-
-                                    FilterChip(
-                                        selected =
-                                            selectedSlot == slot,
-
-                                        onClick = {
-                                            selectedSlot = slot
-                                        },
-
-                                        label = {
-                                            Text(slot)
-                                        }
+                                    SlotChip(
+                                        slot = slot,
+                                        isSelected = selectedSlot == slot,
+                                        onClick = { selectedSlot = slot }
                                     )
                                 }
                             }
-
                             if (slotMessage.isNotBlank()) {
-
-                                Spacer(
-                                    modifier = Modifier.height(8.dp)
-                                )
-
+                                Spacer(modifier = Modifier.height(8.dp))
                                 Text(
                                     text = slotMessage,
-                                    fontSize = 13.sp,
+                                    fontSize = 12.sp,
                                     color = MaterialTheme.colorScheme.error,
-                                    fontWeight = FontWeight.SemiBold
+                                    fontWeight = FontWeight.Medium
                                 )
                             }
                         }
 
                         slotMessage.isNotBlank() -> {
-
                             Text(
                                 text = slotMessage,
                                 fontSize = 13.sp,
@@ -310,99 +241,117 @@ fun CartScreen(
                     }
                 }
 
+                // ── PAYMENT METHOD ────────────────────────────────────────────
                 item {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    SectionLabel(text = "Payment Method")
+                    Spacer(modifier = Modifier.height(10.dp))
 
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Orange_10)
+                            .border(1.5.dp, Orange, RoundedCornerShape(12.dp))
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(20.dp)
+                                .clip(CircleShape)
+                                .background(Orange),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Check,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(13.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column {
+                            Text(
+                                text = "Online Payment",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                // ← was TextPrimary (hardcoded dark) — now theme-aware
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "UPI / Card / Net Banking",
+                                fontSize = 11.sp,
+                                // ← was TextSecondary (hardcoded dark) — now theme-aware
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
 
+                // ── ORDER ERROR ───────────────────────────────────────────────
+                item {
                     if (orderState is OrderState.Error) {
-
+                        Spacer(modifier = Modifier.height(4.dp))
                         Text(
                             text = (orderState as OrderState.Error).message,
                             color = MaterialTheme.colorScheme.error,
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Bold
                         )
-
-                        Spacer(
-                            modifier = Modifier.height(8.dp)
-                        )
                     }
+                }
 
-                    Text(
-                        text = "Payment Method",
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onBackground
-                    )
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    listOf(
-                        "Cash on Delivery",
-                        "Online Payment"
-                    ).forEach { method ->
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-
-                            RadioButton(
-                                selected =
-                                    selectedPayment == method,
-
-                                onClick = {
-                                    selectedPayment = method
-                                },
-
-                                colors = RadioButtonDefaults.colors(
-                                    selectedColor = Orange
-                                )
-                            )
-
+                // ── TOTAL ─────────────────────────────────────────────────────
+                item {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
                             Text(
-                                text = method,
-                                fontSize = 14.sp,
-                                color = MaterialTheme.colorScheme.onBackground
+                                text = "Total Amount",
+                                fontSize = 13.sp,
+                                // ← was TextSecondary
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = "₹${cartViewModel.totalPrice.toInt()}",
+                                fontSize = 26.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Orange
+                            )
+                        }
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(20.dp))
+                                .background(Orange_10)
+                                .padding(horizontal = 14.dp, vertical = 6.dp)
+                        ) {
+                            Text(
+                                text = "${cartViewModel.itemCount} item${if (cartViewModel.itemCount > 1) "s" else ""}",
+                                fontSize = 13.sp,
+                                color = Orange,
+                                fontWeight = FontWeight.SemiBold
                             )
                         }
                     }
-                }
-
-                item {
-
                     Spacer(modifier = Modifier.height(8.dp))
-
-                    Divider()
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement =
-                            Arrangement.SpaceBetween
-                    ) {
-
-                        Text(
-                            text = "Total Amount",
-                            fontSize = 17.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onBackground
-                        )
-
-                        Text(
-                            text = "₹${cartViewModel.totalPrice.toInt()}",
-                            fontSize = 17.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Orange
-                        )
-                    }
                 }
             }
 
+            // ── PLACE ORDER BUTTON ────────────────────────────────────────────
+            val canOrder = selectedShop?.isOpen == true &&
+                    selectedSlot.isNotEmpty() &&
+                    availableSlots.isNotEmpty() &&
+                    orderState !is OrderState.Loading
+
             Button(
                 onClick = {
-
                     val order = Order(
                         shopId = shopId,
                         items = cartItems,
@@ -410,66 +359,319 @@ fun CartScreen(
                         status = "pending",
                         pickupSlot = selectedSlot,
                         pickupDate = LocalDate.now().toString(),
-                        paymentMethod = selectedPayment
+                        paymentMethod = "Online Payment"
                     )
-
                     orderViewModel.placeOrder(order)
                 },
-
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(16.dp),
-
-                enabled =
-                    selectedShop?.isOpen == true &&
-                            selectedSlot.isNotEmpty() &&
-                            availableSlots.isNotEmpty() &&
-                            orderState !is OrderState.Loading,
-
+                    .padding(horizontal = 16.dp, vertical = 12.dp)
+                    .height(54.dp),
+                enabled = canOrder,
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = Orange
-                )
+                    containerColor = Orange,
+                    disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant
+                ),
+                shape = RoundedCornerShape(16.dp),
+                elevation = ButtonDefaults.buttonElevation(defaultElevation = 6.dp)
             ) {
-
                 if (orderState is OrderState.Loading) {
-
                     CircularProgressIndicator(
-                        color = MaterialTheme.colorScheme.onPrimary,
-                        modifier = Modifier.size(20.dp),
+                        color = Color.White,
+                        modifier = Modifier.size(22.dp),
                         strokeWidth = 2.dp
                     )
-
                 } else {
-
                     Text(
                         text = when {
-
-                            selectedShop?.isOpen == false -> {
-                                "Shop is closed"
-                            }
-
-                            isLoadingSlots -> {
-                                "Loading slots..."
-                            }
-
-                            availableSlots.isEmpty() -> {
-                                "Slots unavailable"
-                            }
-
-                            selectedSlot.isEmpty() -> {
-                                "Select a pickup slot first"
-                            }
-
-                            else -> {
-                                "Place Order • ₹${cartViewModel.totalPrice.toInt()}"
-                            }
+                            selectedShop?.isOpen == false -> "🔒 Shop is Closed"
+                            isLoadingSlots              -> "Loading slots..."
+                            availableSlots.isEmpty()    -> "No Slots Available"
+                            selectedSlot.isEmpty()      -> "Select a pickup slot first"
+                            else -> "Place Order  •  ₹${cartViewModel.totalPrice.toInt()}"
                         },
-
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center
                     )
                 }
             }
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Cart item card with cooking note expansion
+// ---------------------------------------------------------------------------
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun CartItemCard(
+    item: OrderItem,
+    isNoteExpanded: Boolean,
+    noteDraft: String,
+    onToggleNote: () -> Unit,
+    onNoteDraftChange: (String) -> Unit,
+    onNoteSaved: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = item.name,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold,
+                        // ← was hardcoded MaterialTheme.colorScheme.onSurface already — keep
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.height(3.dp))
+                    Text(
+                        text = "₹${item.price.toInt()} × ${item.quantity}",
+                        fontSize = 13.sp,
+                        // ← was TextSecondary
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    if (item.prepTimeMinutes > 0) {
+                        Text(
+                            text = "⏱ ${item.prepTimeMinutes} min prep",
+                            fontSize = 12.sp,
+                            // ← was TextSecondary
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    if (item.cookingNote.isNotBlank() && !isNoteExpanded) {
+                        Spacer(modifier = Modifier.height(5.dp))
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(Orange_10)
+                                .padding(horizontal = 8.dp, vertical = 3.dp)
+                        ) {
+                            Text(
+                                text = "📝 ${item.cookingNote}",
+                                fontSize = 11.sp,
+                                color = Orange,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+                }
+
+                Column(horizontalAlignment = Alignment.End) {
+                    Text(
+                        text = "₹${(item.price * item.quantity).toInt()}",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Orange
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(if (isNoteExpanded) Orange else Orange_10)
+                            .clickable { onToggleNote() }
+                            .padding(horizontal = 8.dp, vertical = 5.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.Edit,
+                                contentDescription = "Add note",
+                                tint = if (isNoteExpanded) Color.White else Orange,
+                                modifier = Modifier.size(13.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = if (item.cookingNote.isBlank()) "Add note" else "Edit note",
+                                fontSize = 11.sp,
+                                color = if (isNoteExpanded) Color.White else Orange,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Expandable note input
+            AnimatedVisibility(
+                visible = isNoteExpanded,
+                enter = expandVertically() + fadeIn(),
+                exit = shrinkVertically() + fadeOut()
+            ) {
+                Column {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    HorizontalDivider(
+                        color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f)
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text(
+                        text = "Cooking Preferences",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        // ← was TextSecondary
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    val suggestions = listOf(
+                        "Extra spicy", "Less spicy", "No onion",
+                        "Less oil", "Less sugar", "Extra crispy"
+                    )
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    ) {
+                        suggestions.forEach { suggestion ->
+                            val isSelected = noteDraft
+                                .split(",")
+                                .map { it.trim() }
+                                .contains(suggestion)
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(20.dp))
+                                    .background(if (isSelected) Orange else Orange_10)
+                                    .clickable {
+                                        val current = noteDraft
+                                            .split(",")
+                                            .map { it.trim() }
+                                            .filter { it.isNotBlank() }
+                                            .toMutableList()
+                                        if (isSelected) current.remove(suggestion)
+                                        else current.add(suggestion)
+                                        onNoteDraftChange(current.joinToString(", "))
+                                    }
+                                    .padding(horizontal = 10.dp, vertical = 5.dp)
+                            ) {
+                                Text(
+                                    text = suggestion,
+                                    fontSize = 11.sp,
+                                    color = if (isSelected) Color.White else Orange,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                        }
+                    }
+
+                    OutlinedTextField(
+                        value = noteDraft,
+                        onValueChange = onNoteDraftChange,
+                        placeholder = {
+                            Text(
+                                "e.g. extra spicy, no onion...",
+                                fontSize = 13.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = Orange,
+                            unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f),
+                            cursorColor = Orange
+                        ),
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                        keyboardActions = KeyboardActions(onDone = { onNoteSaved() })
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Button(
+                        onClick = onNoteSaved,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(40.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Orange),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Text("Save Preference", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Styled slot chip — dark-mode safe
+// ---------------------------------------------------------------------------
+@Composable
+private fun SlotChip(slot: String, isSelected: Boolean, onClick: () -> Unit) {
+    val bgColor by animateColorAsState(
+        targetValue = if (isSelected) Orange else MaterialTheme.colorScheme.surface,
+        animationSpec = tween(180),
+        label = "slot_bg"
+    )
+    val textColor by animateColorAsState(
+        targetValue = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurface,
+        // ← was TextPrimary (hardcoded dark)
+        animationSpec = tween(180),
+        label = "slot_text"
+    )
+    val borderColor by animateColorAsState(
+        targetValue = if (isSelected) Orange else MaterialTheme.colorScheme.outline.copy(alpha = 0.4f),
+        animationSpec = tween(180),
+        label = "slot_border"
+    )
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(10.dp))
+            .background(bgColor)
+            .border(1.dp, borderColor, RoundedCornerShape(10.dp))
+            .clickable { onClick() }
+            .padding(horizontal = 14.dp, vertical = 9.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = slot,
+            fontSize = 13.sp,
+            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+            color = textColor
+        )
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Shimmer skeleton for slots loading
+// ---------------------------------------------------------------------------
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun SlotShimmer() {
+    FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        repeat(8) {
+            Box(
+                modifier = Modifier
+                    .width(88.dp)
+                    .height(38.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .shimmerEffect()
+            )
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Section label — dark-mode safe
+// ---------------------------------------------------------------------------
+@Composable
+private fun SectionLabel(text: String) {
+    Text(
+        text = text,
+        fontSize = 17.sp,
+        fontWeight = FontWeight.Bold,
+        // ← was TextPrimary (hardcoded #1A1A1A)
+        color = MaterialTheme.colorScheme.onBackground
+    )
 }

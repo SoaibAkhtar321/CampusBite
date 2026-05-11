@@ -1,11 +1,22 @@
 package com.campusbite.app.ui.viewmodel
 
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.campusbite.app.R
 import com.campusbite.app.data.model.Order
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -16,17 +27,6 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import javax.inject.Inject
-import android.Manifest
-import android.app.NotificationChannel
-import android.app.NotificationManager
-import android.content.Context
-import android.content.pm.PackageManager
-import android.os.Build
-import androidx.core.app.NotificationCompat
-import androidx.core.app.NotificationManagerCompat
-import androidx.core.content.ContextCompat
-import com.campusbite.app.R
-import dagger.hilt.android.qualifiers.ApplicationContext
 
 @HiltViewModel
 class AdminViewModel @Inject constructor(
@@ -40,6 +40,7 @@ class AdminViewModel @Inject constructor(
 
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading
+
     private val _shopOpen = MutableStateFlow(true)
     val shopOpen: StateFlow<Boolean> = _shopOpen
 
@@ -47,13 +48,12 @@ class AdminViewModel @Inject constructor(
     val closedSlots: StateFlow<List<String>> = _closedSlots
 
     private var shopId: String = ""
+    private var shopDocId: String = ""
 
     private val knownOrderIds = mutableSetOf<String>()
     private var hasLoadedInitialOrders = false
 
-    init {
-        loadShopIdAndOrders()
-    }
+    init { loadShopIdAndOrders() }
 
     private fun loadShopIdAndOrders() {
         viewModelScope.launch {
@@ -62,7 +62,6 @@ class AdminViewModel @Inject constructor(
                 val uid = auth.currentUser?.uid ?: return@launch
                 val userDoc = firestore.collection("users").document(uid).get().await()
                 shopId = userDoc.getString("shopId") ?: ""
-
                 if (shopId.isNotEmpty()) {
                     loadShopControls()
                     listenToOrders()
@@ -73,14 +72,27 @@ class AdminViewModel @Inject constructor(
         }
     }
 
+    private fun loadShopControls() {
+        firestore.collection("shops")
+            .whereEqualTo("shopId", shopId)
+            .addSnapshotListener { snapshot, _ ->
+                val doc = snapshot?.documents?.firstOrNull()
+                if (doc != null) {
+                    shopDocId = doc.id
+                    _shopOpen.value = doc.getBoolean("isOpen") ?: true
+                    _closedSlots.value = doc.get("closedSlots") as? List<String> ?: emptyList()
+                }
+            }
+    }
+
     private fun listenToOrders() {
         firestore.collection("orders")
             .whereEqualTo("shopId", shopId)
             .whereNotEqualTo("status", "picked_up")
             .addSnapshotListener { snapshot, _ ->
-
-                val orderList = snapshot?.documents?.mapNotNull {
-                    it.toObject(Order::class.java)
+                // per-document try-catch: malformed old docs are skipped, not crashed
+                val orderList = snapshot?.documents?.mapNotNull { doc ->
+                    try { doc.toObject(Order::class.java) } catch (e: Exception) { null }
                 } ?: emptyList()
 
                 val sortedOrders = orderList.sortedBy { it.createdAt }
@@ -90,15 +102,10 @@ class AdminViewModel @Inject constructor(
                     knownOrderIds.addAll(sortedOrders.map { it.orderId })
                     hasLoadedInitialOrders = true
                 } else {
-                    val newPendingOrders = sortedOrders.filter { order ->
-                        order.status == "pending" &&
-                                order.orderId !in knownOrderIds
+                    val newPending = sortedOrders.filter {
+                        it.status == "pending" && it.orderId !in knownOrderIds
                     }
-
-                    newPendingOrders.forEach { order ->
-                        showNewOrderNotification(order)
-                    }
-
+                    newPending.forEach { showNewOrderNotification(it) }
                     knownOrderIds.clear()
                     knownOrderIds.addAll(sortedOrders.map { it.orderId })
                 }
@@ -107,196 +114,108 @@ class AdminViewModel @Inject constructor(
                 _isLoading.value = false
             }
     }
-    private fun loadShopControls() {
-
-        firestore.collection("shops")
-            .whereEqualTo("shopId", shopId)
-            .addSnapshotListener { snapshot, _ ->
-
-                val shop = snapshot?.documents
-                    ?.firstOrNull()
-
-                _shopOpen.value =
-                    shop?.getBoolean("isOpen") ?: true
-
-                _closedSlots.value =
-                    shop?.get("closedSlots") as? List<String>
-                        ?: emptyList()
-            }
-    }
 
     fun toggleShopOpen(isOpen: Boolean) {
-
+        if (shopDocId.isEmpty()) return
         viewModelScope.launch {
-
             try {
-
-                val shopDoc = firestore.collection("shops")
-                    .whereEqualTo("shopId", shopId)
-                    .get()
-                    .await()
-                    .documents
-                    .firstOrNull()
-
-                shopDoc?.reference
-                    ?.update("isOpen", isOpen)
-                    ?.await()
-
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
+                firestore.collection("shops").document(shopDocId)
+                    .update("isOpen", isOpen).await()
+            } catch (e: Exception) { e.printStackTrace() }
         }
     }
 
     fun toggleSlot(slot: String) {
-
+        if (shopDocId.isEmpty()) return
         viewModelScope.launch {
-
             try {
-
-                val shopDoc = firestore.collection("shops")
-                    .whereEqualTo("shopId", shopId)
-                    .get()
-                    .await()
-                    .documents
-                    .firstOrNull()
-
-                val current =
-                    _closedSlots.value.toMutableList()
-
-                if (current.contains(slot)) {
-                    current.remove(slot)
-                } else {
-                    current.add(slot)
-                }
-
-                shopDoc?.reference
-                    ?.update("closedSlots", current)
-                    ?.await()
-
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
+                val docRef = firestore.collection("shops").document(shopDocId)
+                if (_closedSlots.value.contains(slot))
+                    docRef.update("closedSlots", FieldValue.arrayRemove(slot)).await()
+                else
+                    docRef.update("closedSlots", FieldValue.arrayUnion(slot)).await()
+            } catch (e: Exception) { e.printStackTrace() }
         }
     }
 
     fun updateOrderStatus(orderId: String, newStatus: String) {
         viewModelScope.launch {
             try {
-                firestore.collection("orders")
-                    .document(orderId)
-                    .update("status", newStatus)
-                    .await()
-
-                if (newStatus.lowercase() == "ready") {
-                    val order = _orders.value.find { it.orderId == orderId }
-
-                    if (order != null) {
-                        sendNotificationToStudent(order)
-                    }
-                }
-
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
+                firestore.collection("orders").document(orderId)
+                    .update("status", newStatus).await()
+                if (newStatus.lowercase() == "ready")
+                    _orders.value.find { it.orderId == orderId }?.let { sendNotificationToStudent(it) }
+            } catch (e: Exception) { e.printStackTrace() }
         }
     }
 
     private fun sendNotificationToStudent(order: Order) {
         viewModelScope.launch {
             try {
-                val userDoc = firestore.collection("users")
-                    .document(order.studentId)
-                    .get()
-                    .await()
-
-                val token = userDoc.getString("fcmToken")
-
-                if (!token.isNullOrEmpty()) {
-                    sendNotification(token)
-                }
-
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
+                val token = firestore.collection("users").document(order.studentId)
+                    .get().await().getString("fcmToken")
+                if (!token.isNullOrEmpty()) sendNotification(token)
+            } catch (e: Exception) { e.printStackTrace() }
         }
     }
+
     private fun showNewOrderNotification(order: Order) {
-        val channelId = "staff_order_updates"
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                channelId,
-                "Staff Order Updates",
-                NotificationManager.IMPORTANCE_HIGH
-            )
-
-            val manager = appContext.getSystemService(NotificationManager::class.java)
-            manager.createNotificationChannel(channel)
-        }
-
-        val itemSummary = order.items.joinToString {
-            "${it.name} x${it.quantity}"
-        }
-
-        val notification = NotificationCompat.Builder(appContext, channelId)
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
-            .setContentTitle("New Order Received")
-            .setContentText(itemSummary.ifEmpty { "You have a new order" })
-            .setStyle(
-                NotificationCompat.BigTextStyle()
-                    .bigText("New order received: $itemSummary")
-            )
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setAutoCancel(true)
-            .build()
-
+        // Android 13+ requires POST_NOTIFICATIONS permission at runtime.
+        // Check before calling notify() to satisfy lint and avoid SecurityException.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (
-                ContextCompat.checkSelfPermission(
+            if (ContextCompat.checkSelfPermission(
                     appContext,
-                    Manifest.permission.POST_NOTIFICATIONS
-                ) == PackageManager.PERMISSION_GRANTED
-            ) {
-                NotificationManagerCompat.from(appContext)
-                    .notify(order.orderId.hashCode(), notification)
-            }
-        } else {
-            NotificationManagerCompat.from(appContext)
-                .notify(order.orderId.hashCode(), notification)
+                    android.Manifest.permission.POST_NOTIFICATIONS
+                ) != PackageManager.PERMISSION_GRANTED
+            ) return  // permission not granted — skip notification silently
+        }
+
+        val channelId = "staff_order_updates"
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            appContext.getSystemService(NotificationManager::class.java)
+                .createNotificationChannel(
+                    NotificationChannel(
+                        channelId,
+                        "Staff Order Updates",
+                        NotificationManager.IMPORTANCE_HIGH
+                    )
+                )
+        }
+
+        val itemSummary = order.items.joinToString { "${it.name} x${it.quantity}" }
+        try {
+            NotificationManagerCompat.from(appContext).notify(
+                order.orderId.hashCode(),
+                NotificationCompat.Builder(appContext, channelId)
+                    .setSmallIcon(R.drawable.ic_launcher_foreground)
+                    .setContentTitle("New Order Received 🔔")
+                    .setContentText(itemSummary.ifEmpty { "You have a new order" })
+                    .setPriority(NotificationCompat.PRIORITY_HIGH)
+                    .setAutoCancel(true)
+                    .build()
+            )
+        } catch (e: SecurityException) {
+            // Fallback catch — handles edge cases where permission is revoked
+            // between the check above and the notify() call
+            e.printStackTrace()
         }
     }
+
     private fun sendNotification(token: String) {
-        val client = OkHttpClient()
-
-        val notification = JSONObject().apply {
-            put("title", "Order Ready 🎉")
-            put("body", "Your order is ready for pickup")
-        }
-
         val json = JSONObject().apply {
             put("to", token)
-            put("notification", notification)
+            put("notification", JSONObject().apply {
+                put("title", "Order Ready 🎉")
+                put("body", "Your order is ready for pickup")
+            })
         }
-
-        val body = json.toString()
-            .toRequestBody("application/json; charset=utf-8".toMediaType())
-
         val request = Request.Builder()
             .url("https://fcm.googleapis.com/fcm/send")
-            .post(body)
+            .post(json.toString().toRequestBody("application/json; charset=utf-8".toMediaType()))
             .addHeader("Authorization", "key=YOUR_SERVER_KEY")
-            .addHeader("Content-Type", "application/json")
             .build()
-
         Thread {
-            try {
-                client.newCall(request).execute().use { response ->
-                    println("FCM Response: ${response.body?.string()}")
-                }
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
+            try { OkHttpClient().newCall(request).execute() } catch (e: Exception) { e.printStackTrace() }
         }.start()
     }
 }

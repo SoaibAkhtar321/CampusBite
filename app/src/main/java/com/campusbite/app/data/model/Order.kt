@@ -9,7 +9,7 @@ data class Order(
     val totalPrice: Double = 0.0,
     val status: String = "pending",
     val pickupSlot: String = "",
-    val paymentMethod: String = "Cash on Delivery",
+    val paymentMethod: String = "Online Payment",  // Cash on Delivery removed
     val createdAt: Long = 0L,
     val pickupDate: String = ""
 )
@@ -20,5 +20,6 @@ data class OrderItem(
     val price: Double = 0.0,
     val quantity: Int = 1,
     val prepTimeMinutes: Int = 0,
-    val shopId: String = ""
+    val shopId: String = "",
+    val cookingNote: String = ""   // e.g. "extra spicy", "less sugar"
 )

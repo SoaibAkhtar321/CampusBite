@@ -5,7 +5,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue // IMPORTANT: Fixes the 'getValue' delegate error
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -24,7 +24,7 @@ import com.campusbite.app.ui.viewmodel.AuthViewModel
 import com.campusbite.app.ui.viewmodel.CartViewModel
 import com.campusbite.app.ui.screens.shop.ShopDetailScreen
 import com.campusbite.app.ui.screens.profile.ProfileScreen
-import com.campusbite.app.ui.screens.profile.ShopkeeperProfileScreen // IMPORTANT: Fixes Unresolved reference
+import com.campusbite.app.ui.screens.profile.ShopkeeperProfileScreen
 
 @Composable
 fun NavGraph(navController: NavHostController) {
@@ -56,7 +56,6 @@ fun NavGraph(navController: NavHostController) {
         }
 
         composable("profile") {
-            // "by" delegation now works because of the "import androidx.compose.runtime.getValue"
             val userRole by authViewModel.userRole.collectAsState()
 
             if (userRole == "shopkeeper") {
@@ -66,9 +65,7 @@ fun NavGraph(navController: NavHostController) {
                     },
                     onLogout = {
                         authViewModel.logout()
-                        navController.navigate(Routes.LOGIN) {
-                            popUpTo(0)
-                        }
+                        navController.navigate(Routes.LOGIN) { popUpTo(0) }
                     }
                 )
             } else {
@@ -76,11 +73,13 @@ fun NavGraph(navController: NavHostController) {
                     onNavigateToOrderHistory = {
                         navController.navigate(Routes.ORDER_HISTORY)
                     },
+                    // ← NEW: tap active/past order → OrderStatusScreen
+                    onNavigateToOrderStatus = { orderId ->
+                        navController.navigate(Routes.orderStatus(orderId))
+                    },
                     onLogout = {
                         authViewModel.logout()
-                        navController.navigate(Routes.LOGIN) {
-                            popUpTo(0)
-                        }
+                        navController.navigate(Routes.LOGIN) { popUpTo(0) }
                     },
                     onBack = { navController.popBackStack() }
                 )
@@ -129,6 +128,10 @@ fun NavGraph(navController: NavHostController) {
                 onNavigateToProfile = {
                     navController.navigate("profile")
                 },
+                // ← NEW: active order banner tap → OrderStatusScreen
+                onNavigateToOrderStatus = { orderId ->
+                    navController.navigate(Routes.orderStatus(orderId))
+                },
                 cartViewModel = cartViewModel
             )
         }
@@ -170,20 +173,18 @@ fun NavGraph(navController: NavHostController) {
         composable(Routes.ORDER_HISTORY) {
             OrderHistoryScreen()
         }
+
         composable("edit_shop") {
-            // For now, just a placeholder so it doesn't crash
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text("Edit Shop Info Screen Coming Soon")
             }
         }
 
-        // Inside NavGraph.kt
         composable(Routes.ADMIN_DASHBOARD) {
             AdminDashboardScreen(
                 onNavigateToProfile = {
                     navController.navigate("profile")
                 }
-                // onLogout is no longer needed here
             )
         }
     }
