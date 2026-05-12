@@ -17,7 +17,7 @@ class HomeViewModel @Inject constructor(
     private val shopRepository: ShopRepository
 ) : ViewModel() {
 
-    // Data Streams
+    // ====== Data Streams ======
     private val _shops = MutableStateFlow<List<Shop>>(emptyList())
     val shops: StateFlow<List<Shop>> = _shops.asStateFlow()
 
@@ -27,7 +27,7 @@ class HomeViewModel @Inject constructor(
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
-    // Filter States
+    // ====== Filter States ======
     private val _selectedCategory = MutableStateFlow("All")
     val selectedCategory: StateFlow<String> = _selectedCategory.asStateFlow()
 
@@ -37,17 +37,31 @@ class HomeViewModel @Inject constructor(
     private val _priceRange = MutableStateFlow(0f..500f)
     val priceRange: StateFlow<ClosedFloatingPointRange<Float>> = _priceRange.asStateFlow()
 
+    // ====== Constants ======
     val categories = listOf("All", "Snacks", "Meals", "Drinks")
+    val priceSteps = listOf(0f, 20f, 50f, 100f, 200f, 500f)
+    val defaultPriceRange = 0f..500f
 
-    // UI state helper to know when data is loaded
+    // ====== UI State Helper ======
     val isDataReady: StateFlow<Boolean> = combine(_shops, _menuItems) { shops, items ->
         shops.isNotEmpty() && items.isNotEmpty()
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(), false)
+
+    // ====== Filtered Items Flow ======
+    val filteredItems: StateFlow<List<MenuItem>> = combine(
+        _menuItems,
+        _selectedCategory,
+        _searchQuery,
+        _priceRange
+    ) { menuItems, category, query, range ->
+        getFilteredItemsInternal(menuItems, category, query, range)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(), emptyList())
 
     init {
         loadData()
     }
 
+    // ====== Data Loading ======
     private fun loadData() {
         viewModelScope.launch {
             _isLoading.value = true
@@ -72,7 +86,7 @@ class HomeViewModel @Inject constructor(
         }
     }
 
-    // Update Functions
+    // ====== Filter Update Functions ======
     fun selectCategory(category: String) {
         _selectedCategory.value = category
     }
@@ -85,47 +99,88 @@ class HomeViewModel @Inject constructor(
         _priceRange.value = range
     }
 
+    fun resetFilters() {
+        _priceRange.value = defaultPriceRange
+        _selectedCategory.value = "All"
+        _searchQuery.value = ""
+    }
 
-    // Inside HomeViewModel class
-
-    // Define logical price steps
-    val priceSteps = listOf(0f, 20f, 50f, 100f, 200f, 500f)
-
+    // ====== Filter Logic ======
+    /**
+     * Get filtered items based on current filter states
+     * This is a public function that uses current state values
+     */
     fun getFilteredItems(): List<MenuItem> {
-        val query = _searchQuery.value.lowercase().trim()
-        val category = _selectedCategory.value
-        val range = _priceRange.value
+        return getFilteredItemsInternal(
+            _menuItems.value,
+            _selectedCategory.value,
+            _searchQuery.value,
+            _priceRange.value
+        )
+    }
 
-        return _menuItems.value.filter { item ->
+    /**
+     * Internal filter logic that can be used by both public function and Flow
+     */
+    private fun getFilteredItemsInternal(
+        menuItems: List<MenuItem>,
+        category: String,
+        query: String,
+        range: ClosedFloatingPointRange<Float>
+    ): List<MenuItem> {
+        val processedQuery = query.lowercase().trim()
+
+        return menuItems.filter { item ->
             val matchesCategory = category == "All" || item.category == category
 
-            // Price check using the selected range
             val matchesPrice = item.price >= range.start && item.price <= range.endInclusive
 
             val shopName = getShopName(item.shopId).lowercase()
-            val matchesSearch = query.isEmpty() ||
-                    item.name.lowercase().contains(query) ||
-                    shopName.contains(query)
+            val matchesSearch = processedQuery.isEmpty() ||
+                    item.name.lowercase().contains(processedQuery) ||
+                    shopName.contains(processedQuery)
 
             matchesCategory && matchesPrice && matchesSearch
         }
     }
-    // Inside HomeViewModel.kt
 
-    // Default range to check against
-    val defaultPriceRange = 0f..500f
-
-    fun resetFilters() {
-        _priceRange.value = defaultPriceRange
-        _selectedCategory.value = "All"
-    }
-
-    // Helper to check if any filter is active (to show/hide the Clear button)
+    // ====== Helper Functions ======
+    /**
+     * Check if any filter is active (to show/hide the Clear button)
+     */
     fun isFilterActive(): Boolean {
-        return _selectedCategory.value != "All" || _priceRange.value != defaultPriceRange
+        val hasActiveCategory = _selectedCategory.value != "All"
+        val hasActivePrice = _priceRange.value != defaultPriceRange
+        val hasActiveSearch = _searchQuery.value.isNotBlank()
+
+        return hasActiveCategory || hasActivePrice || hasActiveSearch
     }
 
+    /**
+     * Get shop name by shop ID
+     */
     fun getShopName(shopId: String): String {
         return _shops.value.find { it.shopId == shopId }?.name ?: "Unknown Shop"
+    }
+
+    /**
+     * Get shop by ID
+     */
+    fun getShopById(shopId: String): Shop? {
+        return _shops.value.find { it.shopId == shopId }
+    }
+
+    /**
+     * Get all menu items for a specific shop
+     */
+    fun getMenuItemsByShopId(shopId: String): List<MenuItem> {
+        return _menuItems.value.filter { it.shopId == shopId }
+    }
+
+    /**
+     * Get filtered items for a specific shop
+     */
+    fun getFilteredItemsByShopId(shopId: String): List<MenuItem> {
+        return getFilteredItems().filter { it.shopId == shopId }
     }
 }

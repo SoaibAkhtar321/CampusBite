@@ -1,147 +1,223 @@
 package com.campusbite.app.ui.screens.profile
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-//import androidx.compose.material.icons.automirrored.filled.ChevronRight
-import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.ArrowBack
+import androidx.compose.material.icons.outlined.Logout
+import androidx.compose.material.icons.outlined.Store
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import androidx.hilt.navigation.compose.hiltViewModel
-import com.campusbite.app.ui.theme.Orange
-import com.campusbite.app.ui.theme.OrangeLight
-import com.campusbite.app.ui.viewmodel.ShopkeeperProfileViewModel
+
+private val BrandOrange = Color(0xFFFF6B00)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ShopkeeperProfileScreen(
-    onNavigateToEditShop: () -> Unit,
-    onLogout: () -> Unit,
-    viewModel: ShopkeeperProfileViewModel = hiltViewModel()
+    onNavigateBack: () -> Unit,
+    onLogout: () -> Unit
 ) {
-    val shop by viewModel.shopData.collectAsState()
+    var showLogoutDialog by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
-            CenterAlignedTopAppBar(
-                title = { Text("Shop Profile", fontWeight = FontWeight.Bold) },
-                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background
-                )
+            TopAppBar(
+                title = {
+                    Text(
+                        text = "Shopkeeper Profile",
+                        fontWeight = FontWeight.SemiBold
+                    )
+                },
+                navigationIcon = {
+                    IconButton(onClick = onNavigateBack) {
+                        Icon(
+                            imageVector = Icons.Outlined.ArrowBack,
+                            contentDescription = "Back"
+                        )
+                    }
+                }
             )
         }
-    ) { padding ->
+    ) { paddingValues ->
+
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding)
+                .padding(paddingValues)
+                .verticalScroll(rememberScrollState())
                 .padding(16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Shop Image Placeholder
-            Box(
-                modifier = Modifier
-                    .size(100.dp)
-                    .background(OrangeLight, CircleShape),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(Icons.Default.Storefront, contentDescription = null, modifier = Modifier.size(50.dp), tint = Orange)
-            }
 
-            Spacer(modifier = Modifier.height(16.dp))
-
-            Text(text = shop?.name ?: "Loading Shop...", fontSize = 22.sp, fontWeight = FontWeight.Bold)
-            Text(text = "Owner Account", color = Color.Gray, fontSize = 14.sp)
-
-            Spacer(modifier = Modifier.height(24.dp))
-
-            // QUICK ACTION: OPEN/CLOSE SHOP
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = if (shop?.isOpen == true) Color(0xFFE8F5E9) else Color(0xFFFFEBEE)),
-                shape = RoundedCornerShape(16.dp)
+                shape = RoundedCornerShape(18.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = BrandOrange
+                )
             ) {
                 Row(
-                    modifier = Modifier.padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    modifier = Modifier.padding(20.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
+                    Box(
+                        modifier = Modifier
+                            .size(64.dp)
+                            .clip(CircleShape)
+                            .background(Color.White.copy(alpha = 0.2f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "S",
+                            color = Color.White,
+                            style = MaterialTheme.typography.headlineMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.width(16.dp))
+
                     Column {
                         Text(
-                            text = if (shop?.isOpen == true) "Shop is OPEN" else "Shop is CLOSED",
-                            fontWeight = FontWeight.Bold,
-                            color = if (shop?.isOpen == true) Color(0xFF2E7D32) else Color(0xFFC62828)
+                            text = "Shopkeeper",
+                            color = Color.White,
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold
                         )
-                        Text("Instant toggle for customers", fontSize = 12.sp)
+
+                        Text(
+                            text = "CampusBite Partner",
+                            color = Color.White.copy(alpha = 0.85f),
+                            style = MaterialTheme.typography.bodyMedium
+                        )
                     }
-                    Switch(
-                        checked = shop?.isOpen ?: false,
-                        onCheckedChange = { viewModel.toggleShopStatus(it) },
-                        colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFF2E7D32))
+                }
+            }
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Outlined.Store,
+                            contentDescription = null,
+                            tint = BrandOrange
+                        )
+
+                        Spacer(modifier = Modifier.width(8.dp))
+
+                        Text(
+                            text = "Shop Info",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Text(
+                        text = "Shop profile details will be shown here.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
-
-            // OPTIONS
-            ProfileOptionItem("Edit Shop Info", Icons.Default.Edit) { onNavigateToEditShop() }
-            ProfileOptionItem("Order History", Icons.Default.History) { /* Navigate to Shop Orders */ }
-            ProfileOptionItem("Business Insights", Icons.Default.Assessment) { /* Navigate to Sales */ }
-
-            Spacer(modifier = Modifier.weight(1f))
-
-            Button(
-                onClick = onLogout,
-                modifier = Modifier.fillMaxWidth().height(50.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Color.Red.copy(alpha = 0.1f), contentColor = Color.Red),
-                shape = RoundedCornerShape(12.dp)
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp)
             ) {
-                Text("Logout Manager", fontWeight = FontWeight.Bold)
+                Column(
+                    modifier = Modifier.padding(16.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Outlined.Settings,
+                            contentDescription = null,
+                            tint = BrandOrange
+                        )
+
+                        Spacer(modifier = Modifier.width(8.dp))
+
+                        Text(
+                            text = "Settings",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Button(
+                        onClick = {
+                            showLogoutDialog = true
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.error
+                        )
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Logout,
+                            contentDescription = null
+                        )
+
+                        Spacer(modifier = Modifier.width(8.dp))
+
+                        Text("Logout")
+                    }
+                }
             }
         }
     }
-}
-@Composable
-private fun ProfileOptionItem(title: String, icon: androidx.compose.ui.graphics.vector.ImageVector, onClick: () -> Unit) {
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp)
-            .clickable { onClick() },
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+
+    if (showLogoutDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                showLogoutDialog = false
+            },
+            title = {
+                Text("Logout")
+            },
+            text = {
+                Text("Are you sure you want to logout?")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showLogoutDialog = false
+                        onLogout()
+                    }
+                ) {
+                    Text(
+                        text = "Logout",
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        showLogoutDialog = false
+                    }
+                ) {
+                    Text("Cancel")
+                }
+            }
         )
-    ) {
-        Row(
-            modifier = Modifier.padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(icon, contentDescription = null, tint = Orange)
-            Spacer(modifier = Modifier.width(16.dp))
-            Text(
-                text = title,
-                fontWeight = FontWeight.Medium,
-                modifier = Modifier.weight(1f),
-                color = MaterialTheme.colorScheme.onSurface
-            )
-            // Using a standard Arrow icon to avoid ChevronRight indexing errors
-            Icon(
-                imageVector = Icons.Default.ArrowForwardIos,
-                contentDescription = null,
-                tint = Color.Gray,
-                modifier = Modifier.size(16.dp)
-            )
-        }
     }
 }

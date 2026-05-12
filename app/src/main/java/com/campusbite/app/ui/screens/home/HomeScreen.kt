@@ -30,10 +30,13 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.campusbite.app.data.model.CartItem
 import com.campusbite.app.data.model.MenuItem
+import com.campusbite.app.data.model.Order
 import com.campusbite.app.data.model.Shop
 import com.campusbite.app.ui.theme.Orange
 import com.campusbite.app.ui.theme.OrangeDark
@@ -46,11 +49,11 @@ import com.campusbite.app.ui.viewmodel.CartViewModel
 import com.campusbite.app.ui.viewmodel.HomeViewModel
 import com.campusbite.app.ui.viewmodel.OrderViewModel
 import com.google.firebase.auth.FirebaseAuth
+import com.campusbite.app.data.model.OrderItem
 
-// ---------------------------------------------------------------------------
-// Shimmer helper (imported by other screens as
-// com.campusbite.app.ui.screens.home.shimmerEffect)
-// ---------------------------------------------------------------------------
+// ═══════════════════════════════════════════════════════════════════════════
+// SHIMMER EFFECT - Reusable loading animation
+// ═══════════════════════════════════════════════════════════════════════════
 fun Modifier.shimmerEffect(): Modifier = composed {
     val transition = rememberInfiniteTransition(label = "shimmer")
     val translateAnim by transition.animateFloat(
@@ -76,9 +79,9 @@ fun Modifier.shimmerEffect(): Modifier = composed {
     )
 }
 
-// ---------------------------------------------------------------------------
-// HomeScreen
-// ---------------------------------------------------------------------------
+// ═══════════════════════════════════════════════════════════════════════════
+// MAIN HOMESCREEN COMPOSABLE
+// ═══════════════════════════════════════════════════════════════════════════
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
@@ -90,44 +93,60 @@ fun HomeScreen(
     cartViewModel: CartViewModel = hiltViewModel(),
     orderViewModel: OrderViewModel = hiltViewModel()
 ) {
+    // ─────────────────────────────────────────────────────────────────────────
+    // STATE COLLECTION
+    // ─────────────────────────────────────────────────────────────────────────
     val shops by viewModel.shops.collectAsState()
     val isDataReady by viewModel.isDataReady.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val selectedCategory by viewModel.selectedCategory.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
     val priceRange by viewModel.priceRange.collectAsState()
+    val filteredItems by viewModel.filteredItems.collectAsState()
 
     val cartItems by cartViewModel.cartItems.collectAsState()
     val showDialog by cartViewModel.showShopConflict.collectAsState()
 
     val activeOrder by orderViewModel.activeOrder.collectAsState()
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // LOCAL STATE
+    // ─────────────────────────────────────────────────────────────────────────
     var showExitDialog by remember { mutableStateOf(false) }
     var showFilterSheet by remember { mutableStateOf(false) }
+    var dismissedOrderIds by remember { mutableStateOf(setOf<String>()) }
     val sheetState = rememberModalBottomSheetState()
 
-    // Start listening to active order for the current user
+    // ─────────────────────────────────────────────────────────────────────────
+    // LIFECYCLE EFFECTS
+    // ─────────────────────────────────────────────────────────────────────────
     LaunchedEffect(Unit) {
         FirebaseAuth.getInstance().currentUser?.uid?.let { uid ->
             orderViewModel.listenToActiveOrder(uid)
         }
     }
 
-    BackHandler(enabled = cartItems.isNotEmpty()) { showExitDialog = true }
-
-    val filteredItems by remember(searchQuery, selectedCategory, priceRange) {
-        derivedStateOf { viewModel.getFilteredItems() }
+    BackHandler(enabled = cartItems.isNotEmpty()) {
+        showExitDialog = true
     }
 
-    // Bottom padding: grows when banner and/or cart FAB are visible
-    val hasActiveOrder = activeOrder != null
+    // ─────────────────────────────────────────────────────────────────────────
+    // DERIVED STATE
+    // ─────────────────────────────────────────────────────────────────────────
+    val shouldShowBanner = activeOrder != null &&
+            !dismissedOrderIds.contains(activeOrder?.orderId) &&
+            activeOrder?.status?.uppercase() !in listOf("COMPLETED", "CANCELLED")
+
     val hasCartItems = cartItems.isNotEmpty()
-    val bottomContentPadding = when {
-        hasActiveOrder && hasCartItems -> 180.dp
-        hasActiveOrder || hasCartItems -> 96.dp
+    val bottomContentPadding: Dp = when {
+        shouldShowBanner && hasCartItems -> 180.dp
+        shouldShowBanner || hasCartItems -> 96.dp
         else -> 16.dp
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // MAIN UI LAYOUT
+    // ─────────────────────────────────────────────────────────────────────────
     Box(modifier = Modifier.fillMaxSize()) {
         Column(
             modifier = Modifier
@@ -135,224 +154,336 @@ fun HomeScreen(
                 .statusBarsPadding()
                 .background(MaterialTheme.colorScheme.background)
         ) {
-            // ── TOP BAR ──────────────────────────────────────────────────────
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 14.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column {
-                    Text(
-                        "CampusBite",
-                        fontSize = 24.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onBackground
-                    )
-                    Text(
-                        "Bhukh Mitao, Time Bachao 🍱",
-                        fontSize = 11.sp,
-                        color = TextSecondary
-                    )
-                }
-                Box(
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clip(CircleShape)
-                        .background(OrangeLight)
-                        .clickable { onNavigateToProfile() },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Person,
-                        contentDescription = "Profile",
-                        tint = Orange,
-                        modifier = Modifier.size(22.dp)
-                    )
-                }
-            }
+            TopAppBarSection(onProfileClick = onNavigateToProfile)
 
-            // ── SEARCH & FILTER ───────────────────────────────────────────────
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                OutlinedTextField(
-                    value = searchQuery,
-                    onValueChange = { viewModel.updateSearchQuery(it) },
-                    placeholder = { Text("Search dish or shop...", fontSize = 14.sp) },
-                    leadingIcon = {
-                        Icon(Icons.Default.Search, contentDescription = null, tint = Orange)
-                    },
-                    trailingIcon = {
-                        AnimatedVisibility(visible = searchQuery.isNotEmpty()) {
-                            IconButton(onClick = { viewModel.updateSearchQuery("") }) {
-                                Icon(Icons.Default.Close, contentDescription = "Clear", tint = TextSecondary)
-                            }
-                        }
-                    },
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(14.dp),
-                    singleLine = true,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = Orange,
-                        unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f),
-                        cursorColor = Orange
-                    )
-                )
-                Spacer(modifier = Modifier.width(10.dp))
-                Box(
-                    modifier = Modifier
-                        .size(52.dp)
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(if (viewModel.isFilterActive()) Orange else OrangeLight)
-                        .clickable { showFilterSheet = true },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        Icons.Default.FilterList,
-                        contentDescription = "Filter",
-                        tint = if (viewModel.isFilterActive()) Color.White else Orange
-                    )
-                }
-            }
+            SearchAndFilterBar(
+                searchQuery = searchQuery,
+                isFilterActive = viewModel.isFilterActive(),
+                onSearchChange = { viewModel.updateSearchQuery(it) },
+                onFilterClick = { showFilterSheet = true }
+            )
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // ── BODY ──────────────────────────────────────────────────────────
             if (isLoading || !isDataReady) {
                 ShimmerHomeContent()
             } else {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(bottom = bottomContentPadding)
-                ) {
-                    // Shops section
-                    item {
-                        SectionHeader(
-                            title = "Shops",
-                            modifier = Modifier.padding(horizontal = 16.dp)
-                        )
-                        Spacer(modifier = Modifier.height(10.dp))
-                        LazyRow(
-                            contentPadding = PaddingValues(horizontal = 16.dp),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            items(shops) { shop ->
-                                ShopCard(
-                                    shop = shop,
-                                    onClick = { onNavigateToShopDetail(shop.shopId) }
-                                )
-                            }
-                        }
-                        Spacer(modifier = Modifier.height(20.dp))
-                    }
-
-                    // Categories + filter clear
-                    item {
-                        SectionHeader(
-                            title = "Menu",
-                            modifier = Modifier.padding(horizontal = 16.dp)
-                        )
-                        Spacer(modifier = Modifier.height(10.dp))
-                        LazyRow(
-                            contentPadding = PaddingValues(horizontal = 16.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            items(viewModel.categories) { category ->
-                                CategoryChip(
-                                    category = category,
-                                    isSelected = category == selectedCategory,
-                                    onClick = { viewModel.selectCategory(category) }
-                                )
-                            }
-                        }
-                        if (viewModel.isFilterActive()) {
-                            Spacer(modifier = Modifier.height(8.dp))
-                            TextButton(
-                                onClick = { viewModel.resetFilters() },
-                                modifier = Modifier.padding(horizontal = 8.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Close,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(15.dp),
-                                    tint = Orange
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(
-                                    "Clear All Filters",
-                                    color = Orange,
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                            }
-                        }
-                        Spacer(modifier = Modifier.height(12.dp))
-                    }
-
-                    // Menu items or empty state
-                    if (filteredItems.isEmpty()) {
-                        item {
-                            EmptyMenuState(hasFilters = viewModel.isFilterActive())
-                        }
-                    } else {
-                        val groupedItems = filteredItems.groupBy { it.shopId }
-                        groupedItems.forEach { (shopId, items) ->
-                            val shopName = viewModel.getShopName(shopId)
-                            item {
-                                Row(
-                                    modifier = Modifier.padding(
-                                        horizontal = 16.dp,
-                                        vertical = 8.dp
-                                    ),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .width(3.dp)
-                                            .height(18.dp)
-                                            .clip(RoundedCornerShape(2.dp))
-                                            .background(Orange)
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(
-                                        shopName,
-                                        fontSize = 15.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Orange
-                                    )
-                                }
-                            }
-                            items(items) { menuItem ->
-                                MenuItemCard(
-                                    menuItem = menuItem,
-                                    quantity = cartItems
-                                        .find { it.itemId == menuItem.itemId }?.quantity ?: 0,
-                                    onAddClick = { cartViewModel.addItem(menuItem) },
-                                    onRemoveClick = { cartViewModel.removeItem(menuItem.itemId) }
-                                )
-                            }
-                        }
-                    }
-                }
+                HomeContentList(
+                    shops = shops,
+                    filteredItems = filteredItems,
+                    selectedCategory = selectedCategory,
+                    cartItems = cartItems,
+                    isFilterActive = viewModel.isFilterActive(),
+                    bottomContentPadding = bottomContentPadding,
+                    viewModel = viewModel,
+                    cartViewModel = cartViewModel,
+                    onNavigateToShopDetail = onNavigateToShopDetail
+                )
             }
         }
 
-        // ── BOTTOM FLOATING STACK (active order banner + cart FAB) ───────────
-        Column(
+        // ── FLOATING BOTTOM STACK ─────────────────────────────────────────────
+        BottomFloatingStack(
+            shouldShowBanner = shouldShowBanner,
+            activeOrder = activeOrder,
+            cartItemCount = cartItems.size,
+            cartTotalPrice = cartViewModel.totalPrice,
+            onTrackClick = { activeOrder?.let { onNavigateToOrderStatus(it.orderId) } },
+            onCartClick = onNavigateToCart,
+            onDismissOrder = { orderId ->
+                dismissedOrderIds = dismissedOrderIds + orderId
+            }
+        )
+
+        // ── DIALOGS & SHEETS ──────────────────────────────────────────────────
+        PriceFilterBottomSheet(
+            isVisible = showFilterSheet,
+            sheetState = sheetState,
+            selectedRange = priceRange,
+            viewModel = viewModel,
+            onDismiss = { showFilterSheet = false }
+        )
+
+        ShopConflictDialog(
+            isVisible = showDialog,
+            cartViewModel = cartViewModel
+        )
+
+        ExitConfirmationDialog(
+            isVisible = showExitDialog,
+            cartViewModel = cartViewModel,
+            onDismiss = { showExitDialog = false },
+            onConfirm = { showExitDialog = false; onNavigateToCart() }
+        )
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// COMPOSABLE SECTIONS
+// ═══════════════════════════════════════════════════════════════════════════
+
+@Composable
+private fun TopAppBarSection(onProfileClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column {
+            Text(
+                "CampusBite",
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onBackground
+            )
+            Text(
+                "Bhukh Mitao, Time Bachao 🍱",
+                fontSize = 11.sp,
+                color = TextSecondary
+            )
+        }
+        Box(
             modifier = Modifier
-                .fillMaxWidth()
-                .align(Alignment.BottomCenter)
-                .padding(horizontal = 16.dp, vertical = 16.dp),
+                .size(40.dp)
+                .clip(CircleShape)
+                .background(OrangeLight)
+                .clickable { onProfileClick() },
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.Default.Person,
+                contentDescription = "Profile",
+                tint = Orange,
+                modifier = Modifier.size(22.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun SearchAndFilterBar(
+    searchQuery: String,
+    isFilterActive: Boolean,
+    onSearchChange: (String) -> Unit,
+    onFilterClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        OutlinedTextField(
+            value = searchQuery,
+            onValueChange = onSearchChange,
+            placeholder = { Text("Search dish or shop...", fontSize = 14.sp) },
+            leadingIcon = {
+                Icon(Icons.Default.Search, contentDescription = null, tint = Orange)
+            },
+            trailingIcon = {
+                AnimatedVisibility(visible = searchQuery.isNotEmpty()) {
+                    IconButton(onClick = { onSearchChange("") }) {
+                        Icon(
+                            Icons.Default.Close,
+                            contentDescription = "Clear",
+                            tint = TextSecondary
+                        )
+                    }
+                }
+            },
+            modifier = Modifier.weight(1f),
+            shape = RoundedCornerShape(14.dp),
+            singleLine = true,
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = Orange,
+                unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f),
+                cursorColor = Orange
+            )
+        )
+        Spacer(modifier = Modifier.width(10.dp))
+        Box(
+            modifier = Modifier
+                .size(52.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(if (isFilterActive) Orange else OrangeLight)
+                .clickable { onFilterClick() },
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                Icons.Default.FilterList,
+                contentDescription = "Filter",
+                tint = if (isFilterActive) Color.White else Orange
+            )
+        }
+    }
+}
+
+@Composable
+private fun HomeContentList(
+    shops: List<Shop>,
+    filteredItems: List<MenuItem>,
+    selectedCategory: String,
+    cartItems: List<OrderItem>,
+    isFilterActive: Boolean,
+    bottomContentPadding: Dp,
+    viewModel: HomeViewModel,
+    cartViewModel: CartViewModel,
+    onNavigateToShopDetail: (String) -> Unit
+) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(bottom = bottomContentPadding)
+    ) {
+        // ── SHOPS SECTION ─────────────────────────────────────────────────────
+        item {
+            SectionHeader(
+                title = "Shops",
+                modifier = Modifier.padding(horizontal = 16.dp)
+            )
+            Spacer(modifier = Modifier.height(10.dp))
+            LazyRow(
+                contentPadding = PaddingValues(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                items(
+                    items = shops,
+                    key = { shop -> shop.shopId }
+                ) { shop ->
+                    ShopCard(
+                        shop = shop,
+                        onClick = { onNavigateToShopDetail(shop.shopId) }
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(20.dp))
+        }
+
+        // ── CATEGORIES SECTION ────────────────────────────────────────────────
+        item {
+            SectionHeader(
+                title = "Menu",
+                modifier = Modifier.padding(horizontal = 16.dp)
+            )
+            Spacer(modifier = Modifier.height(10.dp))
+            LazyRow(
+                contentPadding = PaddingValues(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(
+                    items = viewModel.categories,
+                    key = { category -> category }
+                ) { category ->
+                    CategoryChip(
+                        category = category,
+                        isSelected = category == selectedCategory,
+                        onClick = { viewModel.selectCategory(category) }
+                    )
+                }
+            }
+            if (isFilterActive) {
+                Spacer(modifier = Modifier.height(8.dp))
+                TextButton(
+                    onClick = { viewModel.resetFilters() },
+                    modifier = Modifier.padding(horizontal = 8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = null,
+                        modifier = Modifier.size(15.dp),
+                        tint = Orange
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        "Clear All Filters",
+                        color = Orange,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+        }
+
+        // ── MENU ITEMS OR EMPTY STATE ─────────────────────────────────────────
+        if (filteredItems.isEmpty()) {
+            item {
+                EmptyMenuState(hasFilters = isFilterActive)
+            }
+        } else {
+            val groupedItems = filteredItems.groupBy { menuItem -> menuItem.shopId }
+            groupedItems.forEach { (shopId, itemsList) ->
+                val shopName = viewModel.getShopName(shopId)
+                item {
+                    ShopNameHeader(shopName = shopName)
+                }
+                items(
+                    items = itemsList,
+                    key = { menuItem -> menuItem.itemId }
+                ) { menuItem ->
+                    // Find the OrderItem in cartItems that matches this MenuItem
+                    val matchingCartItem = cartItems.firstOrNull { orderItem ->
+                        orderItem.itemId == menuItem.itemId
+                    }
+
+                    MenuItemCard(
+                        menuItem = menuItem,
+                        quantity = matchingCartItem?.quantity ?: 0,
+                        onAddClick = { cartViewModel.addItem(menuItem) },
+                        onRemoveClick = { cartViewModel.removeItem(menuItem.itemId) }
+                    )
+                }
+            }
+        }
+    }
+}
+@Composable
+private fun ShopNameHeader(shopName: String) {
+    Row(
+        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .width(3.dp)
+                .height(18.dp)
+                .clip(RoundedCornerShape(2.dp))
+                .background(Orange)
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(
+            shopName,
+            fontSize = 15.sp,
+            fontWeight = FontWeight.Bold,
+            color = Orange
+        )
+    }
+}
+
+@Composable
+private fun BottomFloatingStack(
+    shouldShowBanner: Boolean,
+    activeOrder: Order?,
+    cartItemCount: Int,
+    cartTotalPrice: Double,
+    onTrackClick: () -> Unit,
+    onCartClick: () -> Unit,
+    onDismissOrder: (String) -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp, vertical = 16.dp),
+        contentAlignment = Alignment.BottomCenter
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             // Active order banner
             AnimatedVisibility(
-                visible = activeOrder != null,
+                visible = shouldShowBanner && activeOrder != null,
                 enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
                 exit = slideOutVertically(targetOffsetY = { it }) + fadeOut()
             ) {
@@ -362,20 +493,20 @@ fun HomeScreen(
                         status = order.status,
                         shopId = order.shopId,
                         pickupSlot = order.pickupSlot,
-                        onClick = { onNavigateToOrderStatus(order.orderId) }
+                        onTrackClick = onTrackClick,
+                        onDismissClick = { onDismissOrder(order.orderId) }
                     )
                 }
             }
 
             // Cart FAB
-            val itemCount = cartViewModel.itemCount
             AnimatedVisibility(
-                visible = itemCount > 0,
+                visible = cartItemCount > 0,
                 enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
                 exit = slideOutVertically(targetOffsetY = { it }) + fadeOut()
             ) {
                 Button(
-                    onClick = onNavigateToCart,
+                    onClick = onCartClick,
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(54.dp),
@@ -390,229 +521,281 @@ fun HomeScreen(
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "$itemCount item${if (itemCount > 1) "s" else ""} in cart",
+                        text = "$cartItemCount item${if (cartItemCount > 1) "s" else ""} in cart",
                         fontSize = 14.sp,
                         fontWeight = FontWeight.SemiBold
                     )
                     Spacer(modifier = Modifier.weight(1f))
                     Text(
-                        text = "₹${cartViewModel.totalPrice.toInt()}  →",
+                        text = "₹${cartTotalPrice.toInt()}  →",
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Bold
                     )
                 }
             }
         }
+    }
+}
 
-        // ── PRICE FILTER BOTTOM SHEET ────────────────────────────────────────
-        if (showFilterSheet) {
-            ModalBottomSheet(
-                onDismissRequest = { showFilterSheet = false },
-                sheetState = sheetState,
-                containerColor = MaterialTheme.colorScheme.surface,
-                shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun PriceFilterBottomSheet(
+    isVisible: Boolean,
+    sheetState: SheetState,
+    selectedRange: ClosedFloatingPointRange<Float>,
+    viewModel: HomeViewModel,
+    onDismiss: () -> Unit
+) {
+    if (isVisible) {
+        ModalBottomSheet(
+            onDismissRequest = onDismiss,
+            sheetState = sheetState,
+            containerColor = MaterialTheme.colorScheme.surface,
+            shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 24.dp, end = 24.dp, bottom = 40.dp)
             ) {
-                Column(
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "Budget Filters",
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = TextPrimary
+                    )
+                    TextButton(onClick = { viewModel.resetFilters() }) {
+                        Text("Reset", color = Orange, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+                Spacer(modifier = Modifier.height(20.dp))
+                Text(
+                    "Quick Select",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = Orange
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                val quickFilters = listOf(
+                    "Under ₹50" to 0f..50f,
+                    "₹50–₹150" to 50f..150f,
+                    "Above ₹150" to 150f..500f
+                )
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(quickFilters.size) { index ->
+                        val (label, range) = quickFilters[index]
+                        FilterChip(
+                            selected = selectedRange == range,
+                            onClick = { viewModel.updatePriceRange(range) },
+                            label = { Text(label) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = Orange,
+                                selectedLabelColor = Color.White
+                            )
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(24.dp))
+                Text(
+                    text = "Custom Range: ₹${selectedRange.start.toInt()} – ₹${selectedRange.endInclusive.toInt()}",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = TextPrimary,
+                    fontWeight = FontWeight.Bold
+                )
+                RangeSlider(
+                    value = selectedRange,
+                    onValueChange = { viewModel.updatePriceRange(it) },
+                    valueRange = 0f..500f,
+                    colors = SliderDefaults.colors(
+                        activeTrackColor = Orange,
+                        thumbColor = Orange,
+                        inactiveTrackColor = OrangeLight
+                    )
+                )
+                Spacer(modifier = Modifier.height(32.dp))
+                Button(
+                    onClick = onDismiss,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(start = 24.dp, end = 24.dp, bottom = 40.dp)
+                        .height(52.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Orange),
+                    shape = RoundedCornerShape(14.dp)
                 ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            "Budget Filters",
-                            fontSize = 20.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = TextPrimary
-                        )
-                        TextButton(onClick = { viewModel.resetFilters() }) {
-                            Text("Reset", color = Orange, fontWeight = FontWeight.SemiBold)
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(20.dp))
-                    Text(
-                        "Quick Select",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = Orange
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    val quickFilters = listOf(
-                        "Under ₹50" to 0f..50f,
-                        "₹50–₹150" to 50f..150f,
-                        "Above ₹150" to 150f..500f
-                    )
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        items(quickFilters) { (label, range) ->
-                            FilterChip(
-                                selected = priceRange == range,
-                                onClick = { viewModel.updatePriceRange(range) },
-                                label = { Text(label) },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = Orange,
-                                    selectedLabelColor = Color.White
-                                )
-                            )
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(24.dp))
-                    Text(
-                        text = "Custom Range: ₹${priceRange.start.toInt()} – ₹${priceRange.endInclusive.toInt()}",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = TextPrimary,
-                        fontWeight = FontWeight.Bold
-                    )
-                    RangeSlider(
-                        value = priceRange,
-                        onValueChange = { viewModel.updatePriceRange(it) },
-                        valueRange = 0f..500f,
-                        colors = SliderDefaults.colors(
-                            activeTrackColor = Orange,
-                            thumbColor = Orange,
-                            inactiveTrackColor = OrangeLight
-                        )
-                    )
-                    Spacer(modifier = Modifier.height(32.dp))
-                    Button(
-                        onClick = { showFilterSheet = false },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(52.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = Orange),
-                        shape = RoundedCornerShape(14.dp)
-                    ) {
-                        Text("Show Results", fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                    }
+                    Text("Show Results", fontWeight = FontWeight.Bold, fontSize = 15.sp)
                 }
             }
-        }
-
-        // ── SHOP CONFLICT DIALOG ─────────────────────────────────────────────
-        if (showDialog) {
-            AlertDialog(
-                onDismissRequest = { cartViewModel.dismissShopConflict() },
-                title = { Text("Order from one shop at a time") },
-                text = { Text("Your cart already has items from another shop. Clear cart and add this item?") },
-                confirmButton = {
-                    Button(
-                        onClick = { cartViewModel.confirmClearCartAndAdd() },
-                        colors = ButtonDefaults.buttonColors(containerColor = Orange)
-                    ) { Text("Clear & Continue") }
-                },
-                dismissButton = {
-                    TextButton(onClick = { cartViewModel.dismissShopConflict() }) {
-                        Text("Cancel", color = Orange)
-                    }
-                }
-            )
-        }
-
-        // ── EXIT DIALOG ──────────────────────────────────────────────────────
-        if (showExitDialog) {
-            AlertDialog(
-                onDismissRequest = { showExitDialog = false },
-                title = { Text("Items in cart") },
-                text = { Text("You have selected items. Do you want to continue to cart or cancel this order?") },
-                confirmButton = {
-                    Button(
-                        onClick = { showExitDialog = false; onNavigateToCart() },
-                        colors = ButtonDefaults.buttonColors(containerColor = Orange)
-                    ) { Text("Go to Cart") }
-                },
-                dismissButton = {
-                    TextButton(
-                        onClick = {
-                            cartViewModel.clearCart()
-                            showExitDialog = false
-                        }
-                    ) { Text("Cancel Order", color = Orange) }
-                }
-            )
         }
     }
 }
 
-// ---------------------------------------------------------------------------
-// Active Order Banner
-// ---------------------------------------------------------------------------
+@Composable
+private fun ShopConflictDialog(
+    isVisible: Boolean,
+    cartViewModel: CartViewModel
+) {
+    if (isVisible) {
+        AlertDialog(
+            onDismissRequest = { cartViewModel.dismissShopConflict() },
+            title = { Text("Order from one shop at a time") },
+            text = { Text("Your cart already has items from another shop. Clear cart and add this item?") },
+            confirmButton = {
+                Button(
+                    onClick = { cartViewModel.confirmClearCartAndAdd() },
+                    colors = ButtonDefaults.buttonColors(containerColor = Orange)
+                ) {
+                    Text("Clear & Continue")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { cartViewModel.dismissShopConflict() }) {
+                    Text("Cancel", color = Orange)
+                }
+            }
+        )
+    }
+}
+
+@Composable
+private fun ExitConfirmationDialog(
+    isVisible: Boolean,
+    cartViewModel: CartViewModel,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit
+) {
+    if (isVisible) {
+        AlertDialog(
+            onDismissRequest = onDismiss,
+            title = { Text("Items in cart") },
+            text = { Text("You have selected items. Do you want to continue to cart or cancel this order?") },
+            confirmButton = {
+                Button(
+                    onClick = onConfirm,
+                    colors = ButtonDefaults.buttonColors(containerColor = Orange)
+                ) {
+                    Text("Go to Cart")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        cartViewModel.clearCart()
+                        onDismiss()
+                    }
+                ) {
+                    Text("Cancel Order", color = Orange)
+                }
+            }
+        )
+    }
+}
+
 @Composable
 private fun ActiveOrderBanner(
     orderId: String,
     status: String,
     shopId: String,
     pickupSlot: String,
-    onClick: () -> Unit
+    onTrackClick: () -> Unit = {},
+    onDismissClick: () -> Unit = {}
 ) {
-    val statusLabel = when (status) {
-        "pending"   -> "⏳ Waiting for shop to accept"
-        "accepted"  -> "👍 Order accepted!"
-        "preparing" -> "👨‍🍳 Your food is being prepared"
-        "ready"     -> "✅ Ready for pickup!"
-        else        -> "Tracking order..."
+    val statusLabel = when (status.uppercase()) {
+        "PENDING" -> "⏳ Waiting for shop to accept"
+        "ACCEPTED" -> "👍 Order accepted!"
+        "PREPARING" -> "👨‍🍳 Your food is being prepared"
+        "READY" -> "✅ Ready for pickup!"
+        else -> "Tracking order..."
     }
 
-    val bannerColor = if (status == "ready")
+    val isReady = status.uppercase() == "READY"
+
+    val bannerColor = if (isReady)
         Color(0xFF2E7D32).copy(alpha = 0.12f)
     else
         OrangeLight
 
-    val borderColor = if (status == "ready")
+    val borderColor = if (isReady)
         Color(0xFF2E7D32).copy(alpha = 0.5f)
     else
         Orange.copy(alpha = 0.4f)
 
-    val textColor = if (status == "ready") Color(0xFF2E7D32) else OrangeDark
+    val textColor = if (isReady) Color(0xFF2E7D32) else OrangeDark
 
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { onClick() },
+            .clickable { onTrackClick() },
         shape = RoundedCornerShape(16.dp),
         color = bannerColor,
-        border = androidx.compose.foundation.BorderStroke(1.dp, borderColor),
+        border = BorderStroke(1.dp, borderColor),
         shadowElevation = 4.dp
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Icon(
-                imageVector = Icons.Default.Timer,
-                contentDescription = null,
-                tint = textColor,
-                modifier = Modifier.size(20.dp)
-            )
-            Spacer(Modifier.width(10.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = statusLabel,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 13.sp,
-                    color = textColor
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.weight(1f)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Timer,
+                    contentDescription = null,
+                    tint = textColor,
+                    modifier = Modifier.size(20.dp)
                 )
-                if (pickupSlot.isNotBlank()) {
+                Spacer(Modifier.width(10.dp))
+                Column {
                     Text(
-                        text = "Pickup at $pickupSlot  •  #${orderId.takeLast(6).uppercase()}",
-                        fontSize = 11.sp,
-                        color = textColor.copy(alpha = 0.75f)
+                        text = statusLabel,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.sp,
+                        color = textColor
+                    )
+                    if (pickupSlot.isNotBlank()) {
+                        Text(
+                            text = "Pickup at $pickupSlot  •  #${orderId.takeLast(6).uppercase()}",
+                            fontSize = 11.sp,
+                            color = textColor.copy(alpha = 0.75f)
+                        )
+                    }
+                }
+            }
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Text(
+                    text = "Track →",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = textColor,
+                    modifier = Modifier.clickable { onTrackClick() }
+                )
+
+                IconButton(
+                    onClick = onDismissClick,
+                    modifier = Modifier.size(28.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Dismiss order banner",
+                        tint = textColor,
+                        modifier = Modifier.size(18.dp)
                     )
                 }
             }
-            Text(
-                text = "Track →",
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold,
-                color = textColor
-            )
         }
     }
 }
 
-// ---------------------------------------------------------------------------
-// Shimmer skeleton
-// ---------------------------------------------------------------------------
 @Composable
 private fun ShimmerHomeContent() {
     Column(
@@ -661,9 +844,6 @@ private fun ShimmerHomeContent() {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Empty state
-// ---------------------------------------------------------------------------
 @Composable
 private fun EmptyMenuState(hasFilters: Boolean) {
     Column(
@@ -694,9 +874,6 @@ private fun EmptyMenuState(hasFilters: Boolean) {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Section header
-// ---------------------------------------------------------------------------
 @Composable
 private fun SectionHeader(title: String, modifier: Modifier = Modifier) {
     Text(
@@ -708,9 +885,6 @@ private fun SectionHeader(title: String, modifier: Modifier = Modifier) {
     )
 }
 
-// ---------------------------------------------------------------------------
-// Shop card
-// ---------------------------------------------------------------------------
 @Composable
 fun ShopCard(shop: Shop, onClick: () -> Unit) {
     Card(
@@ -765,9 +939,6 @@ fun ShopCard(shop: Shop, onClick: () -> Unit) {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Category chip
-// ---------------------------------------------------------------------------
 @Composable
 fun CategoryChip(category: String, isSelected: Boolean, onClick: () -> Unit) {
     val bgColor by animateColorAsState(
@@ -796,9 +967,6 @@ fun CategoryChip(category: String, isSelected: Boolean, onClick: () -> Unit) {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Menu item card
-// ---------------------------------------------------------------------------
 @Composable
 fun MenuItemCard(
     menuItem: MenuItem,
@@ -901,8 +1069,10 @@ fun MenuItemCard(
                             modifier = Modifier.size(36.dp)
                         ) {
                             Text(
-                                "−", color = Color.White,
-                                fontWeight = FontWeight.Bold, fontSize = 18.sp
+                                "−",
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 18.sp
                             )
                         }
                         Text(
@@ -918,8 +1088,10 @@ fun MenuItemCard(
                             modifier = Modifier.size(36.dp)
                         ) {
                             Text(
-                                "+", color = Color.White,
-                                fontWeight = FontWeight.Bold, fontSize = 18.sp
+                                "+",
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 18.sp
                             )
                         }
                     }

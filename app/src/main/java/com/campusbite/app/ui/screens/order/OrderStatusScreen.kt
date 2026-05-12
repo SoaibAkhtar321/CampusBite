@@ -67,7 +67,7 @@ private enum class OrderStep(
 private fun statusToStepIndex(status: String?): Int = when (status) {
     "pending"   -> 0
     "accepted"  -> 1
-    "preparing" -> 2   // "Accept & Prepare" in staff panel sets "preparing"
+    "preparing" -> 2
     "ready"     -> 3
     "picked_up" -> 3
     else        -> 0
@@ -79,7 +79,7 @@ private fun statusToStepIndex(status: String?): Int = when (status) {
 @Composable
 fun OrderStatusScreen(
     orderId: String,
-    onNavigateHome: () -> Unit,
+    onNavigateBack: () -> Unit,
     viewModel: OrderViewModel = hiltViewModel()
 ) {
     val order by viewModel.currentOrder.collectAsState()
@@ -102,7 +102,7 @@ fun OrderStatusScreen(
                     )
                 },
                 navigationIcon = {
-                    IconButton(onClick = onNavigateHome) {
+                    IconButton(onClick = onNavigateBack) {
                         Icon(Icons.Rounded.ArrowBack, contentDescription = "Back")
                     }
                 },
@@ -177,14 +177,14 @@ fun OrderStatusScreen(
 
             // ── Back button ───────────────────────────────────────────────────
             Button(
-                onClick  = onNavigateHome,
+                onClick  = onNavigateBack,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(52.dp),
                 shape  = RoundedCornerShape(14.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = Orange)
             ) {
-                Text("Back to Home", fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                Text("Back", fontSize = 15.sp, fontWeight = FontWeight.Bold)
             }
 
             Spacer(Modifier.height(16.dp))
@@ -196,7 +196,6 @@ fun OrderStatusScreen(
 
 @Composable
 private fun ReadyBanner() {
-    // Gentle pulse on the banner
     val infiniteTransition = rememberInfiniteTransition(label = "pulse")
     val scale by infiniteTransition.animateFloat(
         initialValue = 1f,
@@ -253,7 +252,6 @@ private fun StatusTimeline(
                 index == currentStep -> StepState.ACTIVE
                 else                 -> StepState.UPCOMING
             }
-
             TimelineRow(step = step, state = state, isLast = index == steps.lastIndex)
         }
     }
@@ -267,7 +265,6 @@ private fun TimelineRow(
     state: StepState,
     isLast: Boolean
 ) {
-    // Animate dot color
     val dotColor by animateColorAsState(
         targetValue = when (state) {
             StepState.DONE     -> Orange
@@ -284,7 +281,6 @@ private fun TimelineRow(
         StepState.UPCOMING -> TextSecondary
     }
 
-    // Pulse animation for the active dot
     val infiniteTransition = rememberInfiniteTransition(label = "dotPulse")
     val pulseScale by infiniteTransition.animateFloat(
         initialValue = 1f,
@@ -300,12 +296,10 @@ private fun TimelineRow(
         modifier           = Modifier.fillMaxWidth(),
         verticalAlignment  = Alignment.Top
     ) {
-        // Dot + connector column
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier.width(40.dp)
         ) {
-            // Outer ring for active state
             Box(contentAlignment = Alignment.Center) {
                 if (state == StepState.ACTIVE) {
                     Box(
@@ -346,7 +340,6 @@ private fun TimelineRow(
                 }
             }
 
-            // Connector line
             if (!isLast) {
                 val lineColor by animateColorAsState(
                     targetValue = if (state == StepState.DONE) Orange else MaterialTheme.colorScheme.surfaceVariant,
@@ -364,7 +357,6 @@ private fun TimelineRow(
 
         Spacer(Modifier.width(16.dp))
 
-        // Text content
         Column(modifier = Modifier.padding(top = 4.dp, bottom = if (isLast) 0.dp else 16.dp)) {
             Text(
                 text       = step.label,
@@ -414,7 +406,6 @@ private fun OrderSummaryCard(order: com.campusbite.app.data.model.Order) {
                     verticalAlignment     = Alignment.CenterVertically
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        // Quantity badge
                         Surface(
                             shape = RoundedCornerShape(6.dp),
                             color = OrangeLight
@@ -442,7 +433,6 @@ private fun OrderSummaryCard(order: com.campusbite.app.data.model.Order) {
                         color      = Orange
                     )
                 }
-                // Cooking note (if any)
                 if (item.cookingNote.isNotBlank()) {
                     Text(
                         text     = "📝 ${item.cookingNote}",

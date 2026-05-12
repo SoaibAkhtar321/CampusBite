@@ -19,12 +19,12 @@ import com.campusbite.app.ui.screens.home.HomeScreen
 import com.campusbite.app.ui.screens.order.CartScreen
 import com.campusbite.app.ui.screens.order.OrderHistoryScreen
 import com.campusbite.app.ui.screens.order.OrderStatusScreen
+import com.campusbite.app.ui.screens.profile.ShopkeeperProfileScreen
+import com.campusbite.app.ui.screens.profile.StudentProfileScreen
+import com.campusbite.app.ui.screens.shop.ShopDetailScreen
 import com.campusbite.app.ui.screens.splash.SplashScreen
 import com.campusbite.app.ui.viewmodel.AuthViewModel
 import com.campusbite.app.ui.viewmodel.CartViewModel
-import com.campusbite.app.ui.screens.shop.ShopDetailScreen
-import com.campusbite.app.ui.screens.profile.ProfileScreen
-import com.campusbite.app.ui.screens.profile.ShopkeeperProfileScreen
 
 @Composable
 fun NavGraph(navController: NavHostController) {
@@ -53,37 +53,6 @@ fun NavGraph(navController: NavHostController) {
                     }
                 }
             )
-        }
-
-        composable("profile") {
-            val userRole by authViewModel.userRole.collectAsState()
-
-            if (userRole == "shopkeeper") {
-                ShopkeeperProfileScreen(
-                    onNavigateToEditShop = {
-                        navController.navigate("edit_shop")
-                    },
-                    onLogout = {
-                        authViewModel.logout()
-                        navController.navigate(Routes.LOGIN) { popUpTo(0) }
-                    }
-                )
-            } else {
-                ProfileScreen(
-                    onNavigateToOrderHistory = {
-                        navController.navigate(Routes.ORDER_HISTORY)
-                    },
-                    // ← NEW: tap active/past order → OrderStatusScreen
-                    onNavigateToOrderStatus = { orderId ->
-                        navController.navigate(Routes.orderStatus(orderId))
-                    },
-                    onLogout = {
-                        authViewModel.logout()
-                        navController.navigate(Routes.LOGIN) { popUpTo(0) }
-                    },
-                    onBack = { navController.popBackStack() }
-                )
-            }
         }
 
         composable(Routes.LOGIN) {
@@ -128,7 +97,6 @@ fun NavGraph(navController: NavHostController) {
                 onNavigateToProfile = {
                     navController.navigate("profile")
                 },
-                // ← NEW: active order banner tap → OrderStatusScreen
                 onNavigateToOrderStatus = { orderId ->
                     navController.navigate(Routes.orderStatus(orderId))
                 },
@@ -138,17 +106,24 @@ fun NavGraph(navController: NavHostController) {
 
         composable(Routes.SHOP_DETAIL) { backStackEntry ->
             val shopId = backStackEntry.arguments?.getString("shopId") ?: ""
+
             ShopDetailScreen(
                 shopId = shopId,
-                onNavigateBack = { navController.popBackStack() },
-                onNavigateToCart = { navController.navigate(Routes.CART) },
+                onNavigateBack = {
+                    navController.popBackStack()
+                },
+                onNavigateToCart = {
+                    navController.navigate(Routes.CART)
+                },
                 cartViewModel = cartViewModel
             )
         }
 
         composable(Routes.CART) {
             CartScreen(
-                onNavigateBack = { navController.popBackStack() },
+                onNavigateBack = {
+                    navController.popBackStack()
+                },
                 onOrderPlaced = { orderId ->
                     navController.navigate(Routes.orderStatus(orderId)) {
                         popUpTo(Routes.CART) { inclusive = true }
@@ -160,12 +135,11 @@ fun NavGraph(navController: NavHostController) {
 
         composable(Routes.ORDER_STATUS) { backStackEntry ->
             val orderId = backStackEntry.arguments?.getString("orderId") ?: ""
+
             OrderStatusScreen(
                 orderId = orderId,
-                onNavigateHome = {
-                    navController.navigate(Routes.HOME) {
-                        popUpTo(Routes.HOME) { inclusive = true }
-                    }
+                onNavigateBack = {
+                    navController.popBackStack()
                 }
             )
         }
@@ -174,8 +148,47 @@ fun NavGraph(navController: NavHostController) {
             OrderHistoryScreen()
         }
 
+        composable("profile") {
+            val userRole by authViewModel.userRole.collectAsState()
+
+            if (userRole == "shopkeeper") {
+                ShopkeeperProfileScreen(
+                    onNavigateBack = {
+                        navController.popBackStack()
+                    },
+                    onLogout = {
+                        authViewModel.logout()
+                        navController.navigate(Routes.LOGIN) {
+                            popUpTo(0) { inclusive = true }
+                        }
+                    }
+                )
+            } else {
+                StudentProfileScreen(
+                    onNavigateBack = {
+                        navController.popBackStack()
+                    },
+                    onNavigateToOrderStatus = { orderId: String ->
+                        navController.navigate(Routes.orderStatus(orderId))
+                    },
+                    onNavigateToOrderHistory = {
+                        navController.navigate(Routes.ORDER_HISTORY)
+                    },
+                    onLogout = {
+                        authViewModel.logout()
+                        navController.navigate(Routes.LOGIN) {
+                            popUpTo(0) { inclusive = true }
+                        }
+                    }
+                )
+            }
+        }
+
         composable("edit_shop") {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
                 Text("Edit Shop Info Screen Coming Soon")
             }
         }
