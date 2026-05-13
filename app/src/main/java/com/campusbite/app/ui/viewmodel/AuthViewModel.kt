@@ -25,10 +25,11 @@ class AuthViewModel @Inject constructor(
             val result = authRepository.login(email, password)
             if (result.isSuccess) {
                 val role = authRepository.getUserRole()
-                _authState.value = if (role == "staff") {
-                    AuthState.StaffSuccess
-                } else {
-                    AuthState.Success
+                val isApproved = authRepository.isShopkeeperApproved()   // ✅ NEW
+                _authState.value = when (role) {
+                    "admin" -> AuthState.AdminSuccess
+                    "shopkeeper" -> if (isApproved) AuthState.ShopkeeperSuccess else AuthState.ShopkeeperPending
+                    else -> AuthState.StudentSuccess
                 }
             } else {
                 _authState.value = AuthState.Error(
@@ -38,12 +39,12 @@ class AuthViewModel @Inject constructor(
         }
     }
 
-    fun register(name: String, email: String, password: String) {
+    fun register(name: String, email: String, password: String, role: String) {
         viewModelScope.launch {
             _authState.value = AuthState.Loading
-            val result = authRepository.register(name, email, password)
+            val result = authRepository.register(name, email, password, role) // ✅ updated
             _authState.value = if (result.isSuccess) {
-                AuthState.Success
+                if (role == "shopkeeper") AuthState.ShopkeeperPending else AuthState.StudentSuccess
             } else {
                 AuthState.Error(result.exceptionOrNull()?.message ?: "Registration failed")
             }
@@ -55,16 +56,13 @@ class AuthViewModel @Inject constructor(
         _authState.value = AuthState.Idle
     }
 
-
-
-
     fun resetState() {
         _authState.value = AuthState.Idle
     }
 
-    suspend fun getUserRole(): String {
-        return authRepository.getUserRole()
-    }
+    suspend fun getUserRole(): String = authRepository.getUserRole()
+    suspend fun isShopkeeperApproved(): Boolean = authRepository.isShopkeeperApproved()
+
     private val _userRole = MutableStateFlow("student")
     val userRole: StateFlow<String> = _userRole
 
@@ -73,13 +71,14 @@ class AuthViewModel @Inject constructor(
             _userRole.value = authRepository.getUserRole()
         }
     }
-
 }
 
 sealed class AuthState {
     object Idle : AuthState()
     object Loading : AuthState()
-    object Success : AuthState()
-    object StaffSuccess : AuthState()
+    object StudentSuccess : AuthState()
+    object ShopkeeperSuccess : AuthState()
+    object ShopkeeperPending : AuthState()   // ✅ NEW
+    object AdminSuccess : AuthState()
     data class Error(val message: String) : AuthState()
 }

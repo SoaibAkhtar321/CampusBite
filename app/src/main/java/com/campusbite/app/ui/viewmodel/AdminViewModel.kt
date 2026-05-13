@@ -1,221 +1,115 @@
 package com.campusbite.app.ui.viewmodel
 
-import android.app.NotificationChannel
-import android.app.NotificationManager
-import android.content.Context
-import android.content.pm.PackageManager
-import android.os.Build
-import androidx.core.app.NotificationCompat
-import androidx.core.app.NotificationManagerCompat
-import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.campusbite.app.R
-import com.campusbite.app.data.model.Order
-import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import dagger.hilt.android.lifecycle.HiltViewModel
-import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
-import org.json.JSONObject
 import javax.inject.Inject
+
+data class AdminShop(
+    val docId: String = "",
+    val shopId: String = "",
+    val name: String = "",
+    val ownerUid: String = "",
+    val isOpen: Boolean = false,
+    val isApproved: Boolean = false
+)
+
+data class AdminUser(
+    val docId: String = "",
+    val uid: String = "",
+    val name: String = "",
+    val email: String = "",
+    val role: String = "student",
+    val isBlocked: Boolean = false,
+    val shopId: String = ""
+)
 
 @HiltViewModel
 class AdminViewModel @Inject constructor(
-    private val firestore: FirebaseFirestore,
-    private val auth: FirebaseAuth,
-    @ApplicationContext private val appContext: Context
+    private val firestore: FirebaseFirestore
 ) : ViewModel() {
 
-    private val _orders = MutableStateFlow<List<Order>>(emptyList())
-    val orders: StateFlow<List<Order>> = _orders
+    private val _shops = MutableStateFlow<List<AdminShop>>(emptyList())
+    val shops: StateFlow<List<AdminShop>> = _shops
 
-    private val _isLoading = MutableStateFlow(false)
+    private val _users = MutableStateFlow<List<AdminUser>>(emptyList())
+    val users: StateFlow<List<AdminUser>> = _users
+
+    private val _isLoading = MutableStateFlow(true)
     val isLoading: StateFlow<Boolean> = _isLoading
 
-    private val _shopOpen = MutableStateFlow(true)
-    val shopOpen: StateFlow<Boolean> = _shopOpen
-
-    private val _closedSlots = MutableStateFlow<List<String>>(emptyList())
-    val closedSlots: StateFlow<List<String>> = _closedSlots
-
-    private var shopId: String = ""
-    private var shopDocId: String = ""
-
-    private val knownOrderIds = mutableSetOf<String>()
-    private var hasLoadedInitialOrders = false
-
-    init { loadShopIdAndOrders() }
-
-    private fun loadShopIdAndOrders() {
-        viewModelScope.launch {
-            _isLoading.value = true
-            try {
-                val uid = auth.currentUser?.uid ?: return@launch
-                val userDoc = firestore.collection("users").document(uid).get().await()
-                shopId = userDoc.getString("shopId") ?: ""
-                if (shopId.isNotEmpty()) {
-                    loadShopControls()
-                    listenToOrders()
-                }
-            } catch (e: Exception) {
-                _isLoading.value = false
-            }
-        }
+    init {
+        listenToShops()
+        listenToUsers()
     }
 
-    private fun loadShopControls() {
+    private fun listenToShops() {
         firestore.collection("shops")
-            .whereEqualTo("shopId", shopId)
             .addSnapshotListener { snapshot, _ ->
-                val doc = snapshot?.documents?.firstOrNull()
-                if (doc != null) {
-                    shopDocId = doc.id
-                    _shopOpen.value = doc.getBoolean("isOpen") ?: true
-                    _closedSlots.value = doc.get("closedSlots") as? List<String> ?: emptyList()
-                }
-            }
-    }
-
-    private fun listenToOrders() {
-        firestore.collection("orders")
-            .whereEqualTo("shopId", shopId)
-            .whereNotEqualTo("status", "picked_up")
-            .addSnapshotListener { snapshot, _ ->
-                // per-document try-catch: malformed old docs are skipped, not crashed
-                val orderList = snapshot?.documents?.mapNotNull { doc ->
-                    try { doc.toObject(Order::class.java) } catch (e: Exception) { null }
+                val list = snapshot?.documents?.map { doc ->
+                    AdminShop(
+                        docId = doc.id,
+                        shopId = doc.getString("shopId") ?: "",
+                        name = doc.getString("name") ?: "",
+                        ownerUid = doc.getString("ownerUid") ?: "",
+                        isOpen = doc.getBoolean("isOpen") ?: false,
+                        isApproved = doc.getBoolean("isApproved") ?: false
+                    )
                 } ?: emptyList()
-
-                val sortedOrders = orderList.sortedBy { it.createdAt }
-
-                if (!hasLoadedInitialOrders) {
-                    knownOrderIds.clear()
-                    knownOrderIds.addAll(sortedOrders.map { it.orderId })
-                    hasLoadedInitialOrders = true
-                } else {
-                    val newPending = sortedOrders.filter {
-                        it.status == "pending" && it.orderId !in knownOrderIds
-                    }
-                    newPending.forEach { showNewOrderNotification(it) }
-                    knownOrderIds.clear()
-                    knownOrderIds.addAll(sortedOrders.map { it.orderId })
-                }
-
-                _orders.value = sortedOrders
+                _shops.value = list
                 _isLoading.value = false
             }
     }
 
-    fun toggleShopOpen(isOpen: Boolean) {
-        if (shopDocId.isEmpty()) return
-        viewModelScope.launch {
-            try {
-                firestore.collection("shops").document(shopDocId)
-                    .update("isOpen", isOpen).await()
-            } catch (e: Exception) { e.printStackTrace() }
-        }
-    }
-
-    fun toggleSlot(slot: String) {
-        if (shopDocId.isEmpty()) return
-        viewModelScope.launch {
-            try {
-                val docRef = firestore.collection("shops").document(shopDocId)
-                if (_closedSlots.value.contains(slot))
-                    docRef.update("closedSlots", FieldValue.arrayRemove(slot)).await()
-                else
-                    docRef.update("closedSlots", FieldValue.arrayUnion(slot)).await()
-            } catch (e: Exception) { e.printStackTrace() }
-        }
-    }
-
-    fun updateOrderStatus(orderId: String, newStatus: String) {
-        viewModelScope.launch {
-            try {
-                firestore.collection("orders").document(orderId)
-                    .update("status", newStatus).await()
-                if (newStatus.lowercase() == "ready")
-                    _orders.value.find { it.orderId == orderId }?.let { sendNotificationToStudent(it) }
-            } catch (e: Exception) { e.printStackTrace() }
-        }
-    }
-
-    private fun sendNotificationToStudent(order: Order) {
-        viewModelScope.launch {
-            try {
-                val token = firestore.collection("users").document(order.studentId)
-                    .get().await().getString("fcmToken")
-                if (!token.isNullOrEmpty()) sendNotification(token)
-            } catch (e: Exception) { e.printStackTrace() }
-        }
-    }
-
-    private fun showNewOrderNotification(order: Order) {
-        // Android 13+ requires POST_NOTIFICATIONS permission at runtime.
-        // Check before calling notify() to satisfy lint and avoid SecurityException.
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (ContextCompat.checkSelfPermission(
-                    appContext,
-                    android.Manifest.permission.POST_NOTIFICATIONS
-                ) != PackageManager.PERMISSION_GRANTED
-            ) return  // permission not granted — skip notification silently
-        }
-
-        val channelId = "staff_order_updates"
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            appContext.getSystemService(NotificationManager::class.java)
-                .createNotificationChannel(
-                    NotificationChannel(
-                        channelId,
-                        "Staff Order Updates",
-                        NotificationManager.IMPORTANCE_HIGH
+    private fun listenToUsers() {
+        firestore.collection("users")
+            .addSnapshotListener { snapshot, _ ->
+                val list = snapshot?.documents?.map { doc ->
+                    AdminUser(
+                        docId = doc.id,
+                        uid = doc.getString("uid") ?: "",
+                        name = doc.getString("name") ?: "",
+                        email = doc.getString("email") ?: "",
+                        role = doc.getString("role") ?: "student",
+                        isBlocked = doc.getBoolean("isBlocked") ?: false,
+                        shopId = doc.getString("shopId") ?: ""
                     )
-                )
-        }
+                } ?: emptyList()
+                _users.value = list
+                _isLoading.value = false
+            }
+    }
 
-        val itemSummary = order.items.joinToString { "${it.name} x${it.quantity}" }
-        try {
-            NotificationManagerCompat.from(appContext).notify(
-                order.orderId.hashCode(),
-                NotificationCompat.Builder(appContext, channelId)
-                    .setSmallIcon(R.drawable.ic_launcher_foreground)
-                    .setContentTitle("New Order Received 🔔")
-                    .setContentText(itemSummary.ifEmpty { "You have a new order" })
-                    .setPriority(NotificationCompat.PRIORITY_HIGH)
-                    .setAutoCancel(true)
-                    .build()
-            )
-        } catch (e: SecurityException) {
-            // Fallback catch — handles edge cases where permission is revoked
-            // between the check above and the notify() call
-            e.printStackTrace()
+    fun setShopApproved(shopDocId: String, approved: Boolean) {
+        viewModelScope.launch {
+            firestore.collection("shops").document(shopDocId)
+                .update("isApproved", approved).await()
         }
     }
 
-    private fun sendNotification(token: String) {
-        val json = JSONObject().apply {
-            put("to", token)
-            put("notification", JSONObject().apply {
-                put("title", "Order Ready 🎉")
-                put("body", "Your order is ready for pickup")
-            })
+    fun setShopOpen(shopDocId: String, open: Boolean) {
+        viewModelScope.launch {
+            firestore.collection("shops").document(shopDocId)
+                .update("isOpen", open).await()
         }
-        val request = Request.Builder()
-            .url("https://fcm.googleapis.com/fcm/send")
-            .post(json.toString().toRequestBody("application/json; charset=utf-8".toMediaType()))
-            .addHeader("Authorization", "key=YOUR_SERVER_KEY")
-            .build()
-        Thread {
-            try { OkHttpClient().newCall(request).execute() } catch (e: Exception) { e.printStackTrace() }
-        }.start()
+    }
+
+    fun setUserBlocked(userDocId: String, blocked: Boolean) {
+        viewModelScope.launch {
+            firestore.collection("users").document(userDocId)
+                .update("isBlocked", blocked).await()
+        }
+    }
+
+    fun setUserRole(userDocId: String, role: String) {
+        viewModelScope.launch {
+            firestore.collection("users").document(userDocId)
+                .update("role", role).await()
+        }
     }
 }

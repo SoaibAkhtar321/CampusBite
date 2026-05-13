@@ -23,6 +23,7 @@ import com.campusbite.app.ui.viewmodel.AuthViewModel
 fun RegisterScreen(
     onNavigateToHome: () -> Unit,
     onNavigateToLogin: () -> Unit,
+    onNavigateToPending: () -> Unit, // ✅ NEW
     viewModel: AuthViewModel = hiltViewModel()
 ) {
     var name by remember { mutableStateOf("") }
@@ -32,13 +33,15 @@ fun RegisterScreen(
     var showPassword by remember { mutableStateOf(false) }
     var showConfirmPassword by remember { mutableStateOf(false) }
 
+    var selectedRole by remember { mutableStateOf("student") } // ✅ NEW
+
     val authState by viewModel.authState.collectAsState()
 
-    // Handle navigation on success
     LaunchedEffect(authState) {
-        if (authState is AuthState.Success) {
-            viewModel.resetState()
-            onNavigateToHome()
+        when (authState) {
+            is AuthState.StudentSuccess -> { viewModel.resetState(); onNavigateToHome() }
+            is AuthState.ShopkeeperPending -> { viewModel.resetState(); onNavigateToPending() }
+            else -> {}
         }
     }
 
@@ -59,22 +62,30 @@ fun RegisterScreen(
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text(
-            text = "Create Account",
-            fontSize = 32.sp,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.primary
-        )
+        Text("Create Account", fontSize = 32.sp, fontWeight = FontWeight.Bold)
 
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(16.dp))
 
-        Text(
-            text = "Register to get started",
-            fontSize = 14.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
+        // Role selector
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            FilterChip(
+                selected = selectedRole == "student",
+                onClick = { selectedRole = "student" },
+                label = { Text("Student") }
+            )
+            FilterChip(
+                selected = selectedRole == "shopkeeper",
+                onClick = { selectedRole = "shopkeeper" },
+                label = { Text("Shopkeeper") }
+            )
+        }
 
-        Spacer(modifier = Modifier.height(40.dp))
+        if (selectedRole == "shopkeeper") {
+            Spacer(Modifier.height(6.dp))
+            Text("Shopkeeper accounts require admin approval.", fontSize = 12.sp)
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
 
         OutlinedTextField(
             value = name,
@@ -111,11 +122,7 @@ fun RegisterScreen(
             colors = textFieldColors,
             trailingIcon = {
                 IconButton(onClick = { showPassword = !showPassword }) {
-                    Text(
-                        text = if (showPassword) "Hide" else "Show",
-                        fontSize = 12.sp,
-                        color = Orange
-                    )
+                    Text(if (showPassword) "Hide" else "Show", fontSize = 12.sp, color = Orange)
                 }
             }
         )
@@ -134,18 +141,13 @@ fun RegisterScreen(
             colors = textFieldColors,
             trailingIcon = {
                 IconButton(onClick = { showConfirmPassword = !showConfirmPassword }) {
-                    Text(
-                        text = if (showConfirmPassword) "Hide" else "Show",
-                        fontSize = 12.sp,
-                        color = Orange
-                    )
+                    Text(if (showConfirmPassword) "Hide" else "Show", fontSize = 12.sp, color = Orange)
                 }
             }
         )
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // Show error message
         if (authState is AuthState.Error) {
             Text(
                 text = (authState as AuthState.Error).message,
@@ -155,20 +157,13 @@ fun RegisterScreen(
             Spacer(modifier = Modifier.height(8.dp))
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
-
         Button(
-            onClick = {
-                viewModel.register(name, email, password)
-            },
+            onClick = { viewModel.register(name, email, password, selectedRole) },
             modifier = Modifier.fillMaxWidth(),
             enabled = authState !is AuthState.Loading
         ) {
             if (authState is AuthState.Loading) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(20.dp),
-                    strokeWidth = 2.dp
-                )
+                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
             } else {
                 Text("Register")
             }

@@ -19,30 +19,27 @@ import com.campusbite.app.ui.theme.TextSecondary
 import com.campusbite.app.ui.viewmodel.AuthState
 import com.campusbite.app.ui.viewmodel.AuthViewModel
 
-@Composable    
+@Composable
 fun LoginScreen(
-    onNavigateToHome: () -> Unit,
+    onNavigateToStudent: () -> Unit,
+    onNavigateToShopkeeper: () -> Unit,
+    onNavigateToAdmin: () -> Unit,
+    onNavigateToPending: () -> Unit, // ✅ NEW
     onNavigateToRegister: () -> Unit,
-    onNavigateToStaff: () -> Unit = {},
     viewModel: AuthViewModel = hiltViewModel()
 ){
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var showPassword by remember { mutableStateOf(false) }
-    var showConfirmPassword by remember { mutableStateOf(false) }
 
     val authState by viewModel.authState.collectAsState()
 
     LaunchedEffect(authState) {
         when (authState) {
-            is AuthState.Success -> {
-                viewModel.resetState()
-                onNavigateToHome()
-            }
-            is AuthState.StaffSuccess -> {
-                viewModel.resetState()
-                onNavigateToStaff()
-            }
+            is AuthState.StudentSuccess -> { viewModel.resetState(); onNavigateToStudent() }
+            is AuthState.ShopkeeperSuccess -> { viewModel.resetState(); onNavigateToShopkeeper() }
+            is AuthState.ShopkeeperPending -> { viewModel.resetState(); onNavigateToPending() }
+            is AuthState.AdminSuccess -> { viewModel.resetState(); onNavigateToAdmin() }
             else -> {}
         }
     }

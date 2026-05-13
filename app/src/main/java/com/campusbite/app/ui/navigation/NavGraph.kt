@@ -15,6 +15,7 @@ import androidx.navigation.compose.composable
 import com.campusbite.app.ui.screens.admin.AdminDashboardScreen
 import com.campusbite.app.ui.screens.auth.LoginScreen
 import com.campusbite.app.ui.screens.auth.RegisterScreen
+import com.campusbite.app.ui.screens.auth.ShopkeeperPendingScreen
 import com.campusbite.app.ui.screens.home.HomeScreen
 import com.campusbite.app.ui.screens.order.CartScreen
 import com.campusbite.app.ui.screens.order.OrderHistoryScreen
@@ -22,6 +23,7 @@ import com.campusbite.app.ui.screens.order.OrderStatusScreen
 import com.campusbite.app.ui.screens.profile.ShopkeeperProfileScreen
 import com.campusbite.app.ui.screens.profile.StudentProfileScreen
 import com.campusbite.app.ui.screens.shop.ShopDetailScreen
+import com.campusbite.app.ui.screens.shopkeeper.ShopkeeperDashboardScreen
 import com.campusbite.app.ui.screens.splash.SplashScreen
 import com.campusbite.app.ui.viewmodel.AuthViewModel
 import com.campusbite.app.ui.viewmodel.CartViewModel
@@ -35,10 +37,26 @@ fun NavGraph(navController: NavHostController) {
         navController = navController,
         startDestination = Routes.SPLASH
     ) {
+        // ───────────────────────── Splash ─────────────────────────
         composable(Routes.SPLASH) {
             SplashScreen(
-                onNavigateToHome = {
-                    navController.navigate(Routes.HOME) {
+                onNavigateToStudent = {
+                    navController.navigate(Routes.STUDENT_HOME) {
+                        popUpTo(Routes.SPLASH) { inclusive = true }
+                    }
+                },
+                onNavigateToShopkeeper = {
+                    navController.navigate(Routes.SHOPKEEPER_DASHBOARD) {
+                        popUpTo(Routes.SPLASH) { inclusive = true }
+                    }
+                },
+                onNavigateToAdmin = {
+                    navController.navigate(Routes.ADMIN_DASHBOARD) {
+                        popUpTo(Routes.SPLASH) { inclusive = true }
+                    }
+                },
+                onNavigateToPending = {   // ✅ NEW
+                    navController.navigate(Routes.SHOPKEEPER_PENDING) {
                         popUpTo(Routes.SPLASH) { inclusive = true }
                     }
                 },
@@ -46,29 +64,35 @@ fun NavGraph(navController: NavHostController) {
                     navController.navigate(Routes.LOGIN) {
                         popUpTo(Routes.SPLASH) { inclusive = true }
                     }
-                },
-                onNavigateToStaff = {
-                    navController.navigate(Routes.ADMIN_DASHBOARD) {
-                        popUpTo(Routes.SPLASH) { inclusive = true }
-                    }
                 }
             )
         }
 
+        // ───────────────────────── Auth ─────────────────────────
         composable(Routes.LOGIN) {
             LoginScreen(
-                onNavigateToHome = {
-                    navController.navigate(Routes.HOME) {
+                onNavigateToStudent = {
+                    navController.navigate(Routes.STUDENT_HOME) {
+                        popUpTo(Routes.LOGIN) { inclusive = true }
+                    }
+                },
+                onNavigateToShopkeeper = {
+                    navController.navigate(Routes.SHOPKEEPER_DASHBOARD) {
+                        popUpTo(Routes.LOGIN) { inclusive = true }
+                    }
+                },
+                onNavigateToAdmin = {
+                    navController.navigate(Routes.ADMIN_DASHBOARD) {
+                        popUpTo(Routes.LOGIN) { inclusive = true }
+                    }
+                },
+                onNavigateToPending = {   // ✅ NEW
+                    navController.navigate(Routes.SHOPKEEPER_PENDING) {
                         popUpTo(Routes.LOGIN) { inclusive = true }
                     }
                 },
                 onNavigateToRegister = {
                     navController.navigate(Routes.REGISTER)
-                },
-                onNavigateToStaff = {
-                    navController.navigate(Routes.ADMIN_DASHBOARD) {
-                        popUpTo(Routes.LOGIN) { inclusive = true }
-                    }
                 }
             )
         }
@@ -76,7 +100,12 @@ fun NavGraph(navController: NavHostController) {
         composable(Routes.REGISTER) {
             RegisterScreen(
                 onNavigateToHome = {
-                    navController.navigate(Routes.HOME) {
+                    navController.navigate(Routes.STUDENT_HOME) {
+                        popUpTo(Routes.REGISTER) { inclusive = true }
+                    }
+                },
+                onNavigateToPending = {   // ✅ NEW
+                    navController.navigate(Routes.SHOPKEEPER_PENDING) {
                         popUpTo(Routes.REGISTER) { inclusive = true }
                     }
                 },
@@ -86,7 +115,20 @@ fun NavGraph(navController: NavHostController) {
             )
         }
 
-        composable(Routes.HOME) {
+        // ───────────────────────── Shopkeeper Pending ─────────────────────────
+        composable(Routes.SHOPKEEPER_PENDING) {
+            ShopkeeperPendingScreen(
+                onLogout = {
+                    authViewModel.logout()
+                    navController.navigate(Routes.LOGIN) {
+                        popUpTo(0) { inclusive = true }
+                    }
+                }
+            )
+        }
+
+        // ───────────────────────── Student ─────────────────────────
+        composable(Routes.STUDENT_HOME) {
             HomeScreen(
                 onNavigateToShopDetail = { shopId ->
                     navController.navigate(Routes.shopDetail(shopId))
@@ -109,21 +151,15 @@ fun NavGraph(navController: NavHostController) {
 
             ShopDetailScreen(
                 shopId = shopId,
-                onNavigateBack = {
-                    navController.popBackStack()
-                },
-                onNavigateToCart = {
-                    navController.navigate(Routes.CART)
-                },
+                onNavigateBack = { navController.popBackStack() },
+                onNavigateToCart = { navController.navigate(Routes.CART) },
                 cartViewModel = cartViewModel
             )
         }
 
         composable(Routes.CART) {
             CartScreen(
-                onNavigateBack = {
-                    navController.popBackStack()
-                },
+                onNavigateBack = { navController.popBackStack() },
                 onOrderPlaced = { orderId ->
                     navController.navigate(Routes.orderStatus(orderId)) {
                         popUpTo(Routes.CART) { inclusive = true }
@@ -135,12 +171,9 @@ fun NavGraph(navController: NavHostController) {
 
         composable(Routes.ORDER_STATUS) { backStackEntry ->
             val orderId = backStackEntry.arguments?.getString("orderId") ?: ""
-
             OrderStatusScreen(
                 orderId = orderId,
-                onNavigateBack = {
-                    navController.popBackStack()
-                }
+                onNavigateBack = { navController.popBackStack() }
             )
         }
 
@@ -148,14 +181,31 @@ fun NavGraph(navController: NavHostController) {
             OrderHistoryScreen()
         }
 
+        // ───────────────────────── Shopkeeper ─────────────────────────
+        composable(Routes.SHOPKEEPER_DASHBOARD) {
+            ShopkeeperDashboardScreen(
+                onNavigateToProfile = {
+                    navController.navigate("profile")
+                }
+            )
+        }
+
+        // ───────────────────────── Admin ─────────────────────────
+        composable(Routes.ADMIN_DASHBOARD) {
+            AdminDashboardScreen(
+                onNavigateToProfile = {
+                    navController.navigate("profile")
+                }
+            )
+        }
+
+        // ───────────────────────── Profile ─────────────────────────
         composable("profile") {
             val userRole by authViewModel.userRole.collectAsState()
 
             if (userRole == "shopkeeper") {
                 ShopkeeperProfileScreen(
-                    onNavigateBack = {
-                        navController.popBackStack()
-                    },
+                    onNavigateBack = { navController.popBackStack() },
                     onLogout = {
                         authViewModel.logout()
                         navController.navigate(Routes.LOGIN) {
@@ -165,10 +215,8 @@ fun NavGraph(navController: NavHostController) {
                 )
             } else {
                 StudentProfileScreen(
-                    onNavigateBack = {
-                        navController.popBackStack()
-                    },
-                    onNavigateToOrderStatus = { orderId: String ->
+                    onNavigateBack = { navController.popBackStack() },
+                    onNavigateToOrderStatus = { orderId ->
                         navController.navigate(Routes.orderStatus(orderId))
                     },
                     onNavigateToOrderHistory = {
@@ -191,14 +239,6 @@ fun NavGraph(navController: NavHostController) {
             ) {
                 Text("Edit Shop Info Screen Coming Soon")
             }
-        }
-
-        composable(Routes.ADMIN_DASHBOARD) {
-            AdminDashboardScreen(
-                onNavigateToProfile = {
-                    navController.navigate("profile")
-                }
-            )
         }
     }
 }

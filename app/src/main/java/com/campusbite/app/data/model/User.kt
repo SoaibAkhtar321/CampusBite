@@ -5,6 +5,8 @@ data class User(
     val name: String = "",
     val email: String = "",
     val phoneNumber: String = "",
-    val role: String = "student", // "student" or "staff"
-    val shopId: String = ""       // only relevant if role is staff
+    val role: String = "student", // student | shopkeeper | admin
+    val shopId: String = "",
+    val isApproved: Boolean = true,   // ✅ NEW (shopkeeper approval)
+    val isBlocked: Boolean = false    // ✅ optional future use
 )

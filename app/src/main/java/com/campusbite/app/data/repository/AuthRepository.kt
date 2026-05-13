@@ -23,11 +23,22 @@ class AuthRepository @Inject constructor(
         }
     }
 
-    suspend fun register(name: String, email: String, password: String): Result<Unit> {
+    // ✅ UPDATED: role-based register
+    suspend fun register(name: String, email: String, password: String, role: String): Result<Unit> {
         return try {
             val result = auth.createUserWithEmailAndPassword(email, password).await()
             val uid = result.user?.uid ?: throw Exception("User ID not found")
-            val user = User(uid = uid, name = name, email = email, role = "student")
+
+            val isApproved = role != "shopkeeper" // shopkeeper requires approval
+
+            val user = User(
+                uid = uid,
+                name = name,
+                email = email,
+                role = role,
+                isApproved = isApproved
+            )
+
             firestore.collection("users").document(uid).set(user).await()
             Result.success(Unit)
         } catch (e: Exception) {
@@ -38,6 +49,7 @@ class AuthRepository @Inject constructor(
     fun logout() {
         auth.signOut()
     }
+
     suspend fun getUserRole(): String {
         return try {
             val uid = auth.currentUser?.uid ?: return "student"
@@ -45,6 +57,17 @@ class AuthRepository @Inject constructor(
             snapshot.getString("role") ?: "student"
         } catch (e: Exception) {
             "student"
+        }
+    }
+
+    // ✅ NEW
+    suspend fun isShopkeeperApproved(): Boolean {
+        return try {
+            val uid = auth.currentUser?.uid ?: return false
+            val snapshot = firestore.collection("users").document(uid).get().await()
+            snapshot.getBoolean("isApproved") ?: false
+        } catch (e: Exception) {
+            false
         }
     }
 }

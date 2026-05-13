@@ -1,64 +1,19 @@
 package com.campusbite.app.ui.screens.admin
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
-import com.campusbite.app.data.model.Order
-import com.campusbite.app.ui.theme.Orange
+import com.campusbite.app.ui.viewmodel.AdminUser
 import com.campusbite.app.ui.viewmodel.AdminViewModel
-import java.text.SimpleDateFormat
-import java.time.LocalTime
-import java.time.format.DateTimeFormatter
-import java.util.*
-
-
-// ── Semantic status colours ───────────────────────────────────────────────────
-private val StatusPending   = Color(0xFFE65100)   // deep orange
-private val StatusPreparing = Color(0xFF1565C0)   // blue
-private val StatusReady     = Color(0xFF2E7D32)   // green
-
-private fun statusColor(status: String) = when (status) {
-    "pending"   -> StatusPending
-    "preparing" -> StatusPreparing
-    "ready"     -> StatusReady
-    else        -> Color.Gray
-}
-
-private fun statusLabel(status: String) = when (status) {
-    "pending"   -> "⏳ Pending"
-    "preparing" -> "👨‍🍳 Preparing"
-    "ready"     -> "✅ Ready"
-    else        -> status.replaceFirstChar { it.uppercase() }
-}
-
-// Dark-mode safe orange tint
-private val Orange_10 = Orange.copy(alpha = 0.12f)
+import com.campusbite.app.ui.viewmodel.AdminShop
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -66,435 +21,81 @@ fun AdminDashboardScreen(
     onNavigateToProfile: () -> Unit,
     viewModel: AdminViewModel = hiltViewModel()
 ) {
-    val orders     by viewModel.orders.collectAsState()
-    val isLoading  by viewModel.isLoading.collectAsState()
-    val shopOpen   by viewModel.shopOpen.collectAsState()
-    val closedSlots by viewModel.closedSlots.collectAsState()
+    val shops by viewModel.shops.collectAsState()
+    val users by viewModel.users.collectAsState()
+    val isLoading by viewModel.isLoading.collectAsState()
 
-    // Counts for the summary bar
-    val pendingCount   = orders.count { it.status == "pending" }
-    val preparingCount = orders.count { it.status == "preparing" }
-    val readyCount     = orders.count { it.status == "ready" }
+    var tabIndex by remember { mutableStateOf(0) }
+    val tabs = listOf("Shops", "Users")
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = {
-                    Column {
-                        Text("Staff Panel", fontWeight = FontWeight.ExtraBold, fontSize = 18.sp)
-                        Text(
-                            text = if (shopOpen) "Accepting orders" else "Shop closed",
-                            fontSize = 11.sp,
-                            color = if (shopOpen) StatusReady else MaterialTheme.colorScheme.error
-                        )
-                    }
-                },
+                title = { Text("Admin Panel") },
                 actions = {
-                    // Shop open/close quick toggle in top bar
-                    Switch(
-                        checked = shopOpen,
-                        onCheckedChange = { viewModel.toggleShopOpen(it) },
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = Color.White,
-                            checkedTrackColor = StatusReady,
-                            uncheckedTrackColor = MaterialTheme.colorScheme.error.copy(alpha = 0.5f)
-                        ),
-                        modifier = Modifier.padding(end = 4.dp)
-                    )
                     IconButton(onClick = onNavigateToProfile) {
-                        Icon(Icons.Default.Person, contentDescription = "Profile", tint = Orange)
+                        Icon(Icons.Default.Person, contentDescription = "Profile")
                     }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background
-                )
+                }
             )
         }
     ) { padding ->
+        Column(Modifier.fillMaxSize().padding(padding)) {
 
-        if (isLoading) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(color = Orange)
-            }
-            return@Scaffold
-        }
-
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding),
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-
-            // ── SUMMARY BAR ───────────────────────────────────────────────────
-            item {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    SummaryChip(
-                        label = "Pending",
-                        count = pendingCount,
-                        color = StatusPending,
-                        modifier = Modifier.weight(1f)
-                    )
-                    SummaryChip(
-                        label = "Preparing",
-                        count = preparingCount,
-                        color = StatusPreparing,
-                        modifier = Modifier.weight(1f)
-                    )
-                    SummaryChip(
-                        label = "Ready",
-                        count = readyCount,
-                        color = StatusReady,
-                        modifier = Modifier.weight(1f)
+            TabRow(selectedTabIndex = tabIndex) {
+                tabs.forEachIndexed { index, title ->
+                    Tab(
+                        selected = tabIndex == index,
+                        onClick = { tabIndex = index },
+                        text = { Text(title) }
                     )
                 }
             }
 
-            // ── SLOT CONTROLS ─────────────────────────────────────────────────
-            item {
-                SlotControlCard(
-                    closedSlots = closedSlots,
-                    onToggleSlot = { viewModel.toggleSlot(it) }
-                )
-            }
-
-            // ── ORDERS HEADER ─────────────────────────────────────────────────
-            item {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.padding(top = 4.dp)
-                ) {
-                    Text(
-                        "Active Orders",
-                        fontWeight = FontWeight.ExtraBold,
-                        fontSize = 18.sp
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    if (orders.isNotEmpty()) {
-                        Surface(
-                            shape = CircleShape,
-                            color = Orange_10
-                        ) {
-                            Text(
-                                text = "${orders.size}",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Orange,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
-                            )
-                        }
-                    }
+            if (isLoading) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator()
                 }
+                return@Scaffold
             }
 
-            // ── EMPTY STATE ───────────────────────────────────────────────────
-            if (orders.isEmpty()) {
-                item {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 48.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text("🎉", fontSize = 40.sp)
-                            Spacer(Modifier.height(8.dp))
-                            Text(
-                                "All caught up!",
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Text(
-                                "No active orders right now",
-                                fontSize = 13.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                }
-            }
-
-            // ── ORDER CARDS ───────────────────────────────────────────────────
-            items(orders, key = { it.orderId }) { order ->
-                OrderCard(
-                    order = order,
-                    onUpdateStatus = { newStatus -> viewModel.updateOrderStatus(order.orderId, newStatus) }
-                )
+            when (tabIndex) {
+                0 -> ShopsTab(shops = shops, viewModel = viewModel)
+                1 -> UsersTab(users = users, viewModel = viewModel)
             }
         }
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Order Card — shows items + cooking notes + action button
-// ─────────────────────────────────────────────────────────────────────────────
 @Composable
-private fun OrderCard(order: Order, onUpdateStatus: (String) -> Unit) {
-    val statusCol = statusColor(order.status)
-    val timeStr = remember(order.createdAt) {
-        if (order.createdAt > 0)
-            SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date(order.createdAt))
-        else ""
-    }
-
-    // Check if any item has a cooking note
-    val hasNotes = order.items.any { it.cookingNote.isNotBlank() }
-    var notesExpanded by remember { mutableStateOf(false) }
-
-    Card(
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-        modifier = Modifier.fillMaxWidth()
+private fun ShopsTab(shops: List<AdminShop>, viewModel: AdminViewModel) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        Column {
-            // ── Coloured status strip at top ──────────────────────────────────
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(4.dp)
-                    .background(statusCol)
-            )
+        items(shops, key = { it.docId }) { shop ->
+            Card {
+                Column(Modifier.padding(12.dp)) {
+                    Text(shop.name, style = MaterialTheme.typography.titleMedium)
+                    Text("ShopId: ${shop.shopId}")
+                    Text("OwnerUid: ${shop.ownerUid}")
 
-            Column(modifier = Modifier.padding(14.dp)) {
-
-                // ── Header row ────────────────────────────────────────────────
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column {
-                        Text(
-                            "Order #${order.orderId.takeLast(5).uppercase()}",
-                            fontWeight = FontWeight.ExtraBold,
-                            fontSize = 15.sp
-                        )
-                        if (timeStr.isNotBlank()) {
-                            Text(
-                                text = "Placed at $timeStr",
-                                fontSize = 11.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                    StatusBadge(status = order.status)
-                }
-
-                Spacer(Modifier.height(12.dp))
-
-                // ── Items list ────────────────────────────────────────────────
-                order.items.forEach { item ->
                     Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 2.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.Top
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Row(
-                            modifier = Modifier.weight(1f),
-                            verticalAlignment = Alignment.Top
-                        ) {
-                            // Quantity badge
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(6.dp))
-                                    .background(Orange_10)
-                                    .padding(horizontal = 6.dp, vertical = 2.dp)
-                            ) {
-                                Text(
-                                    "×${item.quantity}",
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Orange
-                                )
-                            }
-                            Spacer(Modifier.width(8.dp))
-                            Column {
-                                Text(
-                                    item.name,
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                // ── COOKING NOTE inline ───────────────────────
-                                if (item.cookingNote.isNotBlank()) {
-                                    Spacer(Modifier.height(2.dp))
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Text("📝", fontSize = 10.sp)
-                                        Spacer(Modifier.width(3.dp))
-                                        Text(
-                                            text = item.cookingNote,
-                                            fontSize = 11.sp,
-                                            color = Orange,
-                                            fontWeight = FontWeight.Medium,
-                                            maxLines = 2,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                        Text(
-                            "₹${(item.price * item.quantity).toInt()}",
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-                }
-
-                HorizontalDivider(
-                    modifier = Modifier.padding(vertical = 10.dp),
-                    thickness = 0.5.dp,
-                    color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
-                )
-
-                // ── Pickup + total row ────────────────────────────────────────
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            Icons.Default.AccessTime,
-                            contentDescription = null,
-                            tint = Orange,
-                            modifier = Modifier.size(14.dp)
-                        )
-                        Spacer(Modifier.width(4.dp))
-                        Text(
-                            "Pickup: ",
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            order.pickupSlot,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Orange
-                        )
-                    }
-                    Text(
-                        "₹${order.totalPrice.toInt()}",
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                }
-
-                Spacer(Modifier.height(12.dp))
-
-                // ── Action button ─────────────────────────────────────────────
-                when (order.status) {
-                    "pending" -> ActionButton(
-                        label = "Accept & Start Preparing",
-                        color = StatusPending,
-                        onClick = { onUpdateStatus("preparing") }
-                    )
-                    "preparing" -> ActionButton(
-                        label = "Mark as Ready for Pickup",
-                        color = StatusPreparing,
-                        onClick = { onUpdateStatus("ready") }
-                    )
-                    "ready" -> ActionButton(
-                        label = "Mark as Picked Up ✓",
-                        color = StatusReady,
-                        onClick = { onUpdateStatus("picked_up") }
-                    )
-                }
-            }
-        }
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Slot Control Card
-// ─────────────────────────────────────────────────────────────────────────────
-@Composable
-private fun SlotControlCard(
-    closedSlots: List<String>,
-    onToggleSlot: (String) -> Unit
-) {
-    val dynamicSlots = remember {
-        val now = LocalTime.now()
-        val minutesToAdd = 15 - (now.minute % 15)
-        val startTime = now.plusMinutes(minutesToAdd.toLong()).withSecond(0).withNano(0)
-        val formatter = DateTimeFormatter.ofPattern("hh:mm a")
-        List(6) { i -> startTime.plusMinutes(i * 15L).format(formatter).uppercase() }
-    }
-
-    Card(
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    Icons.Default.Schedule,
-                    contentDescription = null,
-                    tint = Orange,
-                    modifier = Modifier.size(18.dp)
-                )
-                Spacer(Modifier.width(8.dp))
-                Column {
-                    Text("Slot Controls", fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                    Text(
-                        "Close slots you can't fulfil",
-                        fontSize = 11.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-
-            Spacer(Modifier.height(12.dp))
-
-            // Scrollable row of slot chips
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(dynamicSlots) { slot ->
-                    val isClosed = closedSlots.contains(slot)
-                    val bgColor by animateColorAsState(
-                        targetValue = if (isClosed) MaterialTheme.colorScheme.error.copy(alpha = 0.12f) else Orange_10,
-                        animationSpec = tween(200), label = "slot_bg"
-                    )
-                    val textColor by animateColorAsState(
-                        targetValue = if (isClosed) MaterialTheme.colorScheme.error else Orange,
-                        animationSpec = tween(200), label = "slot_text"
-                    )
-                    val borderColor by animateColorAsState(
-                        targetValue = if (isClosed) MaterialTheme.colorScheme.error.copy(alpha = 0.5f) else Orange.copy(alpha = 0.4f),
-                        animationSpec = tween(200), label = "slot_border"
-                    )
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(bgColor)
-                            .border(1.dp, borderColor, RoundedCornerShape(10.dp))
-                            .clickable { onToggleSlot(slot) }
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text(
-                                slot,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = textColor
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("Approved")
+                            Switch(
+                                checked = shop.isApproved,
+                                onCheckedChange = { viewModel.setShopApproved(shop.docId, it) }
                             )
-                            Text(
-                                if (isClosed) "CLOSED" else "OPEN",
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = textColor.copy(alpha = 0.7f),
-                                letterSpacing = 0.5.sp
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("Open")
+                            Switch(
+                                checked = shop.isOpen,
+                                onCheckedChange = { viewModel.setShopOpen(shop.docId, it) }
                             )
                         }
                     }
@@ -504,65 +105,62 @@ private fun SlotControlCard(
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Reusable composables
-// ─────────────────────────────────────────────────────────────────────────────
-
 @Composable
-private fun SummaryChip(label: String, count: Int, color: Color, modifier: Modifier = Modifier) {
-    Surface(
-        modifier = modifier,
-        shape = RoundedCornerShape(12.dp),
-        color = color.copy(alpha = 0.10f),
-        border = androidx.compose.foundation.BorderStroke(1.dp, color.copy(alpha = 0.3f))
+private fun UsersTab(users: List<AdminUser>, viewModel: AdminViewModel) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        Column(
-            modifier = Modifier.padding(vertical = 10.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Text(
-                "$count",
-                fontSize = 22.sp,
-                fontWeight = FontWeight.ExtraBold,
-                color = color
-            )
-            Text(
-                label,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = color.copy(alpha = 0.8f)
-            )
+        items(users, key = { it.docId }) { user ->
+            Card {
+                Column(Modifier.padding(12.dp)) {
+                    Text(user.name, style = MaterialTheme.typography.titleMedium)
+                    Text(user.email)
+                    Text("Role: ${user.role}")
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        RoleDropdown(
+                            currentRole = user.role,
+                            onRoleChange = { viewModel.setUserRole(user.docId, it) }
+                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("Blocked")
+                            Switch(
+                                checked = user.isBlocked,
+                                onCheckedChange = { viewModel.setUserBlocked(user.docId, it) }
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 }
 
 @Composable
-private fun StatusBadge(status: String) {
-    val color = statusColor(status)
-    Surface(
-        shape = RoundedCornerShape(6.dp),
-        color = color.copy(alpha = 0.12f),
-        border = androidx.compose.foundation.BorderStroke(1.dp, color.copy(alpha = 0.3f))
-    ) {
-        Text(
-            text = statusLabel(status),
-            fontSize = 11.sp,
-            fontWeight = FontWeight.ExtraBold,
-            color = color,
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-        )
-    }
-}
+private fun RoleDropdown(currentRole: String, onRoleChange: (String) -> Unit) {
+    val roles = listOf("student", "shopkeeper", "admin")
+    var expanded by remember { mutableStateOf(false) }
+    var selected by remember { mutableStateOf(currentRole) }
 
-@Composable
-private fun ActionButton(label: String, color: Color, onClick: () -> Unit) {
-    Button(
-        onClick = onClick,
-        modifier = Modifier.fillMaxWidth().height(44.dp),
-        colors = ButtonDefaults.buttonColors(containerColor = color),
-        shape = RoundedCornerShape(12.dp),
-        elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp)
-    ) {
-        Text(label, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+    Box {
+        OutlinedButton(onClick = { expanded = true }) {
+            Text(selected)
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            roles.forEach { role ->
+                DropdownMenuItem(
+                    text = { Text(role) },
+                    onClick = {
+                        selected = role
+                        onRoleChange(role)
+                        expanded = false
+                    }
+                )
+            }
+        }
     }
 }

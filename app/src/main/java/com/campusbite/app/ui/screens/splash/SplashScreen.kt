@@ -1,15 +1,10 @@
 package com.campusbite.app.ui.screens.splash
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.*
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -21,17 +16,24 @@ import kotlinx.coroutines.delay
 
 @Composable
 fun SplashScreen(
-    onNavigateToHome: () -> Unit,
+    onNavigateToStudent: () -> Unit,
+    onNavigateToShopkeeper: () -> Unit,
+    onNavigateToAdmin: () -> Unit,
     onNavigateToLogin: () -> Unit,
-    onNavigateToStaff: () -> Unit,
+    onNavigateToPending: () -> Unit,
     viewModel: AuthViewModel = hiltViewModel()
 ) {
     LaunchedEffect(Unit) {
-        delay(2000)
+        delay(1500)
         if (viewModel.isLoggedIn) {
-            val role = viewModel.getUserRole()
-            if (role == "staff") onNavigateToStaff()
-            else onNavigateToHome()
+            when (viewModel.getUserRole()) {
+                "admin" -> onNavigateToAdmin()
+                "shopkeeper" -> {
+                    val approved = viewModel.isShopkeeperApproved()
+                    if (approved) onNavigateToShopkeeper() else onNavigateToPending()
+                }
+                else -> onNavigateToStudent()
+            }
         } else {
             onNavigateToLogin()
         }
@@ -43,15 +45,12 @@ fun SplashScreen(
             .background(MaterialTheme.colorScheme.primary),
         contentAlignment = Alignment.Center
     ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(
                 text = "CampusBite",
                 fontSize = 40.sp,
                 fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onPrimary,
-                letterSpacing = 2.sp
+                color = MaterialTheme.colorScheme.onPrimary
             )
             Spacer(modifier = Modifier.height(6.dp))
             Text(
@@ -59,8 +58,7 @@ fun SplashScreen(
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Medium,
                 color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.75f),
-                letterSpacing = 1.5.sp,
-                fontStyle = androidx.compose.ui.text.font.FontStyle.Italic
+                letterSpacing = 1.5.sp
             )
         }
     }
