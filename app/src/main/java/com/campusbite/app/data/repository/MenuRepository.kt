@@ -4,14 +4,37 @@ import com.campusbite.app.data.model.MenuItem
 import kotlinx.coroutines.flow.Flow
 
 interface MenuRepository {
-    // Get all menu items for a specific shop (real-time listener)
+
+    /**
+     * Get all menu items for a specific shop in real-time.
+     */
     fun getMenuItemsByShopId(shopId: String): Flow<List<MenuItem>>
 
-    // CRUD operations
+    /**
+     * Add a new menu item.
+     * Returns generated Firestore document ID.
+     */
     suspend fun addMenuItem(menuItem: MenuItem): String
-    suspend fun updateMenuItem(menuItem: MenuItem)
-    suspend fun deleteMenuItem(shopId: String, itemId: String)
 
-    // Toggle item availability
-    suspend fun updateItemAvailability(shopId: String, itemId: String, isAvailable: Boolean)
+    /**
+     * Update an existing menu item.
+     */
+    suspend fun updateMenuItem(menuItem: MenuItem)
+
+    /**
+     * Delete a menu item only if it belongs to the current shop.
+     */
+    suspend fun deleteMenuItem(
+        shopId: String,
+        itemId: String
+    )
+
+    /**
+     * Update availability of a menu item.
+     */
+    suspend fun updateItemAvailability(
+        shopId: String,
+        itemId: String,
+        isAvailable: Boolean
+    )
 }

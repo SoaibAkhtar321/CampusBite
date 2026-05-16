@@ -1,5 +1,6 @@
 package com.campusbite.app.ui.viewmodel
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.campusbite.app.data.model.MenuItem
@@ -9,64 +10,92 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 data class MenuManagementUiState(
-    val isLoading: Boolean = true,
-    val shopId: String = "",
-    val shopName: String = "",
+    val isLoading: Boolean = false,
     val menuItems: List<MenuItem> = emptyList(),
-    val error: String? = null,
-    val operationInProgress: Boolean = false,
-    val operationSuccess: Boolean = false
+    val shopId: String = "",
+    val errorMessage: String? = null,
+    val successMessage: String? = null
 )
 
 @HiltViewModel
 class MenuManagementViewModel @Inject constructor(
-    private val userRepository: UserRepository,
-    private val menuRepository: MenuRepository
+    private val menuRepository: MenuRepository,
+    private val userRepository: UserRepository
 ) : ViewModel() {
 
-    private val _uiState = MutableStateFlow(MenuManagementUiState())
+    private val _uiState = MutableStateFlow(MenuManagementUiState(isLoading = true))
     val uiState: StateFlow<MenuManagementUiState> = _uiState.asStateFlow()
 
     init {
-        initializeShopkeeperMenu()
+        initializeMenuManagement()
     }
 
-    private fun initializeShopkeeperMenu() {
+    private fun initializeMenuManagement() {
         viewModelScope.launch {
             try {
-                // STEP 1: Get current user ID
                 val currentUserId = userRepository.getCurrentUserId()
-                    ?: throw Exception("User not authenticated")
 
-                // STEP 2: Get shopkeeper's shop ID from user profile
+                Log.d("MenuVM", "Current UID: $currentUserId")
+
+                if (currentUserId.isNullOrBlank()) {
+                    _uiState.value = _uiState.value.copy(
+                        isLoading = false,
+                        errorMessage = "User not logged in"
+                    )
+                    return@launch
+                }
+
                 val shopId = userRepository.getShopkeeperShopId(currentUserId)
-                    ?: throw Exception("Shop not found for shopkeeper")
 
-                // STEP 3: Listen to real-time menu updates for THIS SHOP
-                menuRepository.getMenuItemsByShopId(shopId)
-                    .catch { exception ->
-                        _uiState.value = _uiState.value.copy(
-                            error = exception.message ?: "Error loading menu",
-                            isLoading = false
-                        )
-                    }
-                    .collect { menuItems ->
-                        _uiState.value = _uiState.value.copy(
-                            isLoading = false,
-                            shopId = shopId,
-                            menuItems = menuItems,
-                            error = null
-                        )
-                    }
-            } catch (exception: Exception) {
+                Log.d("MenuVM", "Actual shopId from user document: $shopId")
+
+                if (shopId.isNullOrBlank()) {
+                    _uiState.value = _uiState.value.copy(
+                        isLoading = false,
+                        errorMessage = "Shop ID not found for this shopkeeper"
+                    )
+                    return@launch
+                }
+
+                _uiState.value = _uiState.value.copy(
+                    shopId = shopId,
+                    isLoading = false,
+                    errorMessage = null
+                )
+
+                observeMenuItems(shopId)
+
+            } catch (e: Exception) {
+                Log.e("MenuVM", "Error initializing menu management", e)
+
                 _uiState.value = _uiState.value.copy(
                     isLoading = false,
-                    error = exception.message ?: "Unknown error occurred"
+                    errorMessage = e.message ?: "Something went wrong"
+                )
+            }
+        }
+    }
+
+    private fun observeMenuItems(shopId: String) {
+        viewModelScope.launch {
+            try {
+                menuRepository.getMenuItemsByShopId(shopId).collect { items ->
+                    _uiState.value = _uiState.value.copy(
+                        menuItems = items,
+                        isLoading = false,
+                        errorMessage = null
+                    )
+                }
+            } catch (e: Exception) {
+                Log.e("MenuVM", "Error observing menu items", e)
+
+                _uiState.value = _uiState.value.copy(
+                    isLoading = false,
+                    errorMessage = e.message ?: "Failed to load menu items"
                 )
             }
         }
@@ -75,23 +104,36 @@ class MenuManagementViewModel @Inject constructor(
     fun addMenuItem(menuItem: MenuItem) {
         viewModelScope.launch {
             try {
-                _uiState.value = _uiState.value.copy(operationInProgress = true)
+                val correctShopId = _uiState.value.shopId
 
-                // Ensure shopId is set to current shopkeeper's shop
-                val itemWithCorrectShopId = menuItem.copy(
-                    shopId = _uiState.value.shopId
+                if (correctShopId.isBlank()) {
+                    _uiState.value = _uiState.value.copy(
+                        errorMessage = "Cannot add item. Shop ID missing."
+                    )
+                    return@launch
+                }
+
+                val fixedItem = menuItem.copy(
+                    shopId = correctShopId,
+                    isAvailable = menuItem.isAvailable
                 )
 
-                menuRepository.addMenuItem(itemWithCorrectShopId)
+                Log.d("MenuVM", "Adding item: ${fixedItem.name}")
+                Log.d("MenuVM", "Correct shopId used: ${fixedItem.shopId}")
+                Log.d("MenuVM", "Availability used: ${fixedItem.isAvailable}")
+
+                menuRepository.addMenuItem(fixedItem)
 
                 _uiState.value = _uiState.value.copy(
-                    operationInProgress = false,
-                    operationSuccess = true
+                    successMessage = "Menu item added successfully",
+                    errorMessage = null
                 )
-            } catch (exception: Exception) {
+
+            } catch (e: Exception) {
+                Log.e("MenuVM", "Error adding menu item", e)
+
                 _uiState.value = _uiState.value.copy(
-                    operationInProgress = false,
-                    error = exception.message ?: "Failed to add menu item"
+                    errorMessage = e.message ?: "Failed to add menu item"
                 )
             }
         }
@@ -100,23 +142,42 @@ class MenuManagementViewModel @Inject constructor(
     fun updateMenuItem(menuItem: MenuItem) {
         viewModelScope.launch {
             try {
-                _uiState.value = _uiState.value.copy(operationInProgress = true)
+                val correctShopId = _uiState.value.shopId
 
-                // Verify item belongs to current shop
-                if (menuItem.shopId != _uiState.value.shopId) {
-                    throw Exception("Cannot update menu item from another shop")
+                if (correctShopId.isBlank()) {
+                    _uiState.value = _uiState.value.copy(
+                        errorMessage = "Cannot update item. Shop ID missing."
+                    )
+                    return@launch
                 }
 
-                menuRepository.updateMenuItem(menuItem)
+                if (menuItem.itemId.isBlank()) {
+                    _uiState.value = _uiState.value.copy(
+                        errorMessage = "Cannot update item. Item ID missing."
+                    )
+                    return@launch
+                }
+
+                val fixedItem = menuItem.copy(
+                    shopId = correctShopId
+                )
+
+                Log.d("MenuVM", "Updating item: ${fixedItem.name}")
+                Log.d("MenuVM", "Item ID: ${fixedItem.itemId}")
+                Log.d("MenuVM", "Correct shopId used: ${fixedItem.shopId}")
+
+                menuRepository.updateMenuItem(fixedItem)
 
                 _uiState.value = _uiState.value.copy(
-                    operationInProgress = false,
-                    operationSuccess = true
+                    successMessage = "Menu item updated successfully",
+                    errorMessage = null
                 )
-            } catch (exception: Exception) {
+
+            } catch (e: Exception) {
+                Log.e("MenuVM", "Error updating menu item", e)
+
                 _uiState.value = _uiState.value.copy(
-                    operationInProgress = false,
-                    error = exception.message ?: "Failed to update menu item"
+                    errorMessage = e.message ?: "Failed to update menu item"
                 )
             }
         }
@@ -125,44 +186,100 @@ class MenuManagementViewModel @Inject constructor(
     fun deleteMenuItem(itemId: String) {
         viewModelScope.launch {
             try {
-                _uiState.value = _uiState.value.copy(operationInProgress = true)
+                val currentShopId = _uiState.value.shopId
 
-                menuRepository.deleteMenuItem(_uiState.value.shopId, itemId)
+                if (currentShopId.isBlank()) {
+                    _uiState.value = _uiState.value.copy(
+                        errorMessage = "Cannot delete item. Shop ID missing."
+                    )
+                    return@launch
+                }
 
-                _uiState.value = _uiState.value.copy(
-                    operationInProgress = false,
-                    operationSuccess = true
+                if (itemId.isBlank()) {
+                    _uiState.value = _uiState.value.copy(
+                        errorMessage = "Cannot delete item. Item ID missing."
+                    )
+                    return@launch
+                }
+
+                Log.d("MenuVM", "Deleting itemId: $itemId")
+                Log.d("MenuVM", "Current shopId: $currentShopId")
+
+                menuRepository.deleteMenuItem(
+                    shopId = currentShopId,
+                    itemId = itemId
                 )
-            } catch (exception: Exception) {
+
                 _uiState.value = _uiState.value.copy(
-                    operationInProgress = false,
-                    error = exception.message ?: "Failed to delete menu item"
+                    successMessage = "Menu item deleted successfully",
+                    errorMessage = null
+                )
+
+            } catch (e: Exception) {
+                Log.e("MenuVM", "Error deleting menu item", e)
+
+                _uiState.value = _uiState.value.copy(
+                    errorMessage = e.message ?: "Failed to delete menu item"
                 )
             }
         }
     }
 
-    fun toggleItemAvailability(itemId: String, isAvailable: Boolean) {
+    fun updateItemAvailability(
+        itemId: String,
+        isAvailable: Boolean
+    ) {
         viewModelScope.launch {
             try {
+                val currentShopId = _uiState.value.shopId
+
+                if (currentShopId.isBlank()) {
+                    _uiState.value = _uiState.value.copy(
+                        errorMessage = "Cannot update availability. Shop ID missing."
+                    )
+                    return@launch
+                }
+
+                if (itemId.isBlank()) {
+                    _uiState.value = _uiState.value.copy(
+                        errorMessage = "Cannot update availability. Item ID missing."
+                    )
+                    return@launch
+                }
+
+                Log.d("MenuVM", "Updating availability for itemId: $itemId")
+                Log.d("MenuVM", "Current shopId: $currentShopId")
+                Log.d("MenuVM", "New isAvailable: $isAvailable")
+
                 menuRepository.updateItemAvailability(
-                    shopId = _uiState.value.shopId,
+                    shopId = currentShopId,
                     itemId = itemId,
                     isAvailable = isAvailable
                 )
-            } catch (exception: Exception) {
+
                 _uiState.value = _uiState.value.copy(
-                    error = exception.message ?: "Failed to update availability"
+                    successMessage = if (isAvailable) {
+                        "Item marked as available"
+                    } else {
+                        "Item marked as unavailable"
+                    },
+                    errorMessage = null
+                )
+
+            } catch (e: Exception) {
+                Log.e("MenuVM", "Error updating item availability", e)
+
+                _uiState.value = _uiState.value.copy(
+                    errorMessage = e.message ?: "Failed to update availability"
                 )
             }
         }
     }
 
-    fun clearError() {
-        _uiState.value = _uiState.value.copy(error = null)
-    }
-
-    fun clearSuccess() {
-        _uiState.value = _uiState.value.copy(operationSuccess = false)
+    fun clearMessages() {
+        _uiState.value = _uiState.value.copy(
+            errorMessage = null,
+            successMessage = null
+        )
     }
 }

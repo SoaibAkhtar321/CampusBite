@@ -1,20 +1,54 @@
 package com.campusbite.app.ui.screens.shopkeeper
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -25,9 +59,7 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.campusbite.app.data.model.MenuItem
 import com.campusbite.app.ui.theme.Orange
-import com.campusbite.app.ui.theme.OrangeLight
-import com.campusbite.app.ui.viewmodel.ShopkeeperViewModel
-import com.google.firebase.auth.FirebaseAuth
+import com.campusbite.app.ui.viewmodel.MenuManagementViewModel
 
 private val Orange_10 = Orange.copy(alpha = 0.12f)
 
@@ -35,35 +67,54 @@ private val Orange_10 = Orange.copy(alpha = 0.12f)
 @Composable
 fun MenuManagementScreen(
     onNavigateBack: () -> Unit,
-    viewModel: ShopkeeperViewModel = hiltViewModel()
+    viewModel: MenuManagementViewModel = hiltViewModel()
 ) {
-    val menuItems by viewModel.menuItems.collectAsState()
-    val shopId = remember { FirebaseAuth.getInstance().currentUser?.uid ?: "" }
+    val uiState by viewModel.uiState.collectAsState()
+    val snackbarHostState = remember { SnackbarHostState() }
 
     var showAddDialog by remember { mutableStateOf(false) }
     var editingItem by remember { mutableStateOf<MenuItem?>(null) }
 
-    // Load menu items when screen opens
-    LaunchedEffect(shopId) {
-        if (shopId.isNotEmpty()) {
-            viewModel.loadMenuItems(shopId)
+    LaunchedEffect(uiState.errorMessage, uiState.successMessage) {
+        uiState.errorMessage?.let {
+            snackbarHostState.showSnackbar(it)
+            viewModel.clearMessages()
+        }
+
+        uiState.successMessage?.let {
+            snackbarHostState.showSnackbar(it)
+            viewModel.clearMessages()
         }
     }
 
     Scaffold(
+        snackbarHost = {
+            SnackbarHost(hostState = snackbarHostState)
+        },
         topBar = {
             TopAppBar(
                 title = {
-                    Text("Menu Management", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                    Text(
+                        text = "Menu Management",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 18.sp
+                    )
                 },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                        Icon(
+                            imageVector = Icons.Default.ArrowBack,
+                            contentDescription = "Back"
+                        )
                     }
                 },
                 actions = {
                     IconButton(onClick = { showAddDialog = true }) {
-                        Icon(Icons.Default.Add, contentDescription = "Add item", tint = Orange)
+                        Icon(
+                            imageVector = Icons.Default.Add,
+                            contentDescription = "Add item",
+                            tint = Orange
+                        )
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -72,77 +123,74 @@ fun MenuManagementScreen(
             )
         }
     ) { padding ->
-        Column(
+        Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
         ) {
-            if (menuItems.isEmpty()) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("🍽️", fontSize = 56.sp)
-                        Spacer(modifier = Modifier.height(16.dp))
+            when {
+                uiState.isLoading -> {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
                         Text(
-                            "No menu items yet",
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            "Add your first dish to get started",
-                            fontSize = 14.sp,
+                            text = "Loading menu...",
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                        Spacer(modifier = Modifier.height(24.dp))
-                        Button(
-                            onClick = { showAddDialog = true },
-                            colors = ButtonDefaults.buttonColors(containerColor = Orange),
-                            shape = RoundedCornerShape(12.dp)
-                        ) {
-                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Add First Item")
-                        }
                     }
                 }
-            } else {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    items(menuItems, key = { it.itemId }) { item ->
-                        MenuItemCard(
-                            item = item,
-                            onEdit = { editingItem = it },
-                            onDelete = { viewModel.deleteMenuItem(item.itemId) },
-                            onToggleAvailability = { viewModel.toggleMenuItemAvailability(item.itemId, item) }
-                        )
+
+                uiState.menuItems.isEmpty() -> {
+                    EmptyMenuState(
+                        onAddClick = { showAddDialog = true }
+                    )
+                }
+
+                else -> {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        items(
+                            items = uiState.menuItems,
+                            key = { it.itemId }
+                        ) { item ->
+                            MenuItemCard(
+                                item = item,
+                                onEdit = { editingItem = it },
+                                onDelete = {
+                                    viewModel.deleteMenuItem(item.itemId)
+                                },
+                                onToggleAvailability = {
+                                    viewModel.updateItemAvailability(
+                                        itemId = item.itemId,
+                                        isAvailable = !item.isAvailable
+                                    )
+                                }
+                            )
+                        }
                     }
                 }
             }
         }
     }
 
-    // Add/Edit Dialog
     if (showAddDialog || editingItem != null) {
         MenuItemDialog(
             item = editingItem,
-            shopId = shopId,
             onDismiss = {
                 showAddDialog = false
                 editingItem = null
             },
-            onSave = { item ->
+            onSave = { menuItem ->
                 if (editingItem != null) {
-                    viewModel.updateMenuItem(item)
+                    viewModel.updateMenuItem(menuItem)
                 } else {
-                    viewModel.addMenuItem(item)
+                    viewModel.addMenuItem(menuItem)
                 }
+
                 showAddDialog = false
                 editingItem = null
             }
@@ -150,9 +198,61 @@ fun MenuManagementScreen(
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Menu Item Card
-// ─────────────────────────────────────────────────────────────────────────────
+@Composable
+private fun EmptyMenuState(
+    onAddClick: () -> Unit
+) {
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                text = "🍽️",
+                fontSize = 56.sp
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Text(
+                text = "No menu items yet",
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Text(
+                text = "Add your first dish to get started",
+                fontSize = 14.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            Button(
+                onClick = onAddClick,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Orange
+                ),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Add,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp)
+                )
+
+                Spacer(modifier = Modifier.width(8.dp))
+
+                Text(text = "Add First Item")
+            }
+        }
+    }
+}
+
 @Composable
 private fun MenuItemCard(
     item: MenuItem,
@@ -163,8 +263,12 @@ private fun MenuItemCard(
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface
+        ),
+        elevation = CardDefaults.cardElevation(
+            defaultElevation = 1.dp
+        )
     ) {
         Row(
             modifier = Modifier
@@ -173,53 +277,77 @@ private fun MenuItemCard(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(
+                modifier = Modifier.weight(1f)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Text(
-                        item.name,
+                        text = item.name,
                         fontSize = 15.sp,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurface
                     )
+
                     Spacer(modifier = Modifier.width(8.dp))
+
                     Surface(
                         shape = RoundedCornerShape(20.dp),
-                        color = if (item.isAvailable) Color(0xFF4CAF50).copy(alpha = 0.12f) else MaterialTheme.colorScheme.error.copy(alpha = 0.12f)
+                        color = if (item.isAvailable) {
+                            Color(0xFF4CAF50).copy(alpha = 0.12f)
+                        } else {
+                            MaterialTheme.colorScheme.error.copy(alpha = 0.12f)
+                        }
                     ) {
                         Text(
-                            if (item.isAvailable) "Available" else "Unavailable",
+                            text = if (item.isAvailable) "Available" else "Unavailable",
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
-                            color = if (item.isAvailable) Color(0xFF4CAF50) else MaterialTheme.colorScheme.error,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                            color = if (item.isAvailable) {
+                                Color(0xFF4CAF50)
+                            } else {
+                                MaterialTheme.colorScheme.error
+                            },
+                            modifier = Modifier.padding(
+                                horizontal = 8.dp,
+                                vertical = 3.dp
+                            )
                         )
                     }
                 }
+
                 Spacer(modifier = Modifier.height(6.dp))
+
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     Text(
-                        "₹${item.price.toInt()}",
+                        text = "₹${item.price.toInt()}",
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Bold,
                         color = Orange
                     )
+
                     Text(
-                        "⏱ ${item.prepTimeMinutes}min",
+                        text = "⏱ ${item.prepTimeMinutes} min",
                         fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+
                     if (item.category.isNotBlank()) {
                         Text(
-                            item.category,
+                            text = item.category,
                             fontSize = 12.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier
                                 .clip(RoundedCornerShape(6.dp))
                                 .background(Orange_10)
-                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                                .padding(
+                                    horizontal = 6.dp,
+                                    vertical = 2.dp
+                                )
                         )
                     }
                 }
@@ -234,30 +362,36 @@ private fun MenuItemCard(
                     modifier = Modifier.size(36.dp)
                 ) {
                     Icon(
-                        if (item.isAvailable) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                        imageVector = if (item.isAvailable) {
+                            Icons.Default.VisibilityOff
+                        } else {
+                            Icons.Default.Visibility
+                        },
                         contentDescription = "Toggle availability",
                         tint = Orange,
                         modifier = Modifier.size(20.dp)
                     )
                 }
+
                 IconButton(
                     onClick = { onEdit(item) },
                     modifier = Modifier.size(36.dp)
                 ) {
                     Icon(
-                        Icons.Default.Edit,
-                        contentDescription = "Edit",
+                        imageVector = Icons.Default.Edit,
+                        contentDescription = "Edit item",
                         tint = Orange,
                         modifier = Modifier.size(20.dp)
                     )
                 }
+
                 IconButton(
                     onClick = onDelete,
                     modifier = Modifier.size(36.dp)
                 ) {
                     Icon(
-                        Icons.Default.Delete,
-                        contentDescription = "Delete",
+                        imageVector = Icons.Default.Delete,
+                        contentDescription = "Delete item",
                         tint = MaterialTheme.colorScheme.error,
                         modifier = Modifier.size(20.dp)
                     )
@@ -267,26 +401,41 @@ private fun MenuItemCard(
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Add/Edit Dialog
-// ─────────────────────────────────────────────────────────────────────────────
 @Composable
 private fun MenuItemDialog(
     item: MenuItem?,
-    shopId: String,
     onDismiss: () -> Unit,
     onSave: (MenuItem) -> Unit
 ) {
-    var name by remember { mutableStateOf(item?.name ?: "") }
-    var price by remember { mutableStateOf(item?.price?.toString() ?: "") }
-    var prepTime by remember { mutableStateOf(item?.prepTimeMinutes?.toString() ?: "") }
-    var category by remember { mutableStateOf(item?.category ?: "") }
+    var name by remember(item) {
+        mutableStateOf(item?.name ?: "")
+    }
+
+    var price by remember(item) {
+        mutableStateOf(
+            if (item == null || item.price == 0.0) "" else item.price.toString()
+        )
+    }
+
+    var prepTime by remember(item) {
+        mutableStateOf(
+            if (item == null || item.prepTimeMinutes == 0) "" else item.prepTimeMinutes.toString()
+        )
+    }
+
+    var category by remember(item) {
+        mutableStateOf(item?.category ?: "")
+    }
+
+    var isAvailable by remember(item) {
+        mutableStateOf(item?.isAvailable ?: true)
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
             Text(
-                if (item == null) "Add New Item" else "Edit Item",
+                text = if (item == null) "Add New Item" else "Edit Item",
                 fontWeight = FontWeight.Bold
             )
         },
@@ -300,7 +449,9 @@ private fun MenuItemDialog(
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
-                    label = { Text("Dish Name") },
+                    label = {
+                        Text(text = "Dish Name")
+                    },
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(8.dp),
                     singleLine = true
@@ -309,7 +460,9 @@ private fun MenuItemDialog(
                 OutlinedTextField(
                     value = price,
                     onValueChange = { price = it },
-                    label = { Text("Price (₹)") },
+                    label = {
+                        Text(text = "Price (₹)")
+                    },
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(8.dp),
                     singleLine = true
@@ -318,7 +471,9 @@ private fun MenuItemDialog(
                 OutlinedTextField(
                     value = prepTime,
                     onValueChange = { prepTime = it },
-                    label = { Text("Prep Time (minutes)") },
+                    label = {
+                        Text(text = "Prep Time (minutes)")
+                    },
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(8.dp),
                     singleLine = true
@@ -327,39 +482,91 @@ private fun MenuItemDialog(
                 OutlinedTextField(
                     value = category,
                     onValueChange = { category = it },
-                    label = { Text("Category (e.g., Breakfast, Main)") },
+                    label = {
+                        Text(text = "Category")
+                    },
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(8.dp),
                     singleLine = true
                 )
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column {
+                        Text(
+                            text = "Availability",
+                            fontWeight = FontWeight.SemiBold
+                        )
+
+                        Text(
+                            text = if (isAvailable) {
+                                "Students can order this item"
+                            } else {
+                                "This item is hidden/unavailable"
+                            },
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    Switch(
+                        checked = isAvailable,
+                        onCheckedChange = {
+                            isAvailable = it
+                        }
+                    )
+                }
             }
         },
         confirmButton = {
             Button(
                 onClick = {
-                    if (name.isNotBlank() && price.isNotBlank() && prepTime.isNotBlank()) {
+                    val finalPrice = price.toDoubleOrNull()
+                    val finalPrepTime = prepTime.toIntOrNull()
+
+                    if (
+                        name.isNotBlank() &&
+                        finalPrice != null &&
+                        finalPrepTime != null
+                    ) {
                         val menuItem = MenuItem(
                             itemId = item?.itemId ?: "",
-                            shopId = shopId,
+                            shopId = item?.shopId ?: "",
                             name = name.trim(),
-                            price = price.toDoubleOrNull() ?: 0.0,
-                            prepTimeMinutes = prepTime.toIntOrNull() ?: 0,
+                            price = finalPrice,
+                            prepTimeMinutes = finalPrepTime,
                             category = category.trim(),
-                            isAvailable = item?.isAvailable ?: true,
+                            isAvailable = isAvailable,
                             imageUrl = item?.imageUrl ?: ""
                         )
+
                         onSave(menuItem)
                     }
                 },
-                colors = ButtonDefaults.buttonColors(containerColor = Orange),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Orange
+                ),
                 shape = RoundedCornerShape(8.dp)
             ) {
-                Text(if (item == null) "Add" else "Update", fontWeight = FontWeight.Bold)
+                Text(
+                    text = if (item == null) "Add" else "Update",
+                    fontWeight = FontWeight.Bold
+                )
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel", color = Orange)
+            TextButton(
+                onClick = onDismiss
+            ) {
+                Text(
+                    text = "Cancel",
+                    color = Orange
+                )
             }
         }
     )
