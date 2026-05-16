@@ -23,7 +23,7 @@ class AuthRepository @Inject constructor(
         }
     }
 
-    // ✅ UPDATED: role-based register
+    // UPDATED: role-based register
     suspend fun register(name: String, email: String, password: String, role: String): Result<Unit> {
         return try {
             val result = auth.createUserWithEmailAndPassword(email, password).await()
@@ -60,12 +60,20 @@ class AuthRepository @Inject constructor(
         }
     }
 
-    // ✅ NEW
+    //  NEW
     suspend fun isShopkeeperApproved(): Boolean {
         return try {
             val uid = auth.currentUser?.uid ?: return false
-            val snapshot = firestore.collection("users").document(uid).get().await()
-            snapshot.getBoolean("isApproved") ?: false
+
+            // 1) Check users.isApproved first
+            val userSnap = firestore.collection("users").document(uid).get().await()
+            val userApproved = userSnap.getBoolean("isApproved") ?: false
+            if (userApproved) return true
+
+            // 2) Fallback: check shop by shopId
+            val shopId = userSnap.getString("shopId") ?: return false
+            val shopSnap = firestore.collection("shops").document(shopId).get().await()
+            shopSnap.getBoolean("isApproved") ?: false
         } catch (e: Exception) {
             false
         }

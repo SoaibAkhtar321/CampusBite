@@ -3,10 +3,8 @@ package com.campusbite.app.ui.screens.shop
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
@@ -59,10 +57,54 @@ fun ShopDetailScreen(
     val cartItems by cartViewModel.cartItems.collectAsState()
     val showDialog by cartViewModel.showShopConflict.collectAsState()
 
-    val shop = shops.find { it.shopId == shopId }
-    val shopMenuItems = menuItems.filter { it.shopId == shopId }
+    val normalizedId = shopId.trim().lowercase()
+
+    // ✅ Find shop once and memoize it
+    val shop = remember(shops, shopId) {
+        shops.find { it.shopId.trim().lowercase() == normalizedId }
+            ?: shops.find { it.name.trim().lowercase() == normalizedId }
+    }
+
+    val shopMenuItems = remember(menuItems, shopId) {
+        menuItems.filter { it.shopId.trim().lowercase() == normalizedId }
+    }
+
     var showExitDialog by remember { mutableStateOf(false) }
 
+    // ✅ Log only once, not on every recomposition
+    LaunchedEffect(shop, shops.size) {
+        android.util.Log.d("ShopDetail", "Shop found: ${shop?.name ?: "NULL"} | Total shops: ${shops.size}")
+    }
+
+    // ✅ Show loading state
+    if (isLoading || shops.isEmpty()) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                CircularProgressIndicator()
+                Spacer(modifier = Modifier.height(16.dp))
+                Text("Loading shop details...", fontSize = 14.sp)
+            }
+        }
+        return
+    }
+
+    // ✅ Show error state
+    if (shop == null) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("Shop detail not found", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(16.dp))
+                Text("Looking for: '$normalizedId'", fontSize = 12.sp, color = Color.Gray)
+                Spacer(modifier = Modifier.height(16.dp))
+                Button(onClick = onNavigateBack) {
+                    Text("Go Back")
+                }
+            }
+        }
+        return
+    }
+
+    // ✅ Everything below here is safe - shop is NOT null
     BackHandler(enabled = cartItems.isNotEmpty()) { showExitDialog = true }
 
     Scaffold(
@@ -70,7 +112,7 @@ fun ShopDetailScreen(
             TopAppBar(
                 title = {
                     Text(
-                        shop?.name ?: "Shop Detail",
+                        shop.name,  // ✅ Safe to use now
                         fontWeight = FontWeight.Bold,
                         fontSize = 20.sp
                     )
@@ -91,6 +133,7 @@ fun ShopDetailScreen(
             )
         }
     ) { padding ->
+        // ... rest of your code (everything that was after Scaffold) stays the same
 
         Box(
             modifier = Modifier
@@ -110,7 +153,6 @@ fun ShopDetailScreen(
                     ),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    // ── SHOP HEADER ───────────────────────────────────────────
                     item {
                         ShopHeaderCard(
                             name = shop?.name ?: shopId,
@@ -118,9 +160,7 @@ fun ShopDetailScreen(
                             isOpen = shop?.isOpen == true
                         )
                         Spacer(modifier = Modifier.height(20.dp))
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
                             Box(
                                 modifier = Modifier
                                     .width(3.dp)
@@ -136,7 +176,6 @@ fun ShopDetailScreen(
                                 color = TextPrimary
                             )
                             Spacer(modifier = Modifier.width(8.dp))
-                            // Item count badge
                             if (shopMenuItems.isNotEmpty()) {
                                 Box(
                                     modifier = Modifier
@@ -156,15 +195,13 @@ fun ShopDetailScreen(
                         Spacer(modifier = Modifier.height(10.dp))
                     }
 
-                    // ── MENU ITEMS or EMPTY STATE ─────────────────────────────
                     if (shopMenuItems.isEmpty()) {
                         item { ShopEmptyState() }
                     } else {
                         items(shopMenuItems) { item ->
                             ShopMenuItemCard(
                                 menuItem = item,
-                                quantity = cartItems
-                                    .find { it.itemId == item.itemId }?.quantity ?: 0,
+                                quantity = cartItems.find { it.itemId == item.itemId }?.quantity ?: 0,
                                 isShopOpen = shop?.isOpen == true,
                                 onAddClick = { cartViewModel.addItem(item) },
                                 onRemoveClick = { cartViewModel.removeItem(item.itemId) }
@@ -174,7 +211,6 @@ fun ShopDetailScreen(
                 }
             }
 
-            // ── FLOATING CART BUTTON ──────────────────────────────────────────
             val itemCount = cartViewModel.itemCount
             AnimatedVisibility(
                 visible = itemCount > 0,
@@ -194,11 +230,7 @@ fun ShopDetailScreen(
                     shape = RoundedCornerShape(16.dp),
                     elevation = ButtonDefaults.buttonElevation(defaultElevation = 10.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.ShoppingCart,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp)
-                    )
+                    Icon(Icons.Default.ShoppingCart, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
                         text = "$itemCount item${if (itemCount > 1) "s" else ""} in cart",
@@ -214,7 +246,6 @@ fun ShopDetailScreen(
                 }
             }
 
-            // ── EXIT DIALOG ───────────────────────────────────────────────────
             if (showExitDialog) {
                 AlertDialog(
                     onDismissRequest = { showExitDialog = false },
@@ -238,7 +269,6 @@ fun ShopDetailScreen(
                 )
             }
 
-            // ── SHOP CONFLICT DIALOG ──────────────────────────────────────────
             if (showDialog) {
                 AlertDialog(
                     onDismissRequest = { cartViewModel.dismissShopConflict() },
@@ -276,7 +306,6 @@ private fun ShopHeaderCard(name: String, description: String, isOpen: Boolean) {
             modifier = Modifier.padding(16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Shop avatar
             Box(
                 modifier = Modifier
                     .size(56.dp)
@@ -284,35 +313,19 @@ private fun ShopHeaderCard(name: String, description: String, isOpen: Boolean) {
                     .background(Orange.copy(alpha = 0.15f)),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    imageVector = Icons.Default.Store,
-                    contentDescription = null,
-                    tint = OrangeDark,
-                    modifier = Modifier.size(30.dp)
-                )
+                Icon(Icons.Default.Store, contentDescription = null, tint = OrangeDark, modifier = Modifier.size(30.dp))
             }
 
             Spacer(modifier = Modifier.width(14.dp))
 
             Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = name,
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = TextPrimary
-                )
+                Text(name, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
                 if (description.isNotBlank()) {
                     Spacer(modifier = Modifier.height(3.dp))
-                    Text(
-                        text = description,
-                        fontSize = 12.sp,
-                        color = TextSecondary,
-                        maxLines = 2
-                    )
+                    Text(description, fontSize = 12.sp, color = TextSecondary, maxLines = 2)
                 }
                 Spacer(modifier = Modifier.height(8.dp))
 
-                // Open / Closed pill
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(20.dp))
@@ -332,7 +345,7 @@ private fun ShopHeaderCard(name: String, description: String, isOpen: Boolean) {
 }
 
 // ---------------------------------------------------------------------------
-// Menu item card — matches HomeScreen style
+// Menu item card
 // ---------------------------------------------------------------------------
 @Composable
 fun ShopMenuItemCard(
@@ -357,7 +370,6 @@ fun ShopMenuItemCard(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Left — veg dot + info
             Row(
                 modifier = Modifier.weight(1f),
                 verticalAlignment = Alignment.Top
@@ -371,40 +383,23 @@ fun ShopMenuItemCard(
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Column {
-                    Text(
-                        text = menuItem.name,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
+                    Text(menuItem.name, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
                     Spacer(modifier = Modifier.height(3.dp))
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(6.dp))
-                            .background(
-                                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
-                            )
+                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
                             .padding(horizontal = 6.dp, vertical = 2.dp)
                     ) {
-                        Text(
-                            text = "⏱ ${menuItem.prepTimeMinutes} min",
-                            fontSize = 11.sp,
-                            color = TextSecondary
-                        )
+                        Text("⏱ ${menuItem.prepTimeMinutes} min", fontSize = 11.sp, color = TextSecondary)
                     }
                     Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "₹${menuItem.price.toInt()}",
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Orange
-                    )
+                    Text("₹${menuItem.price.toInt()}", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Orange)
                 }
             }
 
             Spacer(modifier = Modifier.width(12.dp))
 
-            // Right — closed label or add/stepper
             if (!isShopOpen) {
                 Box(
                     modifier = Modifier
@@ -412,12 +407,7 @@ fun ShopMenuItemCard(
                         .background(MaterialTheme.colorScheme.errorContainer)
                         .padding(horizontal = 10.dp, vertical = 6.dp)
                 ) {
-                    Text(
-                        text = "Closed",
-                        color = MaterialTheme.colorScheme.error,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold
-                    )
+                    Text("Closed", color = MaterialTheme.colorScheme.error, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 }
             } else {
                 AnimatedContent(
@@ -435,9 +425,7 @@ fun ShopMenuItemCard(
                             contentPadding = PaddingValues(horizontal = 18.dp),
                             shape = RoundedCornerShape(10.dp),
                             border = BorderStroke(1.5.dp, Orange),
-                            colors = ButtonDefaults.outlinedButtonColors(
-                                contentColor = Orange
-                            )
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Orange)
                         ) {
                             Text("Add", fontSize = 13.sp, fontWeight = FontWeight.Bold)
                         }
@@ -449,16 +437,8 @@ fun ShopMenuItemCard(
                                 .background(Orange)
                                 .height(36.dp)
                         ) {
-                            IconButton(
-                                onClick = onRemoveClick,
-                                modifier = Modifier.size(36.dp)
-                            ) {
-                                Text(
-                                    "−",
-                                    color = Color.White,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 18.sp
-                                )
+                            IconButton(onClick = onRemoveClick, modifier = Modifier.size(36.dp)) {
+                                Text("−", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
                             }
                             Text(
                                 text = qty.toString(),
@@ -468,16 +448,8 @@ fun ShopMenuItemCard(
                                 modifier = Modifier.widthIn(min = 20.dp),
                                 textAlign = TextAlign.Center
                             )
-                            IconButton(
-                                onClick = onAddClick,
-                                modifier = Modifier.size(36.dp)
-                            ) {
-                                Text(
-                                    "+",
-                                    color = Color.White,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 18.sp
-                                )
+                            IconButton(onClick = onAddClick, modifier = Modifier.size(36.dp)) {
+                                Text("+", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
                             }
                         }
                     }
@@ -498,18 +470,12 @@ private fun ShopEmptyState() {
             .padding(vertical = 48.dp, horizontal = 32.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text(text = "🍱", fontSize = 56.sp, textAlign = TextAlign.Center)
+        Text("🍱", fontSize = 56.sp, textAlign = TextAlign.Center)
         Spacer(modifier = Modifier.height(16.dp))
-        Text(
-            text = "No items yet",
-            fontSize = 18.sp,
-            fontWeight = FontWeight.Bold,
-            color = TextPrimary,
-            textAlign = TextAlign.Center
-        )
+        Text("No items yet", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = TextPrimary, textAlign = TextAlign.Center)
         Spacer(modifier = Modifier.height(8.dp))
         Text(
-            text = "This shop hasn't added any menu items yet. Check back soon!",
+            "This shop hasn't added any menu items yet. Check back soon!",
             fontSize = 14.sp,
             color = TextSecondary,
             textAlign = TextAlign.Center
@@ -528,7 +494,6 @@ private fun ShopDetailShimmer() {
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        // Header card shimmer
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -537,7 +502,6 @@ private fun ShopDetailShimmer() {
                 .shimmerEffect()
         )
         Spacer(modifier = Modifier.height(8.dp))
-        // Menu label shimmer
         Box(
             modifier = Modifier
                 .width(80.dp)
@@ -546,7 +510,6 @@ private fun ShopDetailShimmer() {
                 .shimmerEffect()
         )
         Spacer(modifier = Modifier.height(4.dp))
-        // Item card shimmers
         repeat(5) {
             Box(
                 modifier = Modifier

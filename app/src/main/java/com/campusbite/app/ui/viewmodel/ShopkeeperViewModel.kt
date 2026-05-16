@@ -27,6 +27,8 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import javax.inject.Inject
+import com.campusbite.app.data.model.MenuItem
+import com.google.firebase.firestore.ListenerRegistration
 
 @HiltViewModel
 class ShopkeeperViewModel @Inject constructor(
@@ -48,7 +50,11 @@ class ShopkeeperViewModel @Inject constructor(
     val closedSlots: StateFlow<List<String>> = _closedSlots
 
     private var shopId: String = ""
-    private var shopDocId: String = ""
+
+    private val _menuItems = MutableStateFlow<List<MenuItem>>(emptyList())
+    val menuItems: StateFlow<List<MenuItem>> = _menuItems
+
+    private var menuItemsListener: ListenerRegistration? = null
 
     private val knownOrderIds = mutableSetOf<String>()
     private var hasLoadedInitialOrders = false
@@ -67,21 +73,20 @@ class ShopkeeperViewModel @Inject constructor(
                     listenToOrders()
                 }
             } catch (e: Exception) {
+                e.printStackTrace()
+            } finally {
                 _isLoading.value = false
             }
         }
     }
 
+    // ✅ read shop by docId = shopId
     private fun loadShopControls() {
-        firestore.collection("shops")
-            .whereEqualTo("shopId", shopId)
-            .addSnapshotListener { snapshot, _ ->
-                val doc = snapshot?.documents?.firstOrNull()
-                if (doc != null) {
-                    shopDocId = doc.id
-                    _shopOpen.value = doc.getBoolean("isOpen") ?: true
-                    _closedSlots.value = doc.get("closedSlots") as? List<String> ?: emptyList()
-                }
+        firestore.collection("shops").document(shopId)
+            .addSnapshotListener { doc, _ ->
+                if (doc == null || !doc.exists()) return@addSnapshotListener
+                _shopOpen.value = doc.getBoolean("isOpen") ?: true
+                _closedSlots.value = doc.get("closedSlots") as? List<String> ?: emptyList()
             }
     }
 
@@ -110,30 +115,34 @@ class ShopkeeperViewModel @Inject constructor(
                 }
 
                 _orders.value = sortedOrders
-                _isLoading.value = false
             }
     }
 
     fun toggleShopOpen(isOpen: Boolean) {
-        if (shopDocId.isEmpty()) return
+        if (shopId.isEmpty()) return
         viewModelScope.launch {
             try {
-                firestore.collection("shops").document(shopDocId)
+                firestore.collection("shops").document(shopId)
                     .update("isOpen", isOpen).await()
-            } catch (e: Exception) { e.printStackTrace() }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
         }
     }
 
     fun toggleSlot(slot: String) {
-        if (shopDocId.isEmpty()) return
+        if (shopId.isEmpty()) return
         viewModelScope.launch {
             try {
-                val docRef = firestore.collection("shops").document(shopDocId)
-                if (_closedSlots.value.contains(slot))
+                val docRef = firestore.collection("shops").document(shopId)
+                if (_closedSlots.value.contains(slot)) {
                     docRef.update("closedSlots", FieldValue.arrayRemove(slot)).await()
-                else
+                } else {
                     docRef.update("closedSlots", FieldValue.arrayUnion(slot)).await()
-            } catch (e: Exception) { e.printStackTrace() }
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
         }
     }
 
@@ -142,9 +151,14 @@ class ShopkeeperViewModel @Inject constructor(
             try {
                 firestore.collection("orders").document(orderId)
                     .update("status", newStatus).await()
-                if (newStatus.lowercase() == "ready")
-                    _orders.value.find { it.orderId == orderId }?.let { sendNotificationToStudent(it) }
-            } catch (e: Exception) { e.printStackTrace() }
+
+                if (newStatus.lowercase() == "ready") {
+                    _orders.value.find { it.orderId == orderId }
+                        ?.let { sendNotificationToStudent(it) }
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
         }
     }
 
@@ -154,17 +168,19 @@ class ShopkeeperViewModel @Inject constructor(
                 val token = firestore.collection("users").document(order.studentId)
                     .get().await().getString("fcmToken")
                 if (!token.isNullOrEmpty()) sendNotification(token)
-            } catch (e: Exception) { e.printStackTrace() }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
         }
     }
 
     private fun showNewOrderNotification(order: Order) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (ContextCompat.checkSelfPermission(
-                    appContext,
-                    android.Manifest.permission.POST_NOTIFICATIONS
-                ) != PackageManager.PERMISSION_GRANTED
-            ) return
+            val granted = ContextCompat.checkSelfPermission(
+                appContext,
+                android.Manifest.permission.POST_NOTIFICATIONS
+            ) == PackageManager.PERMISSION_GRANTED
+            if (!granted) return
         }
 
         val channelId = "staff_order_updates"
@@ -195,6 +211,72 @@ class ShopkeeperViewModel @Inject constructor(
             e.printStackTrace()
         }
     }
+    fun loadMenuItems(shopId: String) {
+        menuItemsListener?.remove()
+        menuItemsListener = firestore.collection("menuItems")
+            .whereEqualTo("shopId", shopId)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    _menuItems.value = emptyList()
+                    return@addSnapshotListener
+                }
+                _menuItems.value = snapshot?.documents
+                    ?.mapNotNull { doc ->
+                        try { doc.toObject(MenuItem::class.java) } catch (e: Exception) { null }
+                    }
+                    ?.sortedBy { it.name }
+                    ?: emptyList()
+            }
+    }
+
+    fun addMenuItem(menuItem: MenuItem) {
+        viewModelScope.launch {
+            try {
+                val itemId = firestore.collection("menuItems").document().id
+                val newItem = menuItem.copy(itemId = itemId)
+                firestore.collection("menuItems").document(itemId).set(newItem).await()
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
+    fun updateMenuItem(menuItem: MenuItem) {
+        viewModelScope.launch {
+            try {
+                firestore.collection("menuItems").document(menuItem.itemId).set(menuItem).await()
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
+    fun deleteMenuItem(itemId: String) {
+        viewModelScope.launch {
+            try {
+                firestore.collection("menuItems").document(itemId).delete().await()
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
+    fun toggleMenuItemAvailability(itemId: String, currentItem: MenuItem) {
+        viewModelScope.launch {
+            try {
+                firestore.collection("menuItems").document(itemId)
+                    .update("isAvailable", !currentItem.isAvailable).await()
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        menuItemsListener?.remove()
+    }
+
 
     private fun sendNotification(token: String) {
         val json = JSONObject().apply {
@@ -204,11 +286,13 @@ class ShopkeeperViewModel @Inject constructor(
                 put("body", "Your order is ready for pickup")
             })
         }
+
         val request = Request.Builder()
             .url("https://fcm.googleapis.com/fcm/send")
             .post(json.toString().toRequestBody("application/json; charset=utf-8".toMediaType()))
             .addHeader("Authorization", "key=YOUR_SERVER_KEY")
             .build()
+
         Thread {
             try { OkHttpClient().newCall(request).execute() } catch (e: Exception) { e.printStackTrace() }
         }.start()

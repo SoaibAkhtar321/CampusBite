@@ -14,6 +14,7 @@ import com.campusbite.app.R
 import com.campusbite.app.data.model.Order
 import com.campusbite.app.data.model.Shop
 import com.campusbite.app.data.repository.OrderRepository
+import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -35,7 +36,6 @@ class OrderViewModel @Inject constructor(
     @ApplicationContext private val appContext: Context
 ) : ViewModel() {
 
-    // ── Slot UI State ─────────────────────────────────────────────────────────
     data class SlotUiState(
         val slots: List<String> = emptyList(),
         val message: String = "",
@@ -45,42 +45,28 @@ class OrderViewModel @Inject constructor(
     private val _slotUiState = MutableStateFlow(SlotUiState())
     val slotUiState: StateFlow<SlotUiState> = _slotUiState
 
-    // ── Order state ───────────────────────────────────────────────────────────
     private val _orderState = MutableStateFlow<OrderState>(OrderState.Idle)
     val orderState: StateFlow<OrderState> = _orderState
 
-    // ── Current order (tracked by ID after placing) ───────────────────────────
     private val _currentOrder = MutableStateFlow<Order?>(null)
     val currentOrder: StateFlow<Order?> = _currentOrder
 
-    // ── Active order (latest in-progress order for the logged-in student) ─────
     private val _activeOrder = MutableStateFlow<Order?>(null)
     val activeOrder: StateFlow<Order?> = _activeOrder
     private var activeOrderListener: ListenerRegistration? = null
 
-    // ── Selected shop ─────────────────────────────────────────────────────────
     private val _selectedShop = MutableStateFlow<Shop?>(null)
     val selectedShop: StateFlow<Shop?> = _selectedShop
 
-    // ── Order history ─────────────────────────────────────────────────────────
     private val _userOrders = MutableStateFlow<List<Order>>(emptyList())
     val userOrders: StateFlow<List<Order>> = _userOrders
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Place order
-    // ─────────────────────────────────────────────────────────────────────────
     fun placeOrder(order: Order) {
         viewModelScope.launch {
             _orderState.value = OrderState.Loading
             try {
-                val shopSnapshot = firestore.collection("shops")
-                    .whereEqualTo("shopId", order.shopId)
-                    .get()
-                    .await()
-
-                val shopDoc = shopSnapshot.documents.firstOrNull()
-                val isOpen = shopDoc?.getBoolean("isOpen") ?: false
-
+                val shopDoc = firestore.collection("shops").document(order.shopId).get().await()
+                val isOpen = shopDoc.getBoolean("isOpen") ?: false
                 if (!isOpen) {
                     _orderState.value = OrderState.Error("This shop is currently not accepting orders.")
                     return@launch
@@ -102,9 +88,6 @@ class OrderViewModel @Inject constructor(
         }
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Listen to a specific order by ID (used on OrderStatusScreen)
-    // ─────────────────────────────────────────────────────────────────────────
     fun listenToOrderById(orderId: String) {
         orderRepository.listenToOrder(orderId) { order ->
             val previousStatus = _currentOrder.value?.status
@@ -115,19 +98,17 @@ class OrderViewModel @Inject constructor(
         }
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Listen to the latest active order for a student (HomeScreen banner &
-    // ProfileScreen). No orderBy → no composite index needed. Sort client-side.
-    // ─────────────────────────────────────────────────────────────────────────
+    fun listenToActiveOrder() {
+        val uid = FirebaseAuth.getInstance().currentUser?.uid ?: return
+        listenToActiveOrder(uid)
+    }
+
     fun listenToActiveOrder(userId: String) {
         activeOrderListener?.remove()
 
         activeOrderListener = firestore.collection("orders")
             .whereEqualTo("studentId", userId)
             .whereIn("status", listOf("pending", "accepted", "preparing", "ready"))
-            // ← NO .orderBy() — that combo requires a Firestore composite index
-            //   which silently causes the query to return nothing if missing.
-            //   We sort client-side instead.
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
                     _activeOrder.value = null
@@ -137,7 +118,7 @@ class OrderViewModel @Inject constructor(
                     ?.mapNotNull { doc ->
                         try { doc.toObject(Order::class.java) } catch (e: Exception) { null }
                     }
-                    ?.maxByOrNull { it.createdAt } // latest active order
+                    ?.maxByOrNull { it.createdAt }
             }
     }
 
@@ -145,18 +126,11 @@ class OrderViewModel @Inject constructor(
         _activeOrder.value = null
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Load order history — NO orderBy to avoid composite index requirement.
-    // Sort client-side by createdAt descending.
-    // ─────────────────────────────────────────────────────────────────────────
     fun loadUserOrders(userId: String) {
         viewModelScope.launch {
             try {
                 val snapshot = firestore.collection("orders")
                     .whereEqualTo("studentId", userId)
-                    // ← removed: .orderBy("createdAt", Query.Direction.DESCENDING)
-                    //   Firestore requires a composite index for whereEqualTo + orderBy
-                    //   on different fields, and without it the query silently fails.
                     .get()
                     .await()
 
@@ -164,7 +138,7 @@ class OrderViewModel @Inject constructor(
                     .mapNotNull { doc ->
                         try { doc.toObject(Order::class.java) } catch (e: Exception) { null }
                     }
-                    .sortedByDescending { it.createdAt } // sort client-side
+                    .sortedByDescending { it.createdAt }
             } catch (e: Exception) {
                 e.printStackTrace()
                 _userOrders.value = emptyList()
@@ -175,20 +149,32 @@ class OrderViewModel @Inject constructor(
     fun resetState() {
         _orderState.value = OrderState.Idle
     }
+    fun loadShop(shopId: String) {
+        viewModelScope.launch {
+            try {
+                val shopDoc = firestore.collection("shops").document(shopId).get().await()
+                val shop = shopDoc.toObject(Shop::class.java)
+                _selectedShop.value = shop
+            } catch (e: Exception) {
+                e.printStackTrace()
+                _selectedShop.value = null
+            }
+        }
+    }
+    fun setSelectedShop(shop: Shop?) {
+        _selectedShop.value = shop
+    }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Pickup slot loading
-    // ─────────────────────────────────────────────────────────────────────────
     fun loadAvailableSlots(shopId: String, cartPrepTimeMinutes: Int) {
         viewModelScope.launch {
             _slotUiState.value = SlotUiState(isLoading = true)
             try {
-                val shopSnapshot = firestore.collection("shops")
-                    .whereEqualTo("shopId", shopId)
-                    .get()
-                    .await()
+                val shopDoc = firestore.collection("shops").document(shopId).get().await()
+                android.util.Log.d("OrderVM", "shopDoc exists: ${shopDoc.exists()}")
+                android.util.Log.d("OrderVM", "shopDoc data: ${shopDoc.data}")
 
-                val shop = shopSnapshot.documents.firstOrNull()?.toObject(Shop::class.java)
+                val shop = shopDoc.toObject(Shop::class.java)
+                android.util.Log.d("OrderVM", "shop deserialized: ${shop?.name ?: "NULL"}")
 
                 if (shop == null) {
                     _selectedShop.value = null
@@ -205,10 +191,24 @@ class OrderViewModel @Inject constructor(
 
                 val displayFormatter = DateTimeFormatter.ofPattern("hh:mm a")
                 val closingFormatter = DateTimeFormatter.ofPattern("HH:mm")
+                val openingFormatter = DateTimeFormatter.ofPattern("HH:mm")
+
                 val today = LocalDate.now().toString()
                 val now = LocalDateTime.now()
+
+                val openingTime = try {
+                    LocalTime.parse(shop.openingTime.ifBlank { "08:00" }, openingFormatter)
+                } catch (e: Exception) {
+                    LocalTime.of(8, 0)
+                }
+                val openingDateTime = LocalDateTime.of(now.toLocalDate(), openingTime)
+
                 val earliestTime = now.plusMinutes(cartPrepTimeMinutes.toLong())
-                var slot = roundToNextSlotDateTime(earliestTime, 15)
+                var slot = roundToNextSlotDateTime(
+                    if (earliestTime.isAfter(openingDateTime)) earliestTime else openingDateTime,
+                    15
+                )
+
                 val maxWindowEnd = now.plusHours(3)
                 val shopClosingDateTime = getShopClosingDateTime(now, shop.closingTime, closingFormatter)
                 val endTime = if (shopClosingDateTime.isBefore(maxWindowEnd)) shopClosingDateTime else maxWindowEnd
@@ -221,7 +221,7 @@ class OrderViewModel @Inject constructor(
 
                 if (generatedSlots.isEmpty()) {
                     _slotUiState.value = SlotUiState(
-                        message = "Shop closing time is ${formatClosingTime(shop.closingTime)}. No further pickup slots are available."
+                        message = "Shop opening time is ${formatClosingTime(shop.openingTime)}. No pickup slots available yet."
                     )
                     return@launch
                 }
@@ -260,9 +260,6 @@ class OrderViewModel @Inject constructor(
         }
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Helpers
-    // ─────────────────────────────────────────────────────────────────────────
     private fun roundToNextSlotDateTime(time: LocalDateTime, intervalMinutes: Int): LocalDateTime {
         val remainder = time.minute % intervalMinutes
         val minutesToAdd = if (remainder == 0) 0 else intervalMinutes - remainder
@@ -323,14 +320,6 @@ class OrderViewModel @Inject constructor(
     }
 }
 
-// ─── Slot UI State (top-level for external use) ───────────────────────────────
-data class SlotUiState(
-    val slots: List<String> = emptyList(),
-    val message: String = "",
-    val isLoading: Boolean = false
-)
-
-// ─── Order state sealed class ─────────────────────────────────────────────────
 sealed class OrderState {
     object Idle : OrderState()
     object Loading : OrderState()

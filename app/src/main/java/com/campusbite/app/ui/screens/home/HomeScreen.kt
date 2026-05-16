@@ -34,10 +34,11 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
-import com.campusbite.app.data.model.CartItem
 import com.campusbite.app.data.model.MenuItem
 import com.campusbite.app.data.model.Order
+import com.campusbite.app.data.model.OrderItem
 import com.campusbite.app.data.model.Shop
+import com.campusbite.app.data.local.OrderBannerPrefs
 import com.campusbite.app.ui.theme.Orange
 import com.campusbite.app.ui.theme.OrangeDark
 import com.campusbite.app.ui.theme.OrangeLight
@@ -48,11 +49,11 @@ import com.campusbite.app.ui.theme.VegGreenLight
 import com.campusbite.app.ui.viewmodel.CartViewModel
 import com.campusbite.app.ui.viewmodel.HomeViewModel
 import com.campusbite.app.ui.viewmodel.OrderViewModel
-import com.google.firebase.auth.FirebaseAuth
-import com.campusbite.app.data.model.OrderItem
+import androidx.compose.ui.platform.LocalContext
+import kotlinx.coroutines.launch
 
 // ═══════════════════════════════════════════════════════════════════════════
-// SHIMMER EFFECT - Reusable loading animation
+// SHIMMER EFFECT
 // ═══════════════════════════════════════════════════════════════════════════
 fun Modifier.shimmerEffect(): Modifier = composed {
     val transition = rememberInfiniteTransition(label = "shimmer")
@@ -80,7 +81,7 @@ fun Modifier.shimmerEffect(): Modifier = composed {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// MAIN HOMESCREEN COMPOSABLE
+// MAIN HOMESCREEN
 // ═══════════════════════════════════════════════════════════════════════════
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -93,9 +94,7 @@ fun HomeScreen(
     cartViewModel: CartViewModel = hiltViewModel(),
     orderViewModel: OrderViewModel = hiltViewModel()
 ) {
-    // ─────────────────────────────────────────────────────────────────────────
-    // STATE COLLECTION
-    // ─────────────────────────────────────────────────────────────────────────
+    // ── STATE ────────────────────────────────────────────────────────────────
     val shops by viewModel.shops.collectAsState()
     val isDataReady by viewModel.isDataReady.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
@@ -109,20 +108,26 @@ fun HomeScreen(
 
     val activeOrder by orderViewModel.activeOrder.collectAsState()
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // LOCAL STATE
-    // ─────────────────────────────────────────────────────────────────────────
+    // ── LOCAL STATE ──────────────────────────────────────────────────────────
     var showExitDialog by remember { mutableStateOf(false) }
     var showFilterSheet by remember { mutableStateOf(false) }
-    var dismissedOrderIds by remember { mutableStateOf(setOf<String>()) }
     val sheetState = rememberModalBottomSheetState()
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // LIFECYCLE EFFECTS
-    // ─────────────────────────────────────────────────────────────────────────
-    LaunchedEffect(Unit) {
-        FirebaseAuth.getInstance().currentUser?.uid?.let { uid ->
-            orderViewModel.listenToActiveOrder(uid)
+    val context = LocalContext.current
+    val bannerPrefs = remember { OrderBannerPrefs(context) }
+    val dismissedIds by bannerPrefs.dismissedIds.collectAsState(initial = emptySet())
+    val scope = rememberCoroutineScope()
+    val order = activeOrder
+
+    val shouldShowBanner = order != null &&
+            !dismissedIds.contains(order.orderId) &&
+            order.status.uppercase() !in listOf("COMPLETED", "CANCELLED")
+
+    // ✅ Auto-clear dismiss when order completes
+    LaunchedEffect(order?.status, order?.orderId) {
+        val status = order?.status?.uppercase()
+        if (status in listOf("COMPLETED", "CANCELLED") && order?.orderId != null) {
+            bannerPrefs.clear(order.orderId)
         }
     }
 
@@ -130,13 +135,7 @@ fun HomeScreen(
         showExitDialog = true
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // DERIVED STATE
-    // ─────────────────────────────────────────────────────────────────────────
-    val shouldShowBanner = activeOrder != null &&
-            !dismissedOrderIds.contains(activeOrder?.orderId) &&
-            activeOrder?.status?.uppercase() !in listOf("COMPLETED", "CANCELLED")
-
+    // ── DERIVED ──────────────────────────────────────────────────────────────
     val hasCartItems = cartItems.isNotEmpty()
     val bottomContentPadding: Dp = when {
         shouldShowBanner && hasCartItems -> 180.dp
@@ -144,9 +143,7 @@ fun HomeScreen(
         else -> 16.dp
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // MAIN UI LAYOUT
-    // ─────────────────────────────────────────────────────────────────────────
+    // ── UI ───────────────────────────────────────────────────────────────────
     Box(modifier = Modifier.fillMaxSize()) {
         Column(
             modifier = Modifier
@@ -182,17 +179,15 @@ fun HomeScreen(
             }
         }
 
-        // ── FLOATING BOTTOM STACK ─────────────────────────────────────────────
+        // ── FLOATING STACK ────────────────────────────────────────────────────
         BottomFloatingStack(
             shouldShowBanner = shouldShowBanner,
-            activeOrder = activeOrder,
+            activeOrder = order,
             cartItemCount = cartItems.size,
             cartTotalPrice = cartViewModel.totalPrice,
-            onTrackClick = { activeOrder?.let { onNavigateToOrderStatus(it.orderId) } },
+            onTrackClick = { order?.let { onNavigateToOrderStatus(it.orderId) } },
             onCartClick = onNavigateToCart,
-            onDismissOrder = { orderId ->
-                dismissedOrderIds = dismissedOrderIds + orderId
-            }
+            onDismissOrder = { orderId -> scope.launch { bannerPrefs.dismiss(orderId) } }
         )
 
         // ── DIALOGS & SHEETS ──────────────────────────────────────────────────
@@ -204,10 +199,7 @@ fun HomeScreen(
             onDismiss = { showFilterSheet = false }
         )
 
-        ShopConflictDialog(
-            isVisible = showDialog,
-            cartViewModel = cartViewModel
-        )
+        ShopConflictDialog(isVisible = showDialog, cartViewModel = cartViewModel)
 
         ExitConfirmationDialog(
             isVisible = showExitDialog,
@@ -216,9 +208,7 @@ fun HomeScreen(
             onConfirm = { showExitDialog = false; onNavigateToCart() }
         )
     }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
+}// ═══════════════════════════════════════════════════════════════════════════
 // COMPOSABLE SECTIONS
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -332,6 +322,16 @@ private fun HomeContentList(
     cartViewModel: CartViewModel,
     onNavigateToShopDetail: (String) -> Unit
 ) {
+    // 👇 ADD THIS BLOCK
+    LaunchedEffect(shops) {
+        android.util.Log.d("DEBUG_SHOPS", "========== SHOPS LOADED ==========")
+        android.util.Log.d("DEBUG_SHOPS", "Total shops: ${shops.size}")
+        shops.forEach { shop ->
+            android.util.Log.d("DEBUG_SHOPS", "  → shopId='${shop.shopId}' | name='${shop.name}'")
+        }
+        android.util.Log.d("DEBUG_SHOPS", "===================================")
+    }
+
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(bottom = bottomContentPadding)
@@ -351,12 +351,19 @@ private fun HomeContentList(
                     items = shops,
                     key = { shop -> shop.shopId }
                 ) { shop ->
+                    // 👇 ADD THIS LOG
+                    android.util.Log.d("DEBUG_SHOPS", "Rendering ShopCard: ${shop.shopId}")
+
                     ShopCard(
                         shop = shop,
-                        onClick = { onNavigateToShopDetail(shop.shopId) }
+                        onClick = {
+                            android.util.Log.d("DEBUG_SHOPS", "⚡ CLICKED: ${shop.shopId} (${shop.name})")
+                            onNavigateToShopDetail(shop.shopId)
+                        }
                     )
                 }
             }
+            // ... rest remains the same
             Spacer(modifier = Modifier.height(20.dp))
         }
 

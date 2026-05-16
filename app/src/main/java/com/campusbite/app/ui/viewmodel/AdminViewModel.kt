@@ -85,10 +85,20 @@ class AdminViewModel @Inject constructor(
             }
     }
 
-    fun setShopApproved(shopDocId: String, approved: Boolean) {
+    fun setShopApproved(shopDocId: String, approved: Boolean, shopId: String) {
         viewModelScope.launch {
+            // update shop
             firestore.collection("shops").document(shopDocId)
                 .update("isApproved", approved).await()
+
+            // update user(s) with same shopId
+            val usersSnapshot = firestore.collection("users")
+                .whereEqualTo("shopId", shopId)
+                .get().await()
+
+            usersSnapshot.documents.forEach { doc ->
+                doc.reference.update("isApproved", approved).await()
+            }
         }
     }
 

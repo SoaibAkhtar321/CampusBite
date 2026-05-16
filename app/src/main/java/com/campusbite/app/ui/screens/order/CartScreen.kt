@@ -74,6 +74,7 @@ import com.campusbite.app.data.model.OrderItem
 import com.campusbite.app.ui.screens.home.shimmerEffect
 import com.campusbite.app.ui.theme.Orange
 import com.campusbite.app.ui.viewmodel.CartViewModel
+import com.campusbite.app.ui.viewmodel.HomeViewModel
 import com.campusbite.app.ui.viewmodel.OrderState
 import com.campusbite.app.ui.viewmodel.OrderViewModel
 import java.time.LocalDate
@@ -84,15 +85,15 @@ import java.time.LocalDate
 // that were invisible on dark surfaces.
 // ---------------------------------------------------------------------------
 private val Orange_10 = Orange.copy(alpha = 0.12f)   // replaces OrangeLight on any surface
-
 @OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun CartScreen(
     onNavigateBack: () -> Unit,
     onOrderPlaced: (String) -> Unit,
     cartViewModel: CartViewModel = hiltViewModel(),
-    orderViewModel: OrderViewModel = hiltViewModel()
-) {
+    orderViewModel: OrderViewModel = hiltViewModel(),
+    homeViewModel: HomeViewModel? = null  // ✅ ADD THIS LINE
+){
     val cartItems by cartViewModel.cartItems.collectAsState()
     val currentShopId by cartViewModel.currentShopId.collectAsState()
     val orderState by orderViewModel.orderState.collectAsState()
@@ -111,7 +112,19 @@ fun CartScreen(
     val cartPrepTime = cartItems.maxOfOrNull { it.prepTimeMinutes } ?: 0
     val focusManager = LocalFocusManager.current
 
+    // ✅ ADD THIS: Load shop when shopId changes
+    LaunchedEffect(shopId) {
+        if (shopId.isNotEmpty() && homeViewModel != null) {
+            val shops = homeViewModel.shops.value  // Get shops from HomeViewModel
+            val shop = shops.find { it.shopId == shopId }
+            if (shop != null) {
+                orderViewModel.setSelectedShop(shop)  // Set it in OrderViewModel
+            }
+        }
+    }
+
     LaunchedEffect(shopId, cartPrepTime, cartItems.size) {
+        android.util.Log.d("CartScreen", "Loading slots for shopId: '$shopId', cartPrepTime: $cartPrepTime, cartItems: ${cartItems.size}")
         if (shopId.isNotEmpty() && cartItems.isNotEmpty()) {
             selectedSlot = ""
             orderViewModel.loadAvailableSlots(
@@ -121,14 +134,7 @@ fun CartScreen(
         }
     }
 
-    LaunchedEffect(orderState) {
-        if (orderState is OrderState.Success) {
-            val orderId = (orderState as OrderState.Success).orderId
-            cartViewModel.clearCart()
-            orderViewModel.resetState()
-            onOrderPlaced(orderId)
-        }
-    }
+    // ... rest of your code
 
     Scaffold(
         topBar = {

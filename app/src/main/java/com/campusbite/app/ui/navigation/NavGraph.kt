@@ -6,6 +6,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -23,10 +24,12 @@ import com.campusbite.app.ui.screens.order.OrderStatusScreen
 import com.campusbite.app.ui.screens.profile.ShopkeeperProfileScreen
 import com.campusbite.app.ui.screens.profile.StudentProfileScreen
 import com.campusbite.app.ui.screens.shop.ShopDetailScreen
+import com.campusbite.app.ui.screens.shopkeeper.MenuManagementScreen
 import com.campusbite.app.ui.screens.shopkeeper.ShopkeeperDashboardScreen
 import com.campusbite.app.ui.screens.splash.SplashScreen
 import com.campusbite.app.ui.viewmodel.AuthViewModel
 import com.campusbite.app.ui.viewmodel.CartViewModel
+import com.campusbite.app.ui.viewmodel.HomeViewModel
 
 @Composable
 fun NavGraph(navController: NavHostController) {
@@ -146,18 +149,29 @@ fun NavGraph(navController: NavHostController) {
             )
         }
 
+// ✅ CORRECT VERSION
         composable(Routes.SHOP_DETAIL) { backStackEntry ->
             val shopId = backStackEntry.arguments?.getString("shopId") ?: ""
+            val parentEntry = remember(backStackEntry) {
+                navController.getBackStackEntry(Routes.STUDENT_HOME)  // ✅ Use correct route constant
+            }
+            val homeViewModel: HomeViewModel = hiltViewModel(parentEntry)
 
             ShopDetailScreen(
                 shopId = shopId,
+                viewModel = homeViewModel,
                 onNavigateBack = { navController.popBackStack() },
                 onNavigateToCart = { navController.navigate(Routes.CART) },
                 cartViewModel = cartViewModel
             )
         }
 
-        composable(Routes.CART) {
+        composable(Routes.CART) { backStackEntry ->
+            val parentEntry = remember(backStackEntry) {
+                navController.getBackStackEntry(Routes.STUDENT_HOME)
+            }
+            val homeViewModel: HomeViewModel = hiltViewModel(parentEntry)
+
             CartScreen(
                 onNavigateBack = { navController.popBackStack() },
                 onOrderPlaced = { orderId ->
@@ -165,7 +179,8 @@ fun NavGraph(navController: NavHostController) {
                         popUpTo(Routes.CART) { inclusive = true }
                     }
                 },
-                cartViewModel = cartViewModel
+                cartViewModel = cartViewModel,
+                homeViewModel = homeViewModel  // ✅ Add this
             )
         }
 
@@ -180,12 +195,20 @@ fun NavGraph(navController: NavHostController) {
         composable(Routes.ORDER_HISTORY) {
             OrderHistoryScreen()
         }
+        composable("menu_management") {
+            MenuManagementScreen(
+                onNavigateBack = { navController.popBackStack() }
+            )
+        }
 
         // ───────────────────────── Shopkeeper ─────────────────────────
         composable(Routes.SHOPKEEPER_DASHBOARD) {
             ShopkeeperDashboardScreen(
                 onNavigateToProfile = {
                     navController.navigate("profile")
+                },
+                onNavigateToMenu = {  // ← ADD THIS PARAMETER
+                    navController.navigate("menu_management")
                 }
             )
         }

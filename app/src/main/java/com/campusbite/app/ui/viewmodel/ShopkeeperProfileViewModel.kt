@@ -13,6 +13,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import java.text.SimpleDateFormat
+import java.util.*
 import javax.inject.Inject
 
 data class ShopkeeperProfileUiState(
@@ -22,7 +24,6 @@ data class ShopkeeperProfileUiState(
     // ── Timing drafts ────────────────────────────────────────────────────────
     val draftOpeningTime: String = "",
     val draftClosingTime: String = "",
-    val draftAvgPrepTime: Int = 10,
     val isTimingsDirty: Boolean = false,
     val timingsSaveSuccess: Boolean = false,
 
@@ -32,7 +33,6 @@ data class ShopkeeperProfileUiState(
     val capacitySaveSuccess: Boolean = false,
 
     // ── Shop info drafts ─────────────────────────────────────────────────────
-    val draftLocationDescription: String = "",
     val draftDescription: String = "",
     val isShopInfoDirty: Boolean = false,
     val shopInfoSaveSuccess: Boolean = false,
@@ -54,11 +54,7 @@ class ShopkeeperProfileViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(ShopkeeperProfileUiState())
     val uiState: StateFlow<ShopkeeperProfileUiState> = _uiState.asStateFlow()
 
-    init {
-        loadProfile()
-    }
-
-    // ── Load ───────────────────────────────────────────────────────────────────
+    init { loadProfile() }
 
     private fun loadProfile() {
         viewModelScope.launch {
@@ -79,9 +75,7 @@ class ShopkeeperProfileViewModel @Inject constructor(
                         shop = shop,
                         draftOpeningTime = shop?.openingTime ?: "",
                         draftClosingTime = shop?.closingTime ?: "",
-                        draftAvgPrepTime = shop?.averagePreparationTime ?: 10,
                         draftMaxOrdersPerSlot = shop?.maxOrdersPerSlot ?: 5,
-                        draftLocationDescription = shop?.locationDescription ?: "",
                         draftDescription = shop?.description ?: ""
                     )
                 }
@@ -102,19 +96,23 @@ class ShopkeeperProfileViewModel @Inject constructor(
                     .whereEqualTo("shopId", shopId)
                     .get().await()
 
-                val todayPrefix = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
-                    .format(java.util.Date())
+                val todayPrefix = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+                    .format(Date())
 
                 var pending = 0
                 var completedToday = 0
 
                 for (doc in snapshot.documents) {
                     try {
-                        val status = doc.getString("status") ?: continue
-                        val createdAt = doc.getString("createdAt") ?: ""
-                        if (status in listOf("PENDING", "ACCEPTED", "PREPARING")) pending++
-                        if (createdAt.startsWith(todayPrefix) &&
-                            status in listOf("COMPLETED", "PICKED_UP")) completedToday++
+                        val status = doc.getString("status")?.lowercase() ?: continue
+                        val createdAtMillis = doc.getLong("createdAt") ?: 0L
+                        val createdDate = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+                            .format(Date(createdAtMillis))
+
+                        if (status in listOf("pending", "accepted", "preparing")) pending++
+                        if (createdDate == todayPrefix && status in listOf("completed", "picked_up")) {
+                            completedToday++
+                        }
                     } catch (_: Exception) { }
                 }
 
@@ -127,8 +125,6 @@ class ShopkeeperProfileViewModel @Inject constructor(
             } catch (_: Exception) { }
         }
     }
-
-    // ── Toggle visibility ──────────────────────────────────────────────────────
 
     fun toggleShopOpen() {
         val shop = _uiState.value.shop ?: return
@@ -144,33 +140,11 @@ class ShopkeeperProfileViewModel @Inject constructor(
         }
     }
 
-    fun toggleAcceptingOrders() {
-        val shop = _uiState.value.shop ?: return
-        val newValue = !shop.acceptingOrders
-        viewModelScope.launch {
-            try {
-                firestore.collection("shops").document(shop.shopId)
-                    .update("acceptingOrders", newValue).await()
-                _uiState.update { it.copy(shop = it.shop?.copy(acceptingOrders = newValue)) }
-            } catch (e: Exception) {
-                _uiState.update { it.copy(errorMessage = "Toggle failed: ${e.message}") }
-            }
-        }
-    }
-
-    // ── Timing drafts ──────────────────────────────────────────────────────────
-
     fun updateOpeningTime(v: String) =
         _uiState.update { it.copy(draftOpeningTime = v, isTimingsDirty = true, timingsSaveSuccess = false) }
 
     fun updateClosingTime(v: String) =
         _uiState.update { it.copy(draftClosingTime = v, isTimingsDirty = true, timingsSaveSuccess = false) }
-
-    fun incrementPrepTime() =
-        _uiState.update { it.copy(draftAvgPrepTime = (it.draftAvgPrepTime + 5).coerceAtMost(120), isTimingsDirty = true, timingsSaveSuccess = false) }
-
-    fun decrementPrepTime() =
-        _uiState.update { it.copy(draftAvgPrepTime = (it.draftAvgPrepTime - 5).coerceAtLeast(5), isTimingsDirty = true, timingsSaveSuccess = false) }
 
     fun saveTimings() {
         val shopId = _uiState.value.shop?.shopId ?: return
@@ -179,8 +153,7 @@ class ShopkeeperProfileViewModel @Inject constructor(
                 firestore.collection("shops").document(shopId).update(
                     mapOf(
                         "openingTime" to _uiState.value.draftOpeningTime,
-                        "closingTime" to _uiState.value.draftClosingTime,
-                        "averagePreparationTime" to _uiState.value.draftAvgPrepTime
+                        "closingTime" to _uiState.value.draftClosingTime
                     )
                 ).await()
                 _uiState.update { it.copy(isTimingsDirty = false, timingsSaveSuccess = true) }
@@ -189,8 +162,6 @@ class ShopkeeperProfileViewModel @Inject constructor(
             }
         }
     }
-
-    // ── Capacity drafts ────────────────────────────────────────────────────────
 
     fun incrementMaxOrders() =
         _uiState.update { it.copy(draftMaxOrdersPerSlot = (it.draftMaxOrdersPerSlot + 1).coerceAtMost(50), isCapacityDirty = true, capacitySaveSuccess = false) }
@@ -211,8 +182,6 @@ class ShopkeeperProfileViewModel @Inject constructor(
             }
         }
     }
-
-    // ── Slot management ────────────────────────────────────────────────────────
 
     fun unblockSlot(slot: String) {
         val shop = _uiState.value.shop ?: return
@@ -256,11 +225,6 @@ class ShopkeeperProfileViewModel @Inject constructor(
         return slots
     }
 
-    // ── Shop info drafts ───────────────────────────────────────────────────────
-
-    fun updateLocationDescription(v: String) =
-        _uiState.update { it.copy(draftLocationDescription = v, isShopInfoDirty = true, shopInfoSaveSuccess = false) }
-
     fun updateDescription(v: String) =
         _uiState.update { it.copy(draftDescription = v, isShopInfoDirty = true, shopInfoSaveSuccess = false) }
 
@@ -269,10 +233,7 @@ class ShopkeeperProfileViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 firestore.collection("shops").document(shopId).update(
-                    mapOf(
-                        "locationDescription" to _uiState.value.draftLocationDescription,
-                        "description" to _uiState.value.draftDescription
-                    )
+                    "description", _uiState.value.draftDescription
                 ).await()
                 _uiState.update { it.copy(isShopInfoDirty = false, shopInfoSaveSuccess = true) }
             } catch (e: Exception) {
@@ -280,8 +241,6 @@ class ShopkeeperProfileViewModel @Inject constructor(
             }
         }
     }
-
-    // ── Account ────────────────────────────────────────────────────────────────
 
     fun changePassword(newPassword: String) {
         viewModelScope.launch {

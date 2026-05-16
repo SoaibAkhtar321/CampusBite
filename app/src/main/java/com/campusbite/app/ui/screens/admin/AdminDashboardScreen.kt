@@ -88,7 +88,7 @@ private fun ShopsTab(shops: List<AdminShop>, viewModel: AdminViewModel) {
                             Text("Approved")
                             Switch(
                                 checked = shop.isApproved,
-                                onCheckedChange = { viewModel.setShopApproved(shop.docId, it) }
+                                onCheckedChange = { viewModel.setShopApproved(shop.docId, it, shop.shopId) }
                             )
                         }
                         Row(verticalAlignment = Alignment.CenterVertically) {

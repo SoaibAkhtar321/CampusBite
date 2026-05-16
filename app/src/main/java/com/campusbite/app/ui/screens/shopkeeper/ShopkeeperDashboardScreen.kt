@@ -32,44 +32,42 @@ import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 import java.util.*
 
-
 // ── Semantic status colours ───────────────────────────────────────────────────
-private val StatusPending   = Color(0xFFE65100)   // deep orange
-private val StatusPreparing = Color(0xFF1565C0)   // blue
-private val StatusReady     = Color(0xFF2E7D32)   // green
+private val StatusPending = Color(0xFFE65100)
+private val StatusPreparing = Color(0xFF1565C0)
+private val StatusReady = Color(0xFF2E7D32)
 
 private fun statusColor(status: String) = when (status) {
-    "pending"   -> StatusPending
+    "pending" -> StatusPending
     "preparing" -> StatusPreparing
-    "ready"     -> StatusReady
-    else        -> Color.Gray
+    "ready" -> StatusReady
+    else -> Color.Gray
 }
 
 private fun statusLabel(status: String) = when (status) {
-    "pending"   -> "⏳ Pending"
+    "pending" -> "⏳ Pending"
     "preparing" -> "👨‍🍳 Preparing"
-    "ready"     -> "✅ Ready"
-    else        -> status.replaceFirstChar { it.uppercase() }
+    "ready" -> "✅ Ready"
+    else -> status.replaceFirstChar { it.uppercase() }
 }
 
-// Dark-mode safe orange tint
 private val Orange_10 = Orange.copy(alpha = 0.12f)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ShopkeeperDashboardScreen(
     onNavigateToProfile: () -> Unit,
+    onNavigateToMenu: () -> Unit = {},  // ← ADD THIS
     viewModel: ShopkeeperViewModel = hiltViewModel()
 ) {
-    val orders     by viewModel.orders.collectAsState()
-    val isLoading  by viewModel.isLoading.collectAsState()
-    val shopOpen   by viewModel.shopOpen.collectAsState()
+    val orders by viewModel.orders.collectAsState()
+    val isLoading by viewModel.isLoading.collectAsState()
+    val shopOpen by viewModel.shopOpen.collectAsState()
     val closedSlots by viewModel.closedSlots.collectAsState()
 
-    // Counts for the summary bar
-    val pendingCount   = orders.count { it.status == "pending" }
+    val pendingCount = orders.count { it.status == "pending" }
     val preparingCount = orders.count { it.status == "preparing" }
-    val readyCount     = orders.count { it.status == "ready" }
+    val readyCount = orders.count { it.status == "ready" }
 
     Scaffold(
         topBar = {
@@ -95,6 +93,10 @@ fun ShopkeeperDashboardScreen(
                         ),
                         modifier = Modifier.padding(end = 4.dp)
                     )
+                    // ✅ ADD THIS BUTTON
+                    IconButton(onClick = onNavigateToMenu) {
+                        Icon(Icons.Default.RestaurantMenu, contentDescription = "Menu", tint = Orange)
+                    }
                     IconButton(onClick = onNavigateToProfile) {
                         Icon(Icons.Default.Person, contentDescription = "Profile", tint = Orange)
                     }
@@ -120,30 +122,14 @@ fun ShopkeeperDashboardScreen(
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-
             item {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    SummaryChip(
-                        label = "Pending",
-                        count = pendingCount,
-                        color = StatusPending,
-                        modifier = Modifier.weight(1f)
-                    )
-                    SummaryChip(
-                        label = "Preparing",
-                        count = preparingCount,
-                        color = StatusPreparing,
-                        modifier = Modifier.weight(1f)
-                    )
-                    SummaryChip(
-                        label = "Ready",
-                        count = readyCount,
-                        color = StatusReady,
-                        modifier = Modifier.weight(1f)
-                    )
+                    SummaryChip("Pending", pendingCount, StatusPending, Modifier.weight(1f))
+                    SummaryChip("Preparing", preparingCount, StatusPreparing, Modifier.weight(1f))
+                    SummaryChip("Ready", readyCount, StatusReady, Modifier.weight(1f))
                 }
             }
 
@@ -159,17 +145,10 @@ fun ShopkeeperDashboardScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.padding(top = 4.dp)
                 ) {
-                    Text(
-                        "Active Orders",
-                        fontWeight = FontWeight.ExtraBold,
-                        fontSize = 18.sp
-                    )
+                    Text("Active Orders", fontWeight = FontWeight.ExtraBold, fontSize = 18.sp)
                     Spacer(Modifier.width(8.dp))
                     if (orders.isNotEmpty()) {
-                        Surface(
-                            shape = CircleShape,
-                            color = Orange_10
-                        ) {
+                        Surface(shape = CircleShape, color = Orange_10) {
                             Text(
                                 text = "${orders.size}",
                                 fontSize = 12.sp,
@@ -222,7 +201,7 @@ fun ShopkeeperDashboardScreen(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Order Card — shows items + cooking notes + action button
+// Order Card
 // ─────────────────────────────────────────────────────────────────────────────
 @Composable
 private fun OrderCard(order: Order, onUpdateStatus: (String) -> Unit) {
@@ -233,10 +212,6 @@ private fun OrderCard(order: Order, onUpdateStatus: (String) -> Unit) {
         else ""
     }
 
-    // Check if any item has a cooking note
-    val hasNotes = order.items.any { it.cookingNote.isNotBlank() }
-    var notesExpanded by remember { mutableStateOf(false) }
-
     Card(
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -244,7 +219,6 @@ private fun OrderCard(order: Order, onUpdateStatus: (String) -> Unit) {
         modifier = Modifier.fillMaxWidth()
     ) {
         Column {
-            // ── Coloured status strip at top ──────────────────────────────────
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -253,8 +227,6 @@ private fun OrderCard(order: Order, onUpdateStatus: (String) -> Unit) {
             )
 
             Column(modifier = Modifier.padding(14.dp)) {
-
-                // ── Header row ────────────────────────────────────────────────
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -279,7 +251,6 @@ private fun OrderCard(order: Order, onUpdateStatus: (String) -> Unit) {
 
                 Spacer(Modifier.height(12.dp))
 
-                // ── Items list ────────────────────────────────────────────────
                 order.items.forEach { item ->
                     Row(
                         modifier = Modifier
@@ -292,7 +263,6 @@ private fun OrderCard(order: Order, onUpdateStatus: (String) -> Unit) {
                             modifier = Modifier.weight(1f),
                             verticalAlignment = Alignment.Top
                         ) {
-                            // Quantity badge
                             Box(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(6.dp))
@@ -314,7 +284,6 @@ private fun OrderCard(order: Order, onUpdateStatus: (String) -> Unit) {
                                     fontWeight = FontWeight.SemiBold,
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
-                                // ── COOKING NOTE inline ───────────────────────
                                 if (item.cookingNote.isNotBlank()) {
                                     Spacer(Modifier.height(2.dp))
                                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -347,7 +316,6 @@ private fun OrderCard(order: Order, onUpdateStatus: (String) -> Unit) {
                     color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
                 )
 
-                // ── Pickup + total row ────────────────────────────────────────
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -383,7 +351,6 @@ private fun OrderCard(order: Order, onUpdateStatus: (String) -> Unit) {
 
                 Spacer(Modifier.height(12.dp))
 
-                // ── Action button ─────────────────────────────────────────────
                 when (order.status) {
                     "pending" -> ActionButton(
                         label = "Accept & Start Preparing",
@@ -448,7 +415,6 @@ private fun SlotControlCard(
 
             Spacer(Modifier.height(12.dp))
 
-            // Scrollable row of slot chips
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(dynamicSlots) { slot ->
                     val isClosed = closedSlots.contains(slot)
@@ -498,7 +464,6 @@ private fun SlotControlCard(
 // ─────────────────────────────────────────────────────────────────────────────
 // Reusable composables
 // ─────────────────────────────────────────────────────────────────────────────
-
 @Composable
 private fun SummaryChip(label: String, count: Int, color: Color, modifier: Modifier = Modifier) {
     Surface(

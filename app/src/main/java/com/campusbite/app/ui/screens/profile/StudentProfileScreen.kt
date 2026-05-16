@@ -24,6 +24,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.hilt.navigation.compose.hiltViewModel
+import com.campusbite.app.ui.viewmodel.OrderViewModel
+import com.google.firebase.auth.FirebaseAuth
 
 private val BrandOrange = Color(0xFFFF6B00)
 
@@ -32,10 +35,20 @@ fun StudentProfileScreen(
     onNavigateBack: () -> Unit,
     onNavigateToOrderStatus: (String) -> Unit,
     onNavigateToOrderHistory: () -> Unit,
-    onLogout: () -> Unit
+    onLogout: () -> Unit,
+    orderViewModel: OrderViewModel = hiltViewModel()
 ) {
     var showLogoutDialog by remember { mutableStateOf(false) }
     var notificationsEnabled by remember { mutableStateOf(true) }
+
+    val activeOrder by orderViewModel.activeOrder.collectAsState()
+
+    LaunchedEffect(Unit) {
+        val uid = FirebaseAuth.getInstance().currentUser?.uid
+        if (uid != null) {
+            orderViewModel.listenToActiveOrder(uid)
+        }
+    }
 
     Scaffold { paddingValues ->
 
@@ -49,6 +62,29 @@ fun StudentProfileScreen(
         ) {
 
             StudentHeaderCard()
+
+            // ✅ Active Order Section
+            if (activeOrder != null &&
+                activeOrder?.status?.uppercase() !in listOf("COMPLETED", "CANCELLED")
+            ) {
+                SectionCard(
+                    title = "Active Order",
+                    icon = Icons.Outlined.History
+                ) {
+                    Text(
+                        text = "Status: ${activeOrder!!.status}",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Button(
+                        onClick = { onNavigateToOrderStatus(activeOrder!!.orderId) },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(containerColor = BrandOrange)
+                    ) {
+                        Text("Track Order")
+                    }
+                }
+            }
 
             SectionCard(
                 title = "Recent Orders",
@@ -123,9 +159,7 @@ fun StudentProfileScreen(
                     icon = Icons.Outlined.Logout,
                     label = "Logout",
                     tint = MaterialTheme.colorScheme.error,
-                    onClick = {
-                        showLogoutDialog = true
-                    }
+                    onClick = { showLogoutDialog = true }
                 )
             }
 
@@ -144,34 +178,16 @@ fun StudentProfileScreen(
 
     if (showLogoutDialog) {
         AlertDialog(
-            onDismissRequest = {
-                showLogoutDialog = false
-            },
-            title = {
-                Text("Logout")
-            },
-            text = {
-                Text("Are you sure you want to logout?")
-            },
+            onDismissRequest = { showLogoutDialog = false },
+            title = { Text("Logout") },
+            text = { Text("Are you sure you want to logout?") },
             confirmButton = {
-                TextButton(
-                    onClick = {
-                        showLogoutDialog = false
-                        onLogout()
-                    }
-                ) {
-                    Text(
-                        text = "Logout",
-                        color = MaterialTheme.colorScheme.error
-                    )
+                TextButton(onClick = { showLogoutDialog = false; onLogout() }) {
+                    Text(text = "Logout", color = MaterialTheme.colorScheme.error)
                 }
             },
             dismissButton = {
-                TextButton(
-                    onClick = {
-                        showLogoutDialog = false
-                    }
-                ) {
+                TextButton(onClick = { showLogoutDialog = false }) {
                     Text("Cancel")
                 }
             }
@@ -184,9 +200,7 @@ private fun StudentHeaderCard() {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(18.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = BrandOrange
-        )
+        colors = CardDefaults.cardColors(containerColor = BrandOrange)
     ) {
         Row(
             modifier = Modifier.padding(20.dp),
@@ -237,9 +251,7 @@ private fun SectionCard(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp)
     ) {
-        Column(
-            modifier = Modifier.padding(16.dp)
-        ) {
+        Column(modifier = Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
                     imageVector = icon,
@@ -288,10 +300,7 @@ private fun ActionRow(
 
             Spacer(modifier = Modifier.width(12.dp))
 
-            Text(
-                text = label,
-                color = tint
-            )
+            Text(text = label, color = tint)
         }
 
         if (trailingText != null) {
@@ -301,10 +310,7 @@ private fun ActionRow(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         } else {
-            Icon(
-                imageVector = Icons.Default.ChevronRight,
-                contentDescription = null
-            )
+            Icon(imageVector = Icons.Default.ChevronRight, contentDescription = null)
         }
     }
 }

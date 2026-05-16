@@ -3,6 +3,7 @@ package com.campusbite.app.data.repository
 import com.campusbite.app.data.model.Order
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.ListenerRegistration
 import kotlinx.coroutines.tasks.await
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -12,6 +13,7 @@ class OrderRepository @Inject constructor(
     private val firestore: FirebaseFirestore,
     private val auth: FirebaseAuth
 ) {
+
     suspend fun placeOrder(order: Order): Result<String> {
         return try {
             val docRef = firestore.collection("orders").document()
@@ -40,10 +42,25 @@ class OrderRepository @Inject constructor(
         }
     }
 
-    fun listenToOrder(orderId: String, onUpdate: (Order) -> Unit) {
-        firestore.collection("orders").document(orderId)
+    fun listenToOrder(orderId: String, onUpdate: (Order?) -> Unit): ListenerRegistration {
+        return firestore.collection("orders").document(orderId)
             .addSnapshotListener { snapshot, _ ->
-                snapshot?.toObject(Order::class.java)?.let { onUpdate(it) }
+                onUpdate(snapshot?.toObject(Order::class.java))
+            }
+    }
+
+    fun listenToActiveOrder(
+        userId: String,
+        onUpdate: (Order?) -> Unit
+    ): ListenerRegistration {
+        return firestore.collection("orders")
+            .whereEqualTo("studentId", userId)
+            .whereIn("status", listOf("pending", "accepted", "preparing", "ready"))
+            .addSnapshotListener { snapshot, _ ->
+                val order = snapshot?.documents
+                    ?.mapNotNull { it.toObject(Order::class.java) }
+                    ?.maxByOrNull { it.createdAt }
+                onUpdate(order)
             }
     }
 }
