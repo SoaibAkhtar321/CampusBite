@@ -2,8 +2,8 @@ package com.campusbite.app.data.repository
 
 import android.util.Log
 import com.campusbite.app.data.model.MenuItem
+import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
-import com.google.firebase.firestore.toObject
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
@@ -19,7 +19,6 @@ class MenuRepositoryImpl @Inject constructor(
 
         val listener = firestore.collection("menuItems")
             .whereEqualTo("shopId", shopId)
-            .orderBy("category")
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
                     Log.e("MenuRepo", "Listener error: ${error.message}", error)
@@ -27,18 +26,22 @@ class MenuRepositoryImpl @Inject constructor(
                     return@addSnapshotListener
                 }
 
-                val items = snapshot?.documents?.mapNotNull { doc ->
-                    val item = doc.toObject<MenuItem>()?.copy(
-                        itemId = doc.id
+                val items = snapshot?.documents
+                    ?.mapNotNull { doc ->
+                        documentToMenuItem(doc)
+                    }
+                    ?.sortedWith(
+                        compareBy<MenuItem> { it.category.lowercase() }
+                            .thenBy { it.name.lowercase() }
                     )
+                    ?: emptyList()
 
+                items.forEach { item ->
                     Log.d(
                         "MenuRepo",
-                        "Item loaded: ${item?.name}, shopId: ${item?.shopId}, isAvailable: ${item?.isAvailable}"
+                        "Loaded item: ${item.name}, itemId=${item.itemId}, shopId=${item.shopId}, isAvailable=${item.isAvailable}"
                     )
-
-                    item
-                } ?: emptyList()
+                }
 
                 Log.d("MenuRepo", "Listener fired: ${items.size} items for shopId: $shopId")
 
@@ -70,18 +73,18 @@ class MenuRepositoryImpl @Inject constructor(
             )
 
             Log.d("MenuRepo", "Adding item: ${menuItem.name}")
-            Log.d("MenuRepo", "Final shopId saved: ${menuItem.shopId}")
-            Log.d("MenuRepo", "Final isAvailable saved: ${menuItem.isAvailable}")
-            Log.d("MenuRepo", "Final Firestore map: $itemMap")
+            Log.d("MenuRepo", "itemId: ${docRef.id}")
+            Log.d("MenuRepo", "shopId: ${menuItem.shopId}")
+            Log.d("MenuRepo", "isAvailable: ${menuItem.isAvailable}")
 
             docRef.set(itemMap).await()
 
-            Log.d("MenuRepo", "Item added successfully with ID: ${docRef.id}")
+            Log.d("MenuRepo", "Item added successfully")
 
             docRef.id
 
         } catch (exception: Exception) {
-            Log.e("MenuRepo", "Failed to add menu item: ${exception.message}", exception)
+            Log.e("MenuRepo", "Failed to add menu item", exception)
             throw Exception("Failed to add menu item: ${exception.message}")
         }
     }
@@ -108,24 +111,27 @@ class MenuRepositoryImpl @Inject constructor(
             )
 
             Log.d("MenuRepo", "Updating item: ${menuItem.name}")
-            Log.d("MenuRepo", "Updating itemId: ${menuItem.itemId}")
-            Log.d("MenuRepo", "Final shopId updated: ${menuItem.shopId}")
-            Log.d("MenuRepo", "Final isAvailable updated: ${menuItem.isAvailable}")
+            Log.d("MenuRepo", "itemId: ${menuItem.itemId}")
+            Log.d("MenuRepo", "shopId: ${menuItem.shopId}")
+            Log.d("MenuRepo", "isAvailable: ${menuItem.isAvailable}")
 
             firestore.collection("menuItems")
                 .document(menuItem.itemId)
                 .set(itemMap)
                 .await()
 
-            Log.d("MenuRepo", "Item updated successfully!")
+            Log.d("MenuRepo", "Item updated successfully")
 
         } catch (exception: Exception) {
-            Log.e("MenuRepo", "Failed to update menu item: ${exception.message}", exception)
+            Log.e("MenuRepo", "Failed to update menu item", exception)
             throw Exception("Failed to update menu item: ${exception.message}")
         }
     }
 
-    override suspend fun deleteMenuItem(shopId: String, itemId: String) {
+    override suspend fun deleteMenuItem(
+        shopId: String,
+        itemId: String
+    ) {
         try {
             if (shopId.isBlank()) {
                 throw Exception("Cannot delete item without shopId!")
@@ -134,8 +140,6 @@ class MenuRepositoryImpl @Inject constructor(
             if (itemId.isBlank()) {
                 throw Exception("Cannot delete item without itemId!")
             }
-
-            Log.d("MenuRepo", "Deleting itemId: $itemId from shopId: $shopId")
 
             val itemDoc = firestore.collection("menuItems")
                 .document(itemId)
@@ -148,8 +152,6 @@ class MenuRepositoryImpl @Inject constructor(
 
             val itemShopId = itemDoc.getString("shopId")
 
-            Log.d("MenuRepo", "Item shopId from Firestore: $itemShopId")
-
             if (itemShopId != shopId) {
                 throw Exception(
                     "Cannot delete item from another shop! Item shopId: $itemShopId, current shopId: $shopId"
@@ -161,10 +163,10 @@ class MenuRepositoryImpl @Inject constructor(
                 .delete()
                 .await()
 
-            Log.d("MenuRepo", "Item deleted successfully!")
+            Log.d("MenuRepo", "Item deleted successfully")
 
         } catch (exception: Exception) {
-            Log.e("MenuRepo", "Failed to delete menu item: ${exception.message}", exception)
+            Log.e("MenuRepo", "Failed to delete menu item", exception)
             throw Exception("Failed to delete menu item: ${exception.message}")
         }
     }
@@ -183,9 +185,10 @@ class MenuRepositoryImpl @Inject constructor(
                 throw Exception("Cannot update availability without itemId!")
             }
 
-            Log.d("MenuRepo", "Updating availability for itemId: $itemId")
-            Log.d("MenuRepo", "Current shopId: $shopId")
-            Log.d("MenuRepo", "New isAvailable value: $isAvailable")
+            Log.d("MenuRepo", "Updating availability")
+            Log.d("MenuRepo", "shopId: $shopId")
+            Log.d("MenuRepo", "itemId: $itemId")
+            Log.d("MenuRepo", "new isAvailable: $isAvailable")
 
             val itemDoc = firestore.collection("menuItems")
                 .document(itemId)
@@ -206,14 +209,47 @@ class MenuRepositoryImpl @Inject constructor(
 
             firestore.collection("menuItems")
                 .document(itemId)
-                .update("isAvailable", isAvailable)
+                .update(
+                    mapOf(
+                        "isAvailable" to isAvailable
+                    )
+                )
                 .await()
 
-            Log.d("MenuRepo", "Availability updated successfully!")
+            Log.d("MenuRepo", "Availability updated successfully to: $isAvailable")
 
         } catch (exception: Exception) {
-            Log.e("MenuRepo", "Failed to update availability: ${exception.message}", exception)
+            Log.e("MenuRepo", "Failed to update availability", exception)
             throw Exception("Failed to update availability: ${exception.message}")
+        }
+    }
+
+    private fun documentToMenuItem(doc: DocumentSnapshot): MenuItem? {
+        return try {
+            val itemId = doc.getString("itemId") ?: doc.id
+            val shopId = doc.getString("shopId") ?: ""
+            val name = doc.getString("name") ?: ""
+            val price = doc.getDouble("price") ?: 0.0
+            val prepTimeMinutes = doc.getLong("prepTimeMinutes")?.toInt() ?: 0
+            val category = doc.getString("category") ?: ""
+            val imageUrl = doc.getString("imageUrl") ?: ""
+
+            val isAvailable = doc.getBoolean("isAvailable") ?: true
+
+            MenuItem(
+                itemId = itemId,
+                shopId = shopId,
+                name = name,
+                price = price,
+                prepTimeMinutes = prepTimeMinutes,
+                category = category,
+                isAvailable = isAvailable,
+                imageUrl = imageUrl
+            )
+
+        } catch (e: Exception) {
+            Log.e("MenuRepo", "Failed to parse menu item: ${doc.id}", e)
+            null
         }
     }
 }

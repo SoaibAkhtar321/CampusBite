@@ -104,9 +104,9 @@ class MenuManagementViewModel @Inject constructor(
     fun addMenuItem(menuItem: MenuItem) {
         viewModelScope.launch {
             try {
-                val correctShopId = _uiState.value.shopId
+                val currentShopId = _uiState.value.shopId
 
-                if (correctShopId.isBlank()) {
+                if (currentShopId.isBlank()) {
                     _uiState.value = _uiState.value.copy(
                         errorMessage = "Cannot add item. Shop ID missing."
                     )
@@ -114,13 +114,13 @@ class MenuManagementViewModel @Inject constructor(
                 }
 
                 val fixedItem = menuItem.copy(
-                    shopId = correctShopId,
+                    shopId = currentShopId,
                     isAvailable = menuItem.isAvailable
                 )
 
                 Log.d("MenuVM", "Adding item: ${fixedItem.name}")
-                Log.d("MenuVM", "Correct shopId used: ${fixedItem.shopId}")
-                Log.d("MenuVM", "Availability used: ${fixedItem.isAvailable}")
+                Log.d("MenuVM", "Saving shopId: ${fixedItem.shopId}")
+                Log.d("MenuVM", "Saving isAvailable: ${fixedItem.isAvailable}")
 
                 menuRepository.addMenuItem(fixedItem)
 
@@ -142,9 +142,9 @@ class MenuManagementViewModel @Inject constructor(
     fun updateMenuItem(menuItem: MenuItem) {
         viewModelScope.launch {
             try {
-                val correctShopId = _uiState.value.shopId
+                val currentShopId = _uiState.value.shopId
 
-                if (correctShopId.isBlank()) {
+                if (currentShopId.isBlank()) {
                     _uiState.value = _uiState.value.copy(
                         errorMessage = "Cannot update item. Shop ID missing."
                     )
@@ -159,12 +159,12 @@ class MenuManagementViewModel @Inject constructor(
                 }
 
                 val fixedItem = menuItem.copy(
-                    shopId = correctShopId
+                    shopId = currentShopId
                 )
 
                 Log.d("MenuVM", "Updating item: ${fixedItem.name}")
-                Log.d("MenuVM", "Item ID: ${fixedItem.itemId}")
-                Log.d("MenuVM", "Correct shopId used: ${fixedItem.shopId}")
+                Log.d("MenuVM", "Updating itemId: ${fixedItem.itemId}")
+                Log.d("MenuVM", "Updating isAvailable: ${fixedItem.isAvailable}")
 
                 menuRepository.updateMenuItem(fixedItem)
 
@@ -201,9 +201,6 @@ class MenuManagementViewModel @Inject constructor(
                     )
                     return@launch
                 }
-
-                Log.d("MenuVM", "Deleting itemId: $itemId")
-                Log.d("MenuVM", "Current shopId: $currentShopId")
 
                 menuRepository.deleteMenuItem(
                     shopId = currentShopId,
@@ -247,9 +244,10 @@ class MenuManagementViewModel @Inject constructor(
                     return@launch
                 }
 
-                Log.d("MenuVM", "Updating availability for itemId: $itemId")
-                Log.d("MenuVM", "Current shopId: $currentShopId")
-                Log.d("MenuVM", "New isAvailable: $isAvailable")
+                Log.d("MenuVM", "Updating availability")
+                Log.d("MenuVM", "itemId: $itemId")
+                Log.d("MenuVM", "shopId: $currentShopId")
+                Log.d("MenuVM", "new isAvailable: $isAvailable")
 
                 menuRepository.updateItemAvailability(
                     shopId = currentShopId,
@@ -267,7 +265,7 @@ class MenuManagementViewModel @Inject constructor(
                 )
 
             } catch (e: Exception) {
-                Log.e("MenuVM", "Error updating item availability", e)
+                Log.e("MenuVM", "Error updating availability", e)
 
                 _uiState.value = _uiState.value.copy(
                     errorMessage = e.message ?: "Failed to update availability"

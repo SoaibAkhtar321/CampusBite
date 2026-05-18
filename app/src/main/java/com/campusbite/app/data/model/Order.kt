@@ -1,18 +1,18 @@
 package com.campusbite.app.data.model
 
-
 data class Order(
     val orderId: String = "",
+    val shopId: String = "",
     val studentId: String = "",
     val studentName: String = "",
-    val shopId: String = "",
+    val studentEmail: String = "",
     val items: List<OrderItem> = emptyList(),
     val totalPrice: Double = 0.0,
     val status: String = "pending",
     val pickupSlot: String = "",
-    val paymentMethod: String = "Online Payment",  // Cash on Delivery removed
-    val createdAt: Long = 0L,
-    val pickupDate: String = ""
+    val pickupDate: String = "",
+    val paymentMethod: String = "",
+    val createdAt: Long = System.currentTimeMillis()
 )
 
 data class OrderItem(

@@ -981,13 +981,19 @@ fun MenuItemCard(
     onAddClick: () -> Unit = {},
     onRemoveClick: () -> Unit = {}
 ) {
+    val canOrder = menuItem.isAvailable
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 5.dp),
         shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f)
+            containerColor = if (canOrder) {
+                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f)
+            } else {
+                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.12f)
+            }
         ),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
@@ -1007,17 +1013,31 @@ fun MenuItemCard(
                         .padding(top = 4.dp)
                         .size(10.dp)
                         .clip(CircleShape)
-                        .background(VegGreen)
+                        .background(
+                            if (canOrder) {
+                                VegGreen
+                            } else {
+                                MaterialTheme.colorScheme.error
+                            }
+                        )
                 )
+
                 Spacer(modifier = Modifier.width(8.dp))
+
                 Column {
                     Text(
                         text = menuItem.name,
                         fontSize = 14.sp,
                         fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface
+                        color = if (canOrder) {
+                            MaterialTheme.colorScheme.onSurface
+                        } else {
+                            MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
+                        }
                     )
+
                     Spacer(modifier = Modifier.height(3.dp))
+
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(6.dp))
@@ -1029,77 +1049,126 @@ fun MenuItemCard(
                         Text(
                             text = "⏱ ${menuItem.prepTimeMinutes} min",
                             fontSize = 11.sp,
-                            color = TextSecondary
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
+
                     Spacer(modifier = Modifier.height(4.dp))
+
                     Text(
                         text = "₹${menuItem.price.toInt()}",
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Orange
+                        color = if (canOrder) {
+                            Orange
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        }
                     )
+
+                    if (!canOrder) {
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(MaterialTheme.colorScheme.errorContainer)
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Text(
+                                text = "Not available right now",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                        }
+                    }
                 }
             }
 
             Spacer(modifier = Modifier.width(12.dp))
 
-            AnimatedContent(
-                targetState = quantity,
-                transitionSpec = {
-                    (slideInVertically { -it } + fadeIn()) togetherWith
-                            (slideOutVertically { it } + fadeOut())
-                },
-                label = "qty_transition"
-            ) { qty ->
-                if (qty == 0) {
-                    OutlinedButton(
-                        onClick = onAddClick,
-                        modifier = Modifier.height(36.dp),
-                        contentPadding = PaddingValues(horizontal = 18.dp),
-                        shape = RoundedCornerShape(10.dp),
-                        border = BorderStroke(1.5.dp, Orange),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Orange)
-                    ) {
-                        Text("Add", fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                    }
-                } else {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(Orange)
-                            .height(36.dp)
-                    ) {
-                        IconButton(
-                            onClick = onRemoveClick,
-                            modifier = Modifier.size(36.dp)
+            if (!canOrder) {
+                OutlinedButton(
+                    onClick = {},
+                    enabled = false,
+                    modifier = Modifier.height(36.dp),
+                    contentPadding = PaddingValues(horizontal = 12.dp),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Text(
+                        text = "Unavailable",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            } else {
+                AnimatedContent(
+                    targetState = quantity,
+                    transitionSpec = {
+                        (slideInVertically { -it } + fadeIn()) togetherWith
+                                (slideOutVertically { it } + fadeOut())
+                    },
+                    label = "qty_transition"
+                ) { qty ->
+                    if (qty == 0) {
+                        OutlinedButton(
+                            onClick = onAddClick,
+                            enabled = canOrder,
+                            modifier = Modifier.height(36.dp),
+                            contentPadding = PaddingValues(horizontal = 18.dp),
+                            shape = RoundedCornerShape(10.dp),
+                            border = BorderStroke(1.5.dp, Orange),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                contentColor = Orange
+                            )
                         ) {
                             Text(
-                                "−",
-                                color = Color.White,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 18.sp
+                                text = "Add",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold
                             )
                         }
-                        Text(
-                            text = qty.toString(),
-                            color = Color.White,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 14.sp,
-                            modifier = Modifier.widthIn(min = 20.dp),
-                            textAlign = TextAlign.Center
-                        )
-                        IconButton(
-                            onClick = onAddClick,
-                            modifier = Modifier.size(36.dp)
+                    } else {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Orange)
+                                .height(36.dp)
                         ) {
+                            IconButton(
+                                onClick = onRemoveClick,
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                Text(
+                                    text = "−",
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 18.sp
+                                )
+                            }
+
                             Text(
-                                "+",
+                                text = qty.toString(),
                                 color = Color.White,
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 18.sp
+                                fontSize = 14.sp,
+                                modifier = Modifier.widthIn(min = 20.dp),
+                                textAlign = TextAlign.Center
                             )
+
+                            IconButton(
+                                onClick = onAddClick,
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                Text(
+                                    text = "+",
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 18.sp
+                                )
+                            }
                         }
                     }
                 }

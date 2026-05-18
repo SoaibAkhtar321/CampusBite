@@ -34,14 +34,14 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -62,6 +62,7 @@ import com.campusbite.app.ui.theme.Orange
 import com.campusbite.app.ui.viewmodel.MenuManagementViewModel
 
 private val Orange_10 = Orange.copy(alpha = 0.12f)
+private val AvailableGreen = Color(0xFF4CAF50)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -76,13 +77,13 @@ fun MenuManagementScreen(
     var editingItem by remember { mutableStateOf<MenuItem?>(null) }
 
     LaunchedEffect(uiState.errorMessage, uiState.successMessage) {
-        uiState.errorMessage?.let {
-            snackbarHostState.showSnackbar(it)
+        uiState.errorMessage?.let { message ->
+            snackbarHostState.showSnackbar(message)
             viewModel.clearMessages()
         }
 
-        uiState.successMessage?.let {
-            snackbarHostState.showSnackbar(it)
+        uiState.successMessage?.let { message ->
+            snackbarHostState.showSnackbar(message)
             viewModel.clearMessages()
         }
     }
@@ -159,7 +160,9 @@ fun MenuManagementScreen(
                         ) { item ->
                             MenuItemCard(
                                 item = item,
-                                onEdit = { editingItem = it },
+                                onEdit = {
+                                    editingItem = it
+                                },
                                 onDelete = {
                                     viewModel.deleteMenuItem(item.itemId)
                                 },
@@ -260,6 +263,24 @@ private fun MenuItemCard(
     onDelete: () -> Unit,
     onToggleAvailability: () -> Unit
 ) {
+    val statusText = if (item.isAvailable) {
+        "Available right now"
+    } else {
+        "Not available right now"
+    }
+
+    val statusColor = if (item.isAvailable) {
+        AvailableGreen
+    } else {
+        MaterialTheme.colorScheme.error
+    }
+
+    val statusBg = if (item.isAvailable) {
+        AvailableGreen.copy(alpha = 0.12f)
+    } else {
+        MaterialTheme.colorScheme.error.copy(alpha = 0.12f)
+    }
+
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(12.dp),
@@ -294,21 +315,13 @@ private fun MenuItemCard(
 
                     Surface(
                         shape = RoundedCornerShape(20.dp),
-                        color = if (item.isAvailable) {
-                            Color(0xFF4CAF50).copy(alpha = 0.12f)
-                        } else {
-                            MaterialTheme.colorScheme.error.copy(alpha = 0.12f)
-                        }
+                        color = statusBg
                     ) {
                         Text(
-                            text = if (item.isAvailable) "Available" else "Unavailable",
+                            text = statusText,
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
-                            color = if (item.isAvailable) {
-                                Color(0xFF4CAF50)
-                            } else {
-                                MaterialTheme.colorScheme.error
-                            },
+                            color = statusColor,
                             modifier = Modifier.padding(
                                 horizontal = 8.dp,
                                 vertical = 3.dp
@@ -321,7 +334,8 @@ private fun MenuItemCard(
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
                         text = "₹${item.price.toInt()}",
@@ -367,8 +381,12 @@ private fun MenuItemCard(
                         } else {
                             Icons.Default.Visibility
                         },
-                        contentDescription = "Toggle availability",
-                        tint = Orange,
+                        contentDescription = if (item.isAvailable) {
+                            "Mark unavailable"
+                        } else {
+                            "Mark available"
+                        },
+                        tint = if (item.isAvailable) Orange else statusColor,
                         modifier = Modifier.size(20.dp)
                     )
                 }
@@ -461,7 +479,7 @@ private fun MenuItemDialog(
                     value = price,
                     onValueChange = { price = it },
                     label = {
-                        Text(text = "Price (₹)")
+                        Text(text = "Price ₹")
                     },
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(8.dp),
@@ -472,7 +490,7 @@ private fun MenuItemDialog(
                     value = prepTime,
                     onValueChange = { prepTime = it },
                     label = {
-                        Text(text = "Prep Time (minutes)")
+                        Text(text = "Prep Time minutes")
                     },
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(8.dp),
@@ -490,37 +508,12 @@ private fun MenuItemDialog(
                     singleLine = true
                 )
 
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Column {
-                        Text(
-                            text = "Availability",
-                            fontWeight = FontWeight.SemiBold
-                        )
-
-                        Text(
-                            text = if (isAvailable) {
-                                "Students can order this item"
-                            } else {
-                                "This item is hidden/unavailable"
-                            },
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                AvailabilitySelector(
+                    isAvailable = isAvailable,
+                    onAvailabilityChange = {
+                        isAvailable = it
                     }
-
-                    Switch(
-                        checked = isAvailable,
-                        onCheckedChange = {
-                            isAvailable = it
-                        }
-                    )
-                }
+                )
             }
         },
         confirmButton = {
@@ -570,4 +563,65 @@ private fun MenuItemDialog(
             }
         }
     )
+}
+
+@Composable
+private fun AvailabilitySelector(
+    isAvailable: Boolean,
+    onAvailabilityChange: (Boolean) -> Unit
+) {
+    val statusColor = if (isAvailable) {
+        AvailableGreen
+    } else {
+        MaterialTheme.colorScheme.error
+    }
+
+    val statusBg = if (isAvailable) {
+        AvailableGreen.copy(alpha = 0.10f)
+    } else {
+        MaterialTheme.colorScheme.error.copy(alpha = 0.10f)
+    }
+
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        color = statusBg
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column(
+                modifier = Modifier.weight(1f)
+            ) {
+                Text(
+                    text = if (isAvailable) {
+                        "Available right now"
+                    } else {
+                        "Not available right now"
+                    },
+                    fontWeight = FontWeight.Bold,
+                    color = statusColor
+                )
+
+                Text(
+                    text = if (isAvailable) {
+                        "Students can order this item."
+                    } else {
+                        "Students cannot order this item."
+                    },
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            Switch(
+                checked = isAvailable,
+                onCheckedChange = onAvailabilityChange
+            )
+        }
+    }
 }

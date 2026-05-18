@@ -1,5 +1,6 @@
 package com.campusbite.app.ui.screens.order
 
+import android.util.Log
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
@@ -79,12 +80,8 @@ import com.campusbite.app.ui.viewmodel.OrderState
 import com.campusbite.app.ui.viewmodel.OrderViewModel
 import java.time.LocalDate
 
-// ---------------------------------------------------------------------------
-// Dark-mode-safe colour helpers
-// These replace the hardcoded TextPrimary / TextSecondary / OrangeLight tokens
-// that were invisible on dark surfaces.
-// ---------------------------------------------------------------------------
-private val Orange_10 = Orange.copy(alpha = 0.12f)   // replaces OrangeLight on any surface
+private val Orange_10 = Orange.copy(alpha = 0.12f)
+
 @OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun CartScreen(
@@ -92,13 +89,14 @@ fun CartScreen(
     onOrderPlaced: (String) -> Unit,
     cartViewModel: CartViewModel = hiltViewModel(),
     orderViewModel: OrderViewModel = hiltViewModel(),
-    homeViewModel: HomeViewModel? = null  // ✅ ADD THIS LINE
-){
+    homeViewModel: HomeViewModel? = null
+) {
     val cartItems by cartViewModel.cartItems.collectAsState()
     val currentShopId by cartViewModel.currentShopId.collectAsState()
     val orderState by orderViewModel.orderState.collectAsState()
     val selectedShop by orderViewModel.selectedShop.collectAsState()
     val slotUiState by orderViewModel.slotUiState.collectAsState()
+
     val availableSlots = slotUiState.slots
     val isLoadingSlots = slotUiState.isLoading
     val slotMessage = slotUiState.message
@@ -112,20 +110,28 @@ fun CartScreen(
     val cartPrepTime = cartItems.maxOfOrNull { it.prepTimeMinutes } ?: 0
     val focusManager = LocalFocusManager.current
 
-    // ✅ ADD THIS: Load shop when shopId changes
     LaunchedEffect(shopId) {
-        if (shopId.isNotEmpty() && homeViewModel != null) {
-            val shops = homeViewModel.shops.value  // Get shops from HomeViewModel
-            val shop = shops.find { it.shopId == shopId }
+        Log.d("CartScreen", "Current shopId: $shopId")
+
+        if (shopId.isNotBlank()) {
+            orderViewModel.loadShop(shopId)
+        }
+
+        if (shopId.isNotBlank() && homeViewModel != null) {
+            val shop = homeViewModel.shops.value.find { it.shopId == shopId }
             if (shop != null) {
-                orderViewModel.setSelectedShop(shop)  // Set it in OrderViewModel
+                orderViewModel.setSelectedShop(shop)
             }
         }
     }
 
     LaunchedEffect(shopId, cartPrepTime, cartItems.size) {
-        android.util.Log.d("CartScreen", "Loading slots for shopId: '$shopId', cartPrepTime: $cartPrepTime, cartItems: ${cartItems.size}")
-        if (shopId.isNotEmpty() && cartItems.isNotEmpty()) {
+        Log.d(
+            "CartScreen",
+            "Loading slots. shopId=$shopId, cartPrepTime=$cartPrepTime, cartItems=${cartItems.size}"
+        )
+
+        if (shopId.isNotBlank() && cartItems.isNotEmpty()) {
             selectedSlot = ""
             orderViewModel.loadAvailableSlots(
                 shopId = shopId,
@@ -134,7 +140,27 @@ fun CartScreen(
         }
     }
 
-    // ... rest of your code
+    LaunchedEffect(orderState) {
+        when (val state = orderState) {
+            is OrderState.Success -> {
+                Log.d("CartScreen", "Order placed successfully. orderId=${state.orderId}")
+
+                cartViewModel.clearCart()
+
+                selectedSlot = ""
+
+                onOrderPlaced(state.orderId)
+
+                orderViewModel.resetState()
+            }
+
+            is OrderState.Error -> {
+                Log.e("CartScreen", "Order error: ${state.message}")
+            }
+
+            else -> Unit
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -171,18 +197,24 @@ fun CartScreen(
                 contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-
-                // ── CART ITEMS ────────────────────────────────────────────────
-                items(cartItems) { item ->
+                items(
+                    items = cartItems,
+                    key = { it.itemId }
+                ) { item ->
                     CartItemCard(
                         item = item,
                         isNoteExpanded = expandedNoteItemId.value == item.itemId,
                         noteDraft = noteDrafts[item.itemId] ?: item.cookingNote,
                         onToggleNote = {
                             focusManager.clearFocus()
+
                             expandedNoteItemId.value =
-                                if (expandedNoteItemId.value == item.itemId) null
-                                else item.itemId
+                                if (expandedNoteItemId.value == item.itemId) {
+                                    null
+                                } else {
+                                    item.itemId
+                                }
+
                             if (noteDrafts[item.itemId] == null) {
                                 noteDrafts[item.itemId] = item.cookingNote
                             }
@@ -201,10 +233,11 @@ fun CartScreen(
                     )
                 }
 
-                // ── PICKUP SLOT SECTION ───────────────────────────────────────
                 item {
                     Spacer(modifier = Modifier.height(6.dp))
+
                     SectionLabel(text = "Select Pickup Slot")
+
                     Spacer(modifier = Modifier.height(12.dp))
 
                     when {
@@ -225,8 +258,10 @@ fun CartScreen(
                                     )
                                 }
                             }
+
                             if (slotMessage.isNotBlank()) {
                                 Spacer(modifier = Modifier.height(8.dp))
+
                                 Text(
                                     text = slotMessage,
                                     fontSize = 12.sp,
@@ -244,13 +279,22 @@ fun CartScreen(
                                 fontWeight = FontWeight.SemiBold
                             )
                         }
+
+                        else -> {
+                            Text(
+                                text = "Pickup slots will appear here.",
+                                fontSize = 13.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                 }
 
-                // ── PAYMENT METHOD ────────────────────────────────────────────
                 item {
                     Spacer(modifier = Modifier.height(6.dp))
+
                     SectionLabel(text = "Payment Method")
+
                     Spacer(modifier = Modifier.height(10.dp))
 
                     Row(
@@ -276,29 +320,30 @@ fun CartScreen(
                                 modifier = Modifier.size(13.dp)
                             )
                         }
+
                         Spacer(modifier = Modifier.width(12.dp))
+
                         Column {
                             Text(
                                 text = "Online Payment",
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.Bold,
-                                // ← was TextPrimary (hardcoded dark) — now theme-aware
                                 color = MaterialTheme.colorScheme.onSurface
                             )
+
                             Text(
                                 text = "UPI / Card / Net Banking",
                                 fontSize = 11.sp,
-                                // ← was TextSecondary (hardcoded dark) — now theme-aware
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }
                 }
 
-                // ── ORDER ERROR ───────────────────────────────────────────────
                 item {
                     if (orderState is OrderState.Error) {
                         Spacer(modifier = Modifier.height(4.dp))
+
                         Text(
                             text = (orderState as OrderState.Error).message,
                             color = MaterialTheme.colorScheme.error,
@@ -308,11 +353,15 @@ fun CartScreen(
                     }
                 }
 
-                // ── TOTAL ─────────────────────────────────────────────────────
                 item {
                     Spacer(modifier = Modifier.height(4.dp))
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+
+                    HorizontalDivider(
+                        color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
+                    )
+
                     Spacer(modifier = Modifier.height(12.dp))
+
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -322,9 +371,9 @@ fun CartScreen(
                             Text(
                                 text = "Total Amount",
                                 fontSize = 13.sp,
-                                // ← was TextSecondary
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
+
                             Text(
                                 text = "₹${cartViewModel.totalPrice.toInt()}",
                                 fontSize = 26.sp,
@@ -332,6 +381,7 @@ fun CartScreen(
                                 color = Orange
                             )
                         }
+
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(20.dp))
@@ -346,18 +396,26 @@ fun CartScreen(
                             )
                         }
                     }
+
                     Spacer(modifier = Modifier.height(8.dp))
                 }
             }
 
-            // ── PLACE ORDER BUTTON ────────────────────────────────────────────
             val canOrder = selectedShop?.isOpen == true &&
-                    selectedSlot.isNotEmpty() &&
+                    selectedSlot.isNotBlank() &&
                     availableSlots.isNotEmpty() &&
+                    cartItems.isNotEmpty() &&
+                    shopId.isNotBlank() &&
                     orderState !is OrderState.Loading
 
             Button(
                 onClick = {
+                    Log.d("CartScreen", "Place Order clicked")
+                    Log.d("CartScreen", "shopId=$shopId")
+                    Log.d("CartScreen", "selectedSlot=$selectedSlot")
+                    Log.d("CartScreen", "cartItems=${cartItems.size}")
+                    Log.d("CartScreen", "totalPrice=${cartViewModel.totalPrice}")
+
                     val order = Order(
                         shopId = shopId,
                         items = cartItems,
@@ -367,6 +425,7 @@ fun CartScreen(
                         pickupDate = LocalDate.now().toString(),
                         paymentMethod = "Online Payment"
                     )
+
                     orderViewModel.placeOrder(order)
                 },
                 modifier = Modifier
@@ -390,10 +449,12 @@ fun CartScreen(
                 } else {
                     Text(
                         text = when {
+                            shopId.isBlank() -> "Shop not found"
+                            cartItems.isEmpty() -> "Cart is Empty"
                             selectedShop?.isOpen == false -> "🔒 Shop is Closed"
-                            isLoadingSlots              -> "Loading slots..."
-                            availableSlots.isEmpty()    -> "No Slots Available"
-                            selectedSlot.isEmpty()      -> "Select a pickup slot first"
+                            isLoadingSlots -> "Loading slots..."
+                            availableSlots.isEmpty() -> "No Slots Available"
+                            selectedSlot.isBlank() -> "Select a pickup slot first"
                             else -> "Place Order  •  ₹${cartViewModel.totalPrice.toInt()}"
                         },
                         fontSize = 15.sp,
@@ -406,9 +467,6 @@ fun CartScreen(
     }
 }
 
-// ---------------------------------------------------------------------------
-// Cart item card with cooking note expansion
-// ---------------------------------------------------------------------------
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun CartItemCard(
@@ -427,37 +485,43 @@ private fun CartItemCard(
         ),
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
-        Column(modifier = Modifier.padding(14.dp)) {
+        Column(
+            modifier = Modifier.padding(14.dp)
+        ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(modifier = Modifier.weight(1f)) {
+                Column(
+                    modifier = Modifier.weight(1f)
+                ) {
                     Text(
                         text = item.name,
                         fontSize = 15.sp,
                         fontWeight = FontWeight.Bold,
-                        // ← was hardcoded MaterialTheme.colorScheme.onSurface already — keep
                         color = MaterialTheme.colorScheme.onSurface
                     )
+
                     Spacer(modifier = Modifier.height(3.dp))
+
                     Text(
                         text = "₹${item.price.toInt()} × ${item.quantity}",
                         fontSize = 13.sp,
-                        // ← was TextSecondary
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+
                     if (item.prepTimeMinutes > 0) {
                         Text(
                             text = "⏱ ${item.prepTimeMinutes} min prep",
                             fontSize = 12.sp,
-                            // ← was TextSecondary
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
+
                     if (item.cookingNote.isNotBlank() && !isNoteExpanded) {
                         Spacer(modifier = Modifier.height(5.dp))
+
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(6.dp))
@@ -474,14 +538,18 @@ private fun CartItemCard(
                     }
                 }
 
-                Column(horizontalAlignment = Alignment.End) {
+                Column(
+                    horizontalAlignment = Alignment.End
+                ) {
                     Text(
                         text = "₹${(item.price * item.quantity).toInt()}",
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Bold,
                         color = Orange
                     )
+
                     Spacer(modifier = Modifier.height(6.dp))
+
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(8.dp))
@@ -489,14 +557,18 @@ private fun CartItemCard(
                             .clickable { onToggleNote() }
                             .padding(horizontal = 8.dp, vertical = 5.dp)
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
                             Icon(
                                 imageVector = Icons.Default.Edit,
                                 contentDescription = "Add note",
                                 tint = if (isNoteExpanded) Color.White else Orange,
                                 modifier = Modifier.size(13.dp)
                             )
+
                             Spacer(modifier = Modifier.width(4.dp))
+
                             Text(
                                 text = if (item.cookingNote.isBlank()) "Add note" else "Edit note",
                                 fontSize = 11.sp,
@@ -508,7 +580,6 @@ private fun CartItemCard(
                 }
             }
 
-            // Expandable note input
             AnimatedVisibility(
                 visible = isNoteExpanded,
                 enter = expandVertically() + fadeIn(),
@@ -516,23 +587,31 @@ private fun CartItemCard(
             ) {
                 Column {
                     Spacer(modifier = Modifier.height(10.dp))
+
                     HorizontalDivider(
                         color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f)
                     )
+
                     Spacer(modifier = Modifier.height(10.dp))
+
                     Text(
                         text = "Cooking Preferences",
                         fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold,
-                        // ← was TextSecondary
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+
                     Spacer(modifier = Modifier.height(4.dp))
 
                     val suggestions = listOf(
-                        "Extra spicy", "Less spicy", "No onion",
-                        "Less oil", "Less sugar", "Extra crispy"
+                        "Extra spicy",
+                        "Less spicy",
+                        "No onion",
+                        "Less oil",
+                        "Less sugar",
+                        "Extra crispy"
                     )
+
                     FlowRow(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -543,6 +622,7 @@ private fun CartItemCard(
                                 .split(",")
                                 .map { it.trim() }
                                 .contains(suggestion)
+
                             Box(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(20.dp))
@@ -553,8 +633,13 @@ private fun CartItemCard(
                                             .map { it.trim() }
                                             .filter { it.isNotBlank() }
                                             .toMutableList()
-                                        if (isSelected) current.remove(suggestion)
-                                        else current.add(suggestion)
+
+                                        if (isSelected) {
+                                            current.remove(suggestion)
+                                        } else {
+                                            current.add(suggestion)
+                                        }
+
                                         onNoteDraftChange(current.joinToString(", "))
                                     }
                                     .padding(horizontal = 10.dp, vertical = 5.dp)
@@ -574,7 +659,7 @@ private fun CartItemCard(
                         onValueChange = onNoteDraftChange,
                         placeholder = {
                             Text(
-                                "e.g. extra spicy, no onion...",
+                                text = "e.g. extra spicy, no onion...",
                                 fontSize = 13.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -587,19 +672,31 @@ private fun CartItemCard(
                             unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f),
                             cursorColor = Orange
                         ),
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                        keyboardActions = KeyboardActions(onDone = { onNoteSaved() })
+                        keyboardOptions = KeyboardOptions(
+                            imeAction = ImeAction.Done
+                        ),
+                        keyboardActions = KeyboardActions(
+                            onDone = { onNoteSaved() }
+                        )
                     )
+
                     Spacer(modifier = Modifier.height(8.dp))
+
                     Button(
                         onClick = onNoteSaved,
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(40.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = Orange),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Orange
+                        ),
                         shape = RoundedCornerShape(10.dp)
                     ) {
-                        Text("Save Preference", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        Text(
+                            text = "Save Preference",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
                     }
                 }
             }
@@ -607,27 +704,30 @@ private fun CartItemCard(
     }
 }
 
-// ---------------------------------------------------------------------------
-// Styled slot chip — dark-mode safe
-// ---------------------------------------------------------------------------
 @Composable
-private fun SlotChip(slot: String, isSelected: Boolean, onClick: () -> Unit) {
+private fun SlotChip(
+    slot: String,
+    isSelected: Boolean,
+    onClick: () -> Unit
+) {
     val bgColor by animateColorAsState(
         targetValue = if (isSelected) Orange else MaterialTheme.colorScheme.surface,
         animationSpec = tween(180),
         label = "slot_bg"
     )
+
     val textColor by animateColorAsState(
         targetValue = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurface,
-        // ← was TextPrimary (hardcoded dark)
         animationSpec = tween(180),
         label = "slot_text"
     )
+
     val borderColor by animateColorAsState(
         targetValue = if (isSelected) Orange else MaterialTheme.colorScheme.outline.copy(alpha = 0.4f),
         animationSpec = tween(180),
         label = "slot_border"
     )
+
     Box(
         modifier = Modifier
             .clip(RoundedCornerShape(10.dp))
@@ -646,9 +746,6 @@ private fun SlotChip(slot: String, isSelected: Boolean, onClick: () -> Unit) {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Shimmer skeleton for slots loading
-// ---------------------------------------------------------------------------
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun SlotShimmer() {
@@ -668,16 +765,14 @@ private fun SlotShimmer() {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Section label — dark-mode safe
-// ---------------------------------------------------------------------------
 @Composable
-private fun SectionLabel(text: String) {
+private fun SectionLabel(
+    text: String
+) {
     Text(
         text = text,
         fontSize = 17.sp,
         fontWeight = FontWeight.Bold,
-        // ← was TextPrimary (hardcoded #1A1A1A)
         color = MaterialTheme.colorScheme.onBackground
     )
 }
