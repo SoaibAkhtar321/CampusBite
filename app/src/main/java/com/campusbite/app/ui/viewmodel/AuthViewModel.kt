@@ -17,20 +17,50 @@ class AuthViewModel @Inject constructor(
     private val _authState = MutableStateFlow<AuthState>(AuthState.Idle)
     val authState: StateFlow<AuthState> = _authState
 
-    val isLoggedIn get() = authRepository.currentUser != null
+    private val _userRole = MutableStateFlow("student")
+    val userRole: StateFlow<String> = _userRole
 
-    fun login(email: String, password: String) {
+    val isLoggedIn: Boolean
+        get() = authRepository.currentUser != null
+
+    fun login(
+        email: String,
+        password: String
+    ) {
         viewModelScope.launch {
             _authState.value = AuthState.Loading
-            val result = authRepository.login(email, password)
+
+            val result = authRepository.login(
+                email = email,
+                password = password
+            )
+
             if (result.isSuccess) {
+                val isBlocked = authRepository.isUserBlocked()
+
+                if (isBlocked) {
+                    authRepository.logout()
+                    _authState.value = AuthState.Error("Your account has been blocked by admin.")
+                    return@launch
+                }
+
                 val role = authRepository.getUserRole()
-                val isApproved = authRepository.isShopkeeperApproved()   // ✅ NEW
+                val isApproved = authRepository.isShopkeeperApproved()
+
                 _authState.value = when (role) {
                     "admin" -> AuthState.AdminSuccess
-                    "shopkeeper" -> if (isApproved) AuthState.ShopkeeperSuccess else AuthState.ShopkeeperPending
+
+                    "shopkeeper" -> {
+                        if (isApproved) {
+                            AuthState.ShopkeeperSuccess
+                        } else {
+                            AuthState.ShopkeeperPending
+                        }
+                    }
+
                     else -> AuthState.StudentSuccess
                 }
+
             } else {
                 _authState.value = AuthState.Error(
                     result.exceptionOrNull()?.message ?: "Login failed"
@@ -39,14 +69,34 @@ class AuthViewModel @Inject constructor(
         }
     }
 
-    fun register(name: String, email: String, password: String, role: String) {
+    fun register(
+        name: String,
+        email: String,
+        phone: String,
+        password: String,
+        role: String
+    ) {
         viewModelScope.launch {
             _authState.value = AuthState.Loading
-            val result = authRepository.register(name, email, password, role) // ✅ updated
+
+            val result = authRepository.register(
+                name = name,
+                email = email,
+                phone = phone,
+                password = password,
+                role = role
+            )
+
             _authState.value = if (result.isSuccess) {
-                if (role == "shopkeeper") AuthState.ShopkeeperPending else AuthState.StudentSuccess
+                if (role == "shopkeeper") {
+                    AuthState.ShopkeeperPending
+                } else {
+                    AuthState.StudentSuccess
+                }
             } else {
-                AuthState.Error(result.exceptionOrNull()?.message ?: "Registration failed")
+                AuthState.Error(
+                    result.exceptionOrNull()?.message ?: "Registration failed"
+                )
             }
         }
     }
@@ -60,11 +110,13 @@ class AuthViewModel @Inject constructor(
         _authState.value = AuthState.Idle
     }
 
-    suspend fun getUserRole(): String = authRepository.getUserRole()
-    suspend fun isShopkeeperApproved(): Boolean = authRepository.isShopkeeperApproved()
+    suspend fun getUserRole(): String {
+        return authRepository.getUserRole()
+    }
 
-    private val _userRole = MutableStateFlow("student")
-    val userRole: StateFlow<String> = _userRole
+    suspend fun isShopkeeperApproved(): Boolean {
+        return authRepository.isShopkeeperApproved()
+    }
 
     fun checkUserRole() {
         viewModelScope.launch {
@@ -78,7 +130,7 @@ sealed class AuthState {
     object Loading : AuthState()
     object StudentSuccess : AuthState()
     object ShopkeeperSuccess : AuthState()
-    object ShopkeeperPending : AuthState()   // ✅ NEW
+    object ShopkeeperPending : AuthState()
     object AdminSuccess : AuthState()
     data class Error(val message: String) : AuthState()
 }

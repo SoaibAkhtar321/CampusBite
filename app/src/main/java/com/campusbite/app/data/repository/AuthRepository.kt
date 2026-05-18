@@ -14,33 +14,82 @@ class AuthRepository @Inject constructor(
 ) {
     val currentUser get() = auth.currentUser
 
-    suspend fun login(email: String, password: String): Result<Unit> {
+    suspend fun login(
+        email: String,
+        password: String
+    ): Result<Unit> {
         return try {
-            auth.signInWithEmailAndPassword(email, password).await()
+            auth.signInWithEmailAndPassword(
+                email.trim(),
+                password
+            ).await()
+
             Result.success(Unit)
+
         } catch (e: Exception) {
             Result.failure(e)
         }
     }
 
-    // UPDATED: role-based register
-    suspend fun register(name: String, email: String, password: String, role: String): Result<Unit> {
+    suspend fun register(
+        name: String,
+        email: String,
+        phone: String,
+        password: String,
+        role: String
+    ): Result<Unit> {
         return try {
-            val result = auth.createUserWithEmailAndPassword(email, password).await()
-            val uid = result.user?.uid ?: throw Exception("User ID not found")
+            if (name.trim().isBlank()) {
+                throw Exception("Name is required")
+            }
 
-            val isApproved = role != "shopkeeper" // shopkeeper requires approval
+            if (email.trim().isBlank()) {
+                throw Exception("Email is required")
+            }
+
+            if (phone.trim().isBlank()) {
+                throw Exception("Phone number is required")
+            }
+
+            if (phone.trim().length < 10) {
+                throw Exception("Enter a valid phone number")
+            }
+
+            if (password.length < 6) {
+                throw Exception("Password should be at least 6 characters")
+            }
+
+            val result = auth.createUserWithEmailAndPassword(
+                email.trim(),
+                password
+            ).await()
+
+            val uid = result.user?.uid
+                ?: throw Exception("User ID not found")
+
+            val normalizedRole = role.trim().lowercase()
+
+            val isApproved = normalizedRole != "shopkeeper"
 
             val user = User(
                 uid = uid,
-                name = name,
-                email = email,
-                role = role,
-                isApproved = isApproved
+                name = name.trim(),
+                email = email.trim(),
+                phone = phone.trim(),
+                role = normalizedRole,
+                shopId = "",
+                isApproved = isApproved,
+                isBlocked = false,
+                createdAt = System.currentTimeMillis()
             )
 
-            firestore.collection("users").document(uid).set(user).await()
+            firestore.collection("users")
+                .document(uid)
+                .set(user)
+                .await()
+
             Result.success(Unit)
+
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -53,27 +102,52 @@ class AuthRepository @Inject constructor(
     suspend fun getUserRole(): String {
         return try {
             val uid = auth.currentUser?.uid ?: return "student"
-            val snapshot = firestore.collection("users").document(uid).get().await()
+
+            val snapshot = firestore.collection("users")
+                .document(uid)
+                .get()
+                .await()
+
             snapshot.getString("role") ?: "student"
+
         } catch (e: Exception) {
             "student"
         }
     }
 
-    //  NEW
     suspend fun isShopkeeperApproved(): Boolean {
         return try {
             val uid = auth.currentUser?.uid ?: return false
 
-            // 1) Check users.isApproved first
-            val userSnap = firestore.collection("users").document(uid).get().await()
-            val userApproved = userSnap.getBoolean("isApproved") ?: false
-            if (userApproved) return true
+            val userSnap = firestore.collection("users")
+                .document(uid)
+                .get()
+                .await()
 
-            // 2) Fallback: check shop by shopId
-            val shopId = userSnap.getString("shopId") ?: return false
-            val shopSnap = firestore.collection("shops").document(shopId).get().await()
-            shopSnap.getBoolean("isApproved") ?: false
+            val role = userSnap.getString("role") ?: "student"
+
+            if (role != "shopkeeper") {
+                return true
+            }
+
+            userSnap.getBoolean("isApproved") ?: false
+
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    suspend fun isUserBlocked(): Boolean {
+        return try {
+            val uid = auth.currentUser?.uid ?: return false
+
+            val snapshot = firestore.collection("users")
+                .document(uid)
+                .get()
+                .await()
+
+            snapshot.getBoolean("isBlocked") ?: false
+
         } catch (e: Exception) {
             false
         }
