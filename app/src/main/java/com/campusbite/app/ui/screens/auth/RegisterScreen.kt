@@ -1,6 +1,7 @@
 package com.campusbite.app.ui.screens.auth
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -14,6 +15,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -50,9 +53,21 @@ fun RegisterScreen(
     onNavigateToPending: () -> Unit,
     viewModel: AuthViewModel = hiltViewModel()
 ) {
+    val universities = listOf(
+        "Galgotias University" to "galgotias_university",
+        "Sharda University" to "sharda_university",
+        "Amity University" to "amity_university",
+        "Other" to "other"
+    )
+
     var name by remember { mutableStateOf("") }
     var email by remember { mutableStateOf("") }
     var phone by remember { mutableStateOf("") }
+
+    var selectedUniversityName by remember { mutableStateOf("") }
+    var selectedUniversityId by remember { mutableStateOf("") }
+    var universityExpanded by remember { mutableStateOf(false) }
+
     var password by remember { mutableStateOf("") }
     var confirmPassword by remember { mutableStateOf("") }
 
@@ -60,12 +75,24 @@ fun RegisterScreen(
     var showConfirmPassword by remember { mutableStateOf(false) }
 
     var selectedRole by remember { mutableStateOf("student") }
-    var localError by remember { mutableStateOf<String?>(null) }
+    var localMessage by remember { mutableStateOf<String?>(null) }
+    var isSuccessMessage by remember { mutableStateOf(false) }
 
     val authState by viewModel.authState.collectAsState()
 
     LaunchedEffect(authState) {
         when (authState) {
+            is AuthState.EmailVerificationSent -> {
+                isSuccessMessage = true
+                localMessage = "Verification email sent. Please check your Inbox or Spam folder."
+                viewModel.resetState()
+            }
+
+            is AuthState.EmailRegistrationCompleted -> {
+                viewModel.resetState()
+                onNavigateToLogin()
+            }
+
             is AuthState.StudentSuccess -> {
                 viewModel.resetState()
                 onNavigateToHome()
@@ -106,27 +133,25 @@ fun RegisterScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             FilterChip(
                 selected = selectedRole == "student",
                 onClick = {
                     selectedRole = "student"
+                    localMessage = null
+                    isSuccessMessage = false
                 },
-                label = {
-                    Text("Student")
-                }
+                label = { Text("Student") }
             )
 
             FilterChip(
                 selected = selectedRole == "shopkeeper",
                 onClick = {
                     selectedRole = "shopkeeper"
+                    localMessage = null
+                    isSuccessMessage = false
                 },
-                label = {
-                    Text("Shopkeeper")
-                }
+                label = { Text("Shopkeeper") }
             )
         }
 
@@ -146,11 +171,10 @@ fun RegisterScreen(
             value = name,
             onValueChange = {
                 name = it
-                localError = null
+                localMessage = null
+                isSuccessMessage = false
             },
-            label = {
-                Text("Full Name")
-            },
+            label = { Text("Full Name") },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
             colors = textFieldColors
@@ -162,15 +186,12 @@ fun RegisterScreen(
             value = email,
             onValueChange = {
                 email = it
-                localError = null
+                localMessage = null
+                isSuccessMessage = false
             },
-            label = {
-                Text("Email")
-            },
+            label = { Text("Email") },
             singleLine = true,
-            keyboardOptions = KeyboardOptions(
-                keyboardType = KeyboardType.Email
-            ),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
             modifier = Modifier.fillMaxWidth(),
             colors = textFieldColors
         )
@@ -181,18 +202,51 @@ fun RegisterScreen(
             value = phone,
             onValueChange = { value ->
                 phone = value.filter { it.isDigit() }.take(10)
-                localError = null
+                localMessage = null
+                isSuccessMessage = false
             },
-            label = {
-                Text("Phone Number")
-            },
+            label = { Text("Phone Number") },
             singleLine = true,
-            keyboardOptions = KeyboardOptions(
-                keyboardType = KeyboardType.Phone
-            ),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
             modifier = Modifier.fillMaxWidth(),
             colors = textFieldColors
         )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Box(modifier = Modifier.fillMaxWidth()) {
+            OutlinedTextField(
+                value = selectedUniversityName,
+                onValueChange = {},
+                readOnly = true,
+                label = { Text("Select University") },
+                modifier = Modifier.fillMaxWidth(),
+                colors = textFieldColors,
+                trailingIcon = {
+                    TextButton(onClick = { universityExpanded = true }) {
+                        Text(text = "Choose", color = Orange)
+                    }
+                }
+            )
+
+            DropdownMenu(
+                expanded = universityExpanded,
+                onDismissRequest = { universityExpanded = false }
+            ) {
+                universities.forEach { (universityName, universityId) ->
+                    DropdownMenuItem(
+                        text = { Text(universityName) },
+                        onClick = {
+                            selectedUniversityName = universityName
+                            selectedUniversityId = universityId
+                            universityExpanded = false
+                            localMessage = null
+                            isSuccessMessage = false
+                        }
+                    )
+                }
+            }
+        }
 
         Spacer(modifier = Modifier.height(16.dp))
 
@@ -200,28 +254,21 @@ fun RegisterScreen(
             value = password,
             onValueChange = {
                 password = it
-                localError = null
+                localMessage = null
+                isSuccessMessage = false
             },
-            label = {
-                Text("Password")
-            },
+            label = { Text("Password") },
             singleLine = true,
             visualTransformation = if (showPassword) {
                 VisualTransformation.None
             } else {
                 PasswordVisualTransformation()
             },
-            keyboardOptions = KeyboardOptions(
-                keyboardType = KeyboardType.Password
-            ),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
             modifier = Modifier.fillMaxWidth(),
             colors = textFieldColors,
             trailingIcon = {
-                IconButton(
-                    onClick = {
-                        showPassword = !showPassword
-                    }
-                ) {
+                IconButton(onClick = { showPassword = !showPassword }) {
                     Text(
                         text = if (showPassword) "Hide" else "Show",
                         fontSize = 12.sp,
@@ -237,28 +284,21 @@ fun RegisterScreen(
             value = confirmPassword,
             onValueChange = {
                 confirmPassword = it
-                localError = null
+                localMessage = null
+                isSuccessMessage = false
             },
-            label = {
-                Text("Confirm Password")
-            },
+            label = { Text("Confirm Password") },
             singleLine = true,
             visualTransformation = if (showConfirmPassword) {
                 VisualTransformation.None
             } else {
                 PasswordVisualTransformation()
             },
-            keyboardOptions = KeyboardOptions(
-                keyboardType = KeyboardType.Password
-            ),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
             modifier = Modifier.fillMaxWidth(),
             colors = textFieldColors,
             trailingIcon = {
-                IconButton(
-                    onClick = {
-                        showConfirmPassword = !showConfirmPassword
-                    }
-                ) {
+                IconButton(onClick = { showConfirmPassword = !showConfirmPassword }) {
                     Text(
                         text = if (showConfirmPassword) "Hide" else "Show",
                         fontSize = 12.sp,
@@ -270,63 +310,106 @@ fun RegisterScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        val errorMessage = when {
-            localError != null -> localError
-            authState is AuthState.Error -> (authState as AuthState.Error).message
-            else -> null
+        val authError = if (authState is AuthState.Error) {
+            (authState as AuthState.Error).message
+        } else {
+            null
         }
 
-        if (errorMessage != null) {
+        val message = localMessage ?: authError
+
+        if (message != null) {
             Text(
-                text = errorMessage,
-                color = MaterialTheme.colorScheme.error,
+                text = message,
+                color = if (isSuccessMessage) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.error
+                },
                 fontSize = 14.sp
             )
 
             Spacer(modifier = Modifier.height(8.dp))
         }
 
-        Button(
-            onClick = {
-                localError = when {
-                    name.trim().isBlank() -> "Name is required"
-                    email.trim().isBlank() -> "Email is required"
-                    phone.trim().length != 10 -> "Enter a valid 10 digit phone number"
-                    password.length < 6 -> "Password should be at least 6 characters"
-                    password != confirmPassword -> "Passwords do not match"
-                    else -> null
+        if (isSuccessMessage) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Button(
+                    onClick = {
+                        viewModel.completeEmailRegistration(
+                            name = name,
+                            email = email,
+                            phone = phone,
+                            password = password,
+                            role = selectedRole,
+                            university = selectedUniversityName,
+                            universityId = selectedUniversityId
+                        )
+                    },
+                    modifier = Modifier.weight(1f),
+                    enabled = authState !is AuthState.Loading
+                ) {
+                    Text("I Verified")
                 }
 
-                if (localError == null) {
-                    viewModel.register(
-                        name = name,
-                        email = email,
-                        phone = phone,
-                        password = password,
-                        role = selectedRole
-                    )
+                TextButton(
+                    onClick = onNavigateToLogin,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("Go to Login")
                 }
-            },
-            modifier = Modifier.fillMaxWidth(),
-            enabled = authState !is AuthState.Loading
-        ) {
-            if (authState is AuthState.Loading) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(20.dp),
-                    strokeWidth = 2.dp
-                )
-            } else {
-                Text("Register")
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+        }
+
+        if (!isSuccessMessage) {
+            Button(
+                onClick = {
+                    isSuccessMessage = false
+
+                    localMessage = when {
+                        name.trim().isBlank() -> "Name is required"
+                        email.trim().isBlank() -> "Email is required"
+                        phone.trim().length != 10 -> "Enter a valid 10 digit phone number"
+                        selectedUniversityName.isBlank() -> "Please select your university"
+                        password.length < 6 -> "Password should be at least 6 characters"
+                        password != confirmPassword -> "Passwords do not match"
+                        else -> null
+                    }
+
+                    if (localMessage == null) {
+                        viewModel.register(
+                            name = name,
+                            email = email,
+                            phone = phone,
+                            password = password,
+                            role = selectedRole,
+                            university = selectedUniversityName,
+                            universityId = selectedUniversityId
+                        )
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = authState !is AuthState.Loading
+            ) {
+                if (authState is AuthState.Loading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        strokeWidth = 2.dp
+                    )
+                } else {
+                    Text("Register")
+                }
             }
         }
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        TextButton(
-            onClick = {
-                onNavigateToLogin()
-            }
-        ) {
+        TextButton(onClick = onNavigateToLogin) {
             Text("Already have an account? Login")
         }
     }

@@ -30,6 +30,7 @@ import com.campusbite.app.ui.screens.splash.SplashScreen
 import com.campusbite.app.ui.viewmodel.AuthViewModel
 import com.campusbite.app.ui.viewmodel.CartViewModel
 import com.campusbite.app.ui.viewmodel.HomeViewModel
+import com.campusbite.app.ui.screens.auth.CompleteProfileScreen
 
 @Composable
 fun NavGraph(navController: NavHostController) {
@@ -67,7 +68,12 @@ fun NavGraph(navController: NavHostController) {
                     navController.navigate(Routes.LOGIN) {
                         popUpTo(Routes.SPLASH) { inclusive = true }
                     }
-                }
+                },
+//                onNavigateToCompleteProfile = {
+//                    navController.navigate(Routes.COMPLETE_PROFILE) {
+//                        popUpTo(Routes.LOGIN) { inclusive = true }
+//                    }
+//                }
             )
         }
 
@@ -89,8 +95,13 @@ fun NavGraph(navController: NavHostController) {
                         popUpTo(Routes.LOGIN) { inclusive = true }
                     }
                 },
-                onNavigateToPending = {   // ✅ NEW
+                onNavigateToPending = {
                     navController.navigate(Routes.SHOPKEEPER_PENDING) {
+                        popUpTo(Routes.LOGIN) { inclusive = true }
+                    }
+                },
+                onNavigateToCompleteProfile = {
+                    navController.navigate(Routes.COMPLETE_PROFILE) {
                         popUpTo(Routes.LOGIN) { inclusive = true }
                     }
                 },
@@ -262,6 +273,20 @@ fun NavGraph(navController: NavHostController) {
             ) {
                 Text("Edit Shop Info Screen Coming Soon")
             }
+        }
+        composable(Routes.COMPLETE_PROFILE) {
+            CompleteProfileScreen(
+                onNavigateToStudent = {
+                    navController.navigate(Routes.STUDENT_HOME) {
+                        popUpTo(Routes.COMPLETE_PROFILE) { inclusive = true }
+                    }
+                },
+                onNavigateToPending = {
+                    navController.navigate(Routes.SHOPKEEPER_PENDING) {
+                        popUpTo(Routes.COMPLETE_PROFILE) { inclusive = true }
+                    }
+                }
+            )
         }
     }
 }

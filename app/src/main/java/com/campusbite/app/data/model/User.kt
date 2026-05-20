@@ -6,6 +6,8 @@ data class User(
     val email: String = "",
     val phone: String = "",
     val role: String = "student",
+    val university: String = "",
+    val universityId: String = "",
     val shopId: String = "",
     val isApproved: Boolean = true,
     val isBlocked: Boolean = false,

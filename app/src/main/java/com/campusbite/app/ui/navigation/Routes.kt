@@ -15,4 +15,5 @@ object Routes {
     const val SHOPKEEPER_DASHBOARD = "shopkeeper_dashboard"
     const val SHOPKEEPER_PENDING = "shopkeeper_pending"   // ✅ NEW
     const val ADMIN_DASHBOARD = "admin_dashboard"
+    const val COMPLETE_PROFILE = "complete_profile"
 }
