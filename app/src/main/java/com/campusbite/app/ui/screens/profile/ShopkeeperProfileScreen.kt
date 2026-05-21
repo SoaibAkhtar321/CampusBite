@@ -9,8 +9,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Logout
-import androidx.compose.material.icons.outlined.Store
+import androidx.compose.material.icons.outlined.Payments
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.Store
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -19,6 +20,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.hilt.navigation.compose.hiltViewModel
+import com.campusbite.app.ui.viewmodel.ProfileViewModel
 
 private val BrandOrange = Color(0xFFFF6B00)
 
@@ -26,9 +29,19 @@ private val BrandOrange = Color(0xFFFF6B00)
 @Composable
 fun ShopkeeperProfileScreen(
     onNavigateBack: () -> Unit,
-    onLogout: () -> Unit
+    onLogout: () -> Unit,
+    viewModel: ProfileViewModel = hiltViewModel()
 ) {
+    val userProfile by viewModel.userProfile.collectAsState()
+    val currentUpiId by viewModel.upiId.collectAsState()
+    val message by viewModel.message.collectAsState()
+
     var showLogoutDialog by remember { mutableStateOf(false) }
+    var upiInput by remember { mutableStateOf("") }
+
+    LaunchedEffect(currentUpiId) {
+        upiInput = currentUpiId
+    }
 
     Scaffold(
         topBar = {
@@ -79,7 +92,7 @@ fun ShopkeeperProfileScreen(
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = "S",
+                            text = userProfile?.name?.firstOrNull()?.uppercase() ?: "S",
                             color = Color.White,
                             style = MaterialTheme.typography.headlineMedium,
                             fontWeight = FontWeight.Bold
@@ -90,14 +103,14 @@ fun ShopkeeperProfileScreen(
 
                     Column {
                         Text(
-                            text = "Shopkeeper",
+                            text = userProfile?.name ?: "Shopkeeper",
                             color = Color.White,
                             style = MaterialTheme.typography.titleLarge,
                             fontWeight = FontWeight.Bold
                         )
 
                         Text(
-                            text = "CampusBite Partner",
+                            text = userProfile?.email ?: "CampusBite Partner",
                             color = Color.White.copy(alpha = 0.85f),
                             style = MaterialTheme.typography.bodyMedium
                         )
@@ -130,10 +143,76 @@ fun ShopkeeperProfileScreen(
 
                     Spacer(modifier = Modifier.height(12.dp))
 
-                    Text(
-                        text = "Shop profile details will be shown here.",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    Text("Shop ID: ${userProfile?.shopId?.ifBlank { "Not assigned" } ?: "Loading..."}")
+                    Text("Role: ${userProfile?.role ?: "shopkeeper"}")
+                    Text("Phone: ${userProfile?.phone?.ifBlank { "Not available" } ?: "Loading..."}")
+                }
+            }
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Outlined.Payments,
+                            contentDescription = null,
+                            tint = BrandOrange
+                        )
+
+                        Spacer(modifier = Modifier.width(8.dp))
+
+                        Text(
+                            text = "Payment Details",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    OutlinedTextField(
+                        value = upiInput,
+                        onValueChange = {
+                            upiInput = it
+                            viewModel.clearMessage()
+                        },
+                        label = { Text("UPI ID") },
+                        placeholder = { Text("example@paytm") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
                     )
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Button(
+                        onClick = {
+                            viewModel.updateUpiId(upiInput)
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = BrandOrange
+                        )
+                    ) {
+                        Text("Save UPI ID")
+                    }
+
+                    if (message != null) {
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        Text(
+                            text = message ?: "",
+                            color = if (message?.contains("success", true) == true) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.error
+                            },
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
                 }
             }
 

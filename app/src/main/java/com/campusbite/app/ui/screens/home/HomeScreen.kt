@@ -1,6 +1,7 @@
 package com.campusbite.app.ui.screens.home
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
@@ -138,9 +139,9 @@ fun HomeScreen(
     // ── DERIVED ──────────────────────────────────────────────────────────────
     val hasCartItems = cartItems.isNotEmpty()
     val bottomContentPadding: Dp = when {
-        shouldShowBanner && hasCartItems -> 180.dp
-        shouldShowBanner || hasCartItems -> 96.dp
-        else -> 16.dp
+        shouldShowBanner && hasCartItems -> 220.dp
+        shouldShowBanner || hasCartItems -> 140.dp
+        else -> 32.dp
     }
 
     // ── UI ───────────────────────────────────────────────────────────────────
@@ -481,6 +482,7 @@ private fun BottomFloatingStack(
     Box(
         modifier = Modifier
             .fillMaxSize()
+            .navigationBarsPadding()
             .padding(horizontal = 16.dp, vertical = 16.dp),
         contentAlignment = Alignment.BottomCenter
     ) {

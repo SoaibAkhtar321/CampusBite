@@ -82,7 +82,7 @@ import java.time.LocalDate
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.ui.platform.LocalContext
-
+import androidx.compose.foundation.layout.navigationBarsPadding
 private val Orange_10 = Orange.copy(alpha = 0.12f)
 
 @OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
@@ -182,7 +182,12 @@ fun CartScreen(
         ) {
             LazyColumn(
                 modifier = Modifier.weight(1f),
-                contentPadding = PaddingValues(16.dp),
+                contentPadding = PaddingValues(
+                    start = 16.dp,
+                    top = 16.dp,
+                    end = 16.dp,
+                    bottom = 100.dp
+                ),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 items(
@@ -401,25 +406,54 @@ fun CartScreen(
                     val upiId = selectedShop?.upiId ?: ""
 
                     if (upiId.isBlank()) {
-                        orderViewModel.setError("UPI ID is missing for this shop.")
+                        orderViewModel.setError(
+                            "UPI ID is missing for this shop."
+                        )
                         return@Button
                     }
 
-                    val uri = Uri.parse(
-                        "upi://pay?pa=$upiId" +
-                                "&pn=${selectedShop?.name ?: "CampusBite"}" +
-                                "&am=${cartViewModel.totalPrice}" +
-                                "&cu=INR"
-                    )
-
-                    val upiIntent = Intent(Intent.ACTION_VIEW, uri)
-
-                    context.startActivity(
-                        Intent.createChooser(
-                            upiIntent,
-                            "Pay with UPI"
+                    val upiUri = Uri.Builder()
+                        .scheme("upi")
+                        .authority("pay")
+                        .appendQueryParameter(
+                            "pa",
+                            upiId.trim()
                         )
+                        .appendQueryParameter(
+                            "pn",
+                            selectedShop?.name ?: "CampusBite"
+                        )
+                        .appendQueryParameter(
+                            "tn",
+                            "CampusBite Order"
+                        )
+                        .appendQueryParameter(
+                            "am",
+                            "%.2f".format(cartViewModel.totalPrice)
+                        )
+                        .appendQueryParameter(
+                            "cu",
+                            "INR"
+                        )
+                        .build()
+
+                    val upiIntent = Intent(
+                        Intent.ACTION_VIEW,
+                        upiUri
                     )
+
+                    val chooser = Intent.createChooser(
+                        upiIntent,
+                        "Pay with UPI"
+                    )
+
+                    try {
+                        context.startActivity(chooser)
+                    } catch (e: Exception) {
+                        orderViewModel.setError(
+                            "No UPI app found"
+                        )
+                    }
 
                     val order = Order(
                         shopId = shopId,
@@ -436,15 +470,22 @@ fun CartScreen(
                 },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 12.dp)
+                    .navigationBarsPadding()
+                    .padding(
+                        horizontal = 16.dp,
+                        vertical = 12.dp
+                    )
                     .height(54.dp),
                 enabled = canOrder,
                 colors = ButtonDefaults.buttonColors(
                     containerColor = Orange,
-                    disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant
+                    disabledContainerColor =
+                        MaterialTheme.colorScheme.surfaceVariant
                 ),
                 shape = RoundedCornerShape(16.dp),
-                elevation = ButtonDefaults.buttonElevation(defaultElevation = 6.dp)
+                elevation = ButtonDefaults.buttonElevation(
+                    defaultElevation = 6.dp
+                )
             ) {
                 if (orderState is OrderState.Loading) {
                     CircularProgressIndicator(
@@ -455,14 +496,29 @@ fun CartScreen(
                 } else {
                     Text(
                         text = when {
-                            shopId.isBlank() -> "Shop not found"
-                            cartItems.isEmpty() -> "Cart is Empty"
-                            selectedShop?.isOpen == false -> "🔒 Shop is Closed"
-                            selectedShop?.upiId.isNullOrBlank() -> "Shop UPI ID Missing"
-                            isLoadingSlots -> "Loading slots..."
-                            availableSlots.isEmpty() -> "No Slots Available"
-                            selectedSlot.isBlank() -> "Select a pickup slot first"
-                            else -> "Pay & Place Order  •  ₹${cartViewModel.totalPrice.toInt()}"
+                            shopId.isBlank() ->
+                                "Shop not found"
+
+                            cartItems.isEmpty() ->
+                                "Cart is Empty"
+
+                            selectedShop?.isOpen == false ->
+                                "🔒 Shop is Closed"
+
+                            selectedShop?.upiId.isNullOrBlank() ->
+                                "Shop UPI ID Missing"
+
+                            isLoadingSlots ->
+                                "Loading slots..."
+
+                            availableSlots.isEmpty() ->
+                                "No Slots Available"
+
+                            selectedSlot.isBlank() ->
+                                "Select a pickup slot first"
+
+                            else ->
+                                "Pay & Place Order  •  ₹${cartViewModel.totalPrice.toInt()}"
                         },
                         fontSize = 15.sp,
                         fontWeight = FontWeight.Bold,
