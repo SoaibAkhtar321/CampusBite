@@ -12,6 +12,8 @@ data class Order(
     val pickupSlot: String = "",
     val pickupDate: String = "",
     val paymentMethod: String = "",
+    val paymentStatus: String = "pending",
+    val transactionRef: String = "",
     val createdAt: Long = System.currentTimeMillis()
 )
 

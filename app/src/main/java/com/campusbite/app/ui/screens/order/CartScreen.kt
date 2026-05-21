@@ -79,6 +79,9 @@ import com.campusbite.app.ui.viewmodel.HomeViewModel
 import com.campusbite.app.ui.viewmodel.OrderState
 import com.campusbite.app.ui.viewmodel.OrderViewModel
 import java.time.LocalDate
+import android.content.Intent
+import android.net.Uri
+import androidx.compose.ui.platform.LocalContext
 
 private val Orange_10 = Orange.copy(alpha = 0.12f)
 
@@ -109,10 +112,9 @@ fun CartScreen(
     val shopId = currentShopId ?: ""
     val cartPrepTime = cartItems.maxOfOrNull { it.prepTimeMinutes } ?: 0
     val focusManager = LocalFocusManager.current
+    val context = LocalContext.current
 
     LaunchedEffect(shopId) {
-        Log.d("CartScreen", "Current shopId: $shopId")
-
         if (shopId.isNotBlank()) {
             orderViewModel.loadShop(shopId)
         }
@@ -126,11 +128,6 @@ fun CartScreen(
     }
 
     LaunchedEffect(shopId, cartPrepTime, cartItems.size) {
-        Log.d(
-            "CartScreen",
-            "Loading slots. shopId=$shopId, cartPrepTime=$cartPrepTime, cartItems=${cartItems.size}"
-        )
-
         if (shopId.isNotBlank() && cartItems.isNotEmpty()) {
             selectedSlot = ""
             orderViewModel.loadAvailableSlots(
@@ -143,19 +140,10 @@ fun CartScreen(
     LaunchedEffect(orderState) {
         when (val state = orderState) {
             is OrderState.Success -> {
-                Log.d("CartScreen", "Order placed successfully. orderId=${state.orderId}")
-
                 cartViewModel.clearCart()
-
                 selectedSlot = ""
-
                 onOrderPlaced(state.orderId)
-
                 orderViewModel.resetState()
-            }
-
-            is OrderState.Error -> {
-                Log.e("CartScreen", "Order error: ${state.message}")
             }
 
             else -> Unit
@@ -325,14 +313,14 @@ fun CartScreen(
 
                         Column {
                             Text(
-                                text = "Online Payment",
+                                text = "UPI Payment",
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
 
                             Text(
-                                text = "UPI / Card / Net Banking",
+                                text = "Pay using GPay / PhonePe / Paytm",
                                 fontSize = 11.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -410,11 +398,28 @@ fun CartScreen(
 
             Button(
                 onClick = {
-                    Log.d("CartScreen", "Place Order clicked")
-                    Log.d("CartScreen", "shopId=$shopId")
-                    Log.d("CartScreen", "selectedSlot=$selectedSlot")
-                    Log.d("CartScreen", "cartItems=${cartItems.size}")
-                    Log.d("CartScreen", "totalPrice=${cartViewModel.totalPrice}")
+                    val upiId = selectedShop?.upiId ?: ""
+
+                    if (upiId.isBlank()) {
+                        orderViewModel.setError("UPI ID is missing for this shop.")
+                        return@Button
+                    }
+
+                    val uri = Uri.parse(
+                        "upi://pay?pa=$upiId" +
+                                "&pn=${selectedShop?.name ?: "CampusBite"}" +
+                                "&am=${cartViewModel.totalPrice}" +
+                                "&cu=INR"
+                    )
+
+                    val upiIntent = Intent(Intent.ACTION_VIEW, uri)
+
+                    context.startActivity(
+                        Intent.createChooser(
+                            upiIntent,
+                            "Pay with UPI"
+                        )
+                    )
 
                     val order = Order(
                         shopId = shopId,
@@ -423,7 +428,8 @@ fun CartScreen(
                         status = "pending",
                         pickupSlot = selectedSlot,
                         pickupDate = LocalDate.now().toString(),
-                        paymentMethod = "Online Payment"
+                        paymentMethod = "UPI",
+                        paymentStatus = "pending_verification"
                     )
 
                     orderViewModel.placeOrder(order)
@@ -452,10 +458,11 @@ fun CartScreen(
                             shopId.isBlank() -> "Shop not found"
                             cartItems.isEmpty() -> "Cart is Empty"
                             selectedShop?.isOpen == false -> "🔒 Shop is Closed"
+                            selectedShop?.upiId.isNullOrBlank() -> "Shop UPI ID Missing"
                             isLoadingSlots -> "Loading slots..."
                             availableSlots.isEmpty() -> "No Slots Available"
                             selectedSlot.isBlank() -> "Select a pickup slot first"
-                            else -> "Place Order  •  ₹${cartViewModel.totalPrice.toInt()}"
+                            else -> "Pay & Place Order  •  ₹${cartViewModel.totalPrice.toInt()}"
                         },
                         fontSize = 15.sp,
                         fontWeight = FontWeight.Bold,

@@ -15,5 +15,6 @@ data class Shop(
 
     // Slot & capacity
     val maxOrdersPerSlot: Int = 5,
-    val closedSlots: List<String> = emptyList()
+    val closedSlots: List<String> = emptyList(),
+    val upiId: String = ""
 )

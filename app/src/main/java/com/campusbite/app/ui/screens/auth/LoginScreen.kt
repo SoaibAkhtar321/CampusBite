@@ -3,10 +3,31 @@ package com.campusbite.app.ui.screens.auth
 import android.app.Activity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -44,18 +65,23 @@ fun LoginScreen(
 
     val authState by viewModel.authState.collectAsState()
 
-    val googleSignInClient = remember {
-        val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
-            .requestIdToken(context.getString(R.string.default_web_client_id))
+    val googleSignInClient = remember(context) {
+        val googleSignInOptions = GoogleSignInOptions.Builder(
+            GoogleSignInOptions.DEFAULT_SIGN_IN
+        )
+            .requestIdToken(
+                context.getString(R.string.default_web_client_id)
+            )
             .requestEmail()
             .build()
 
-        GoogleSignIn.getClient(context, gso)
+        GoogleSignIn.getClient(context, googleSignInOptions)
     }
 
     val googleLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
+
         if (result.resultCode == Activity.RESULT_OK) {
             val task = GoogleSignIn.getSignedInAccountFromIntent(result.data)
 
@@ -66,6 +92,7 @@ fun LoginScreen(
                 if (!idToken.isNullOrBlank()) {
                     viewModel.signInWithGoogle(idToken)
                 }
+
             } catch (e: Exception) {
                 e.printStackTrace()
             }
@@ -74,6 +101,7 @@ fun LoginScreen(
 
     LaunchedEffect(authState) {
         when (authState) {
+
             is AuthState.StudentSuccess -> {
                 viewModel.resetState()
                 onNavigateToStudent()
@@ -99,6 +127,10 @@ fun LoginScreen(
                 onNavigateToCompleteProfile()
             }
 
+            is AuthState.EmailVerificationSent -> {
+                viewModel.resetState()
+            }
+
             else -> Unit
         }
     }
@@ -112,6 +144,17 @@ fun LoginScreen(
         unfocusedLabelColor = TextSecondary,
         cursorColor = Orange
     )
+
+    val errorMessage = if (authState is AuthState.Error) {
+        (authState as AuthState.Error).message
+    } else {
+        null
+    }
+
+    val shouldShowResendButton = errorMessage?.contains(
+        other = "verify",
+        ignoreCase = true
+    ) == true
 
     Column(
         modifier = Modifier
@@ -139,10 +182,16 @@ fun LoginScreen(
 
         OutlinedTextField(
             value = email,
-            onValueChange = { email = it },
-            label = { Text("Email") },
+            onValueChange = {
+                email = it
+            },
+            label = {
+                Text("Email")
+            },
             singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
+            keyboardOptions = KeyboardOptions(
+                keyboardType = KeyboardType.Email
+            ),
             modifier = Modifier.fillMaxWidth(),
             colors = textFieldColors
         )
@@ -151,19 +200,29 @@ fun LoginScreen(
 
         OutlinedTextField(
             value = password,
-            onValueChange = { password = it },
-            label = { Text("Password") },
+            onValueChange = {
+                password = it
+            },
+            label = {
+                Text("Password")
+            },
             singleLine = true,
             visualTransformation = if (showPassword) {
                 VisualTransformation.None
             } else {
                 PasswordVisualTransformation()
             },
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+            keyboardOptions = KeyboardOptions(
+                keyboardType = KeyboardType.Password
+            ),
             modifier = Modifier.fillMaxWidth(),
             colors = textFieldColors,
             trailingIcon = {
-                IconButton(onClick = { showPassword = !showPassword }) {
+                IconButton(
+                    onClick = {
+                        showPassword = !showPassword
+                    }
+                ) {
                     Text(
                         text = if (showPassword) "Hide" else "Show",
                         fontSize = 12.sp,
@@ -175,18 +234,41 @@ fun LoginScreen(
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        if (authState is AuthState.Error) {
+        if (errorMessage != null) {
             Text(
-                text = (authState as AuthState.Error).message,
+                text = errorMessage,
                 color = MaterialTheme.colorScheme.error,
                 fontSize = 13.sp,
                 modifier = Modifier.padding(bottom = 8.dp)
             )
+
+            if (shouldShowResendButton) {
+                Text(
+                    text = "Your account already exists. Please verify your email instead of registering again.",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = 4.dp)
+                )
+
+                TextButton(
+                    onClick = {
+                        viewModel.resendVerificationEmail(
+                            email = email,
+                            password = password
+                        )
+                    }
+                ) {
+                    Text("Resend verification email")
+                }
+            }
         }
 
         Button(
             onClick = {
-                viewModel.login(email, password)
+                viewModel.login(
+                    email = email,
+                    password = password
+                )
             },
             modifier = Modifier.fillMaxWidth(),
             enabled = authState !is AuthState.Loading
@@ -207,7 +289,9 @@ fun LoginScreen(
         OutlinedButton(
             onClick = {
                 googleSignInClient.signOut().addOnCompleteListener {
-                    googleLauncher.launch(googleSignInClient.signInIntent)
+                    googleLauncher.launch(
+                        googleSignInClient.signInIntent
+                    )
                 }
             },
             modifier = Modifier.fillMaxWidth(),
@@ -218,7 +302,11 @@ fun LoginScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        TextButton(onClick = onNavigateToRegister) {
+        TextButton(
+            onClick = {
+                onNavigateToRegister()
+            }
+        ) {
             Text("Don't have an account? Register")
         }
     }

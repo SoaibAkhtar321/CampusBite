@@ -499,6 +499,9 @@ class OrderViewModel @Inject constructor(
                 .notify(orderId.hashCode(), notification)
         }
     }
+    fun setError(message: String) {
+        _orderState.value = OrderState.Error(message)
+    }
 
     override fun onCleared() {
         super.onCleared()

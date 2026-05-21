@@ -16,19 +16,37 @@ class AuthRepository @Inject constructor(
 ) {
     val currentUser get() = auth.currentUser
 
-    suspend fun login(email: String, password: String): Result<Unit> {
+    suspend fun login(
+        email: String,
+        password: String
+    ): Result<Unit> {
         return try {
-            auth.signInWithEmailAndPassword(email.trim(), password).await()
+            auth.signInWithEmailAndPassword(
+                email.trim(),
+                password
+            ).await()
+
             auth.currentUser?.reload()?.await()
 
-            val firebaseUser = auth.currentUser ?: throw Exception("User not found")
+            val firebaseUser = auth.currentUser
+                ?: throw Exception("User not found")
 
-            if (!firebaseUser.isEmailVerified) {
+            val userDoc = firestore.collection("users")
+                .document(firebaseUser.uid)
+                .get()
+                .await()
+
+            val role = userDoc.getString("role") ?: "student"
+
+            if (role != "admin" && !firebaseUser.isEmailVerified) {
                 auth.signOut()
-                throw Exception("Please verify your email before logging in.")
+                throw Exception(
+                    "Your account exists but email is not verified. Please check Inbox/Spam or resend verification email."
+                )
             }
 
             Result.success(Unit)
+
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -86,8 +104,7 @@ class AuthRepository @Inject constructor(
 
             if (!firebaseUser.isEmailVerified) {
                 auth.signOut()
-                throw Exception("Email not verified yet. Please verify your email first.")
-            }
+                throw Exception("Your account exists but email is not verified. Please check Inbox/Spam or resend verification email.")            }
 
             val cleanRole = role.trim().lowercase()
 
