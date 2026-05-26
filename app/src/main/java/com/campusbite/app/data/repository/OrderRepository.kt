@@ -39,8 +39,17 @@ class OrderRepository @Inject constructor(
                 .get()
                 .await()
 
-            val studentName = userDoc.getString("name") ?: "Student"
-            val studentEmail = userDoc.getString("email") ?: currentUser.email.orEmpty()
+            val studentName =
+                userDoc.getString("name")
+                    ?: "Student"
+
+            val studentEmail =
+                userDoc.getString("email")
+                    ?: currentUser.email.orEmpty()
+
+            val studentPhone =
+                userDoc.getString("phone")
+                    ?: currentUser.phoneNumber.orEmpty()
 
             val docRef = firestore.collection("orders").document()
             val orderId = docRef.id
@@ -50,9 +59,9 @@ class OrderRepository @Inject constructor(
                 studentId = studentId,
                 studentName = studentName,
                 studentEmail = studentEmail,
+                studentPhone = studentPhone,
                 createdAt = System.currentTimeMillis()
             )
-
             Log.d("OrderRepository", "Placing order...")
             Log.d("OrderRepository", "orderId: $orderId")
             Log.d("OrderRepository", "studentId: $studentId")

@@ -80,8 +80,7 @@ import com.campusbite.app.ui.viewmodel.HomeViewModel
 import com.campusbite.app.ui.viewmodel.OrderState
 import com.campusbite.app.ui.viewmodel.OrderViewModel
 import java.time.LocalDate
-import android.content.Intent
-import android.net.Uri
+
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.layout.navigationBarsPadding
 import android.graphics.Bitmap
@@ -575,48 +574,6 @@ fun CartScreen(
                         return@Button
                     }
 
-                    val upiUri = Uri.Builder()
-                        .scheme("upi")
-                        .authority("pay")
-                        .appendQueryParameter(
-                            "pa",
-                            upiId.trim()
-                        )
-                        .appendQueryParameter(
-                            "pn",
-                            selectedShop?.name ?: "CampusBite"
-                        )
-                        .appendQueryParameter(
-                            "tn",
-                            "CampusBite Order"
-                        )
-                        .appendQueryParameter(
-                            "am",
-                            "%.2f".format(cartViewModel.totalPrice)
-                        )
-                        .appendQueryParameter(
-                            "cu",
-                            "INR"
-                        )
-                        .build()
-
-                    val upiIntent = Intent(
-                        Intent.ACTION_VIEW,
-                        upiUri
-                    )
-
-                    val chooser = Intent.createChooser(
-                        upiIntent,
-                        "Pay with UPI"
-                    )
-
-                    try {
-                        context.startActivity(chooser)
-                    } catch (e: Exception) {
-                        orderViewModel.setError(
-                            "No UPI app found"
-                        )
-                    }
 
                     val order = Order(
                         shopId = shopId,

@@ -35,6 +35,7 @@ import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 import java.util.*
 
+import androidx.compose.ui.platform.LocalContext
 // ── Semantic status colours ───────────────────────────────────────────────────
 private val StatusPending = Color(0xFFE65100)
 private val StatusPreparing = Color(0xFF1565C0)
@@ -216,6 +217,7 @@ private fun OrderCard(order: Order, onUpdateStatus: (String) -> Unit) {
     }
     val context = LocalContext.current
 
+
     Card(
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -363,16 +365,16 @@ private fun OrderCard(order: Order, onUpdateStatus: (String) -> Unit) {
 
                             OutlinedButton(
                                 onClick = {
-                                    val intent = Intent(
-                                        Intent.ACTION_DIAL,
-                                        Uri.parse(
-                                            "tel:${order.studentPhone}"
+                                    if (order.studentPhone.isNotBlank()) {
+                                        val intent = Intent(
+                                            Intent.ACTION_DIAL,
+                                            Uri.parse("tel:${order.studentPhone}")
                                         )
-                                    )
-
-                                    context.startActivity(intent)
+                                        context.startActivity(intent)
+                                    }
                                 },
-                                modifier = Modifier.weight(1f)
+                                modifier = Modifier.weight(1f),
+                                enabled = order.studentPhone.isNotBlank()
                             ) {
                                 Icon(
                                     Icons.Default.Call,

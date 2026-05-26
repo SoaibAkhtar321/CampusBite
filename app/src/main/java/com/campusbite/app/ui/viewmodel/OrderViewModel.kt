@@ -284,7 +284,10 @@ class OrderViewModel @Inject constructor(
             try {
                 if (shopId.isBlank()) {
                     _selectedShop.value = null
-                    _slotUiState.value = SlotUiState(message = "Shop ID is missing.")
+                    _slotUiState.value = SlotUiState(
+                        message = "Shop ID is missing.",
+                        isLoading = false
+                    )
                     return@launch
                 }
 
@@ -297,16 +300,14 @@ class OrderViewModel @Inject constructor(
 
                 if (shop == null) {
                     _selectedShop.value = null
-                    _slotUiState.value = SlotUiState(message = "Shop details not found.")
+                    _slotUiState.value = SlotUiState(
+                        message = "Shop details not found.",
+                        isLoading = false
+                    )
                     return@launch
                 }
 
                 _selectedShop.value = shop
-
-                if (!shop.isOpen) {
-                    _slotUiState.value = SlotUiState(message = "This shop is currently closed.")
-                    return@launch
-                }
 
                 val displayFormatter = DateTimeFormatter.ofPattern("hh:mm a")
                 val timeFormatter = DateTimeFormatter.ofPattern("HH:mm")
@@ -320,12 +321,49 @@ class OrderViewModel @Inject constructor(
                     formatter = timeFormatter
                 )
 
+                val closingTime = parseShopTime(
+                    value = shop.closingTime,
+                    fallback = LocalTime.of(21, 0),
+                    formatter = timeFormatter
+                )
+
                 val openingDateTime = LocalDateTime.of(
                     now.toLocalDate(),
                     openingTime
                 )
 
-                val earliestTime = now.plusMinutes(cartPrepTimeMinutes.toLong())
+                val closingDateTime = LocalDateTime.of(
+                    now.toLocalDate(),
+                    closingTime
+                )
+
+                val isWithinWorkingHours =
+                    !now.isBefore(openingDateTime) &&
+                            now.isBefore(closingDateTime)
+
+                if (!isWithinWorkingHours) {
+                    _slotUiState.value = SlotUiState(
+                        message = "⏰ This shop is currently closed. Orders are accepted between ${
+                            formatShopTime(shop.openingTime)
+                        } - ${
+                            formatShopTime(shop.closingTime)
+                        }.",
+                        isLoading = false
+                    )
+                    return@launch
+                }
+
+                if (!shop.isOpen) {
+                    _slotUiState.value = SlotUiState(
+                        message = "🔒 This shop has temporarily stopped accepting orders.",
+                        isLoading = false
+                    )
+                    return@launch
+                }
+
+                val earliestTime = now.plusMinutes(
+                    cartPrepTimeMinutes.toLong()
+                )
 
                 var slot = roundToNextSlotDateTime(
                     time = if (earliestTime.isAfter(openingDateTime)) {
@@ -338,14 +376,8 @@ class OrderViewModel @Inject constructor(
 
                 val maxWindowEnd = now.plusHours(3)
 
-                val shopClosingDateTime = getShopClosingDateTime(
-                    now = now,
-                    closingTime = shop.closingTime,
-                    formatter = timeFormatter
-                )
-
-                val endTime = if (shopClosingDateTime.isBefore(maxWindowEnd)) {
-                    shopClosingDateTime
+                val endTime = if (closingDateTime.isBefore(maxWindowEnd)) {
+                    closingDateTime
                 } else {
                     maxWindowEnd
                 }
@@ -353,13 +385,15 @@ class OrderViewModel @Inject constructor(
                 val generatedSlots = mutableListOf<String>()
 
                 while (slot.isBefore(endTime)) {
-                    generatedSlots.add(slot.toLocalTime().format(displayFormatter))
+                    generatedSlots.add(
+                        slot.toLocalTime().format(displayFormatter)
+                    )
                     slot = slot.plusMinutes(15)
                 }
 
                 if (generatedSlots.isEmpty()) {
                     _slotUiState.value = SlotUiState(
-                        message = "Shop opening time is ${formatShopTime(shop.openingTime)}. No pickup slots available yet.",
+                        message = "No pickup slots are available right now. Please try again later.",
                         isLoading = false
                     )
                     return@launch
@@ -376,8 +410,11 @@ class OrderViewModel @Inject constructor(
                         .await()
                         .size()
 
-                    val isSlotClosedByShop = shop.closedSlots.contains(slotText)
-                    val hasCapacity = orderCount < shop.maxOrdersPerSlot
+                    val isSlotClosedByShop =
+                        shop.closedSlots.contains(slotText)
+
+                    val hasCapacity =
+                        orderCount < shop.maxOrdersPerSlot
 
                     if (!isSlotClosedByShop && hasCapacity) {
                         availableSlots.add(slotText)
@@ -388,10 +425,12 @@ class OrderViewModel @Inject constructor(
                     slots = availableSlots,
                     message = when {
                         availableSlots.isEmpty() ->
-                            "All pickup slots are full, closed, or unavailable right now."
+                            "All pickup slots are full or temporarily unavailable."
 
-                        shopClosingDateTime.isBefore(maxWindowEnd) ->
-                            "Shop closing time is ${formatShopTime(shop.closingTime)}. Slots after that are unavailable."
+                        endTime == closingDateTime ->
+                            "Slots are shown only until shop closing time: ${
+                                formatShopTime(shop.closingTime)
+                            }."
 
                         else -> ""
                     },
@@ -400,8 +439,9 @@ class OrderViewModel @Inject constructor(
 
             } catch (e: Exception) {
                 Log.e("OrderVM", "Failed to load pickup slots", e)
+
                 _slotUiState.value = SlotUiState(
-                    message = "Failed to load pickup slots.",
+                    message = "Failed to load pickup slots. Please try again.",
                     isLoading = false
                 )
             }

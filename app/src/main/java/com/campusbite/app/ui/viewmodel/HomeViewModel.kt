@@ -17,7 +17,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlin.ranges.ClosedFloatingPointRange
 import javax.inject.Inject
-
+import kotlinx.coroutines.flow.map
 @HiltViewModel
 class HomeViewModel @Inject constructor(
     private val shopRepository: ShopRepository
@@ -45,17 +45,13 @@ class HomeViewModel @Inject constructor(
     val priceSteps = listOf(0f, 20f, 50f, 100f, 200f, 500f)
     val defaultPriceRange = 0f..500f
 
-    val isDataReady: StateFlow<Boolean> = combine(
-        _shops,
-        _menuItems
-    ) { shops, items ->
-        shops.isNotEmpty() || items.isNotEmpty()
-    }.stateIn(
-        scope = viewModelScope,
-        started = SharingStarted.WhileSubscribed(),
-        initialValue = false
-    )
-
+    val isDataReady: StateFlow<Boolean> = _isLoading
+        .map { loading -> !loading }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(),
+            initialValue = false
+        )
     val filteredItems: StateFlow<List<MenuItem>> = combine(
         _menuItems,
         _selectedCategory,
@@ -99,14 +95,29 @@ class HomeViewModel @Inject constructor(
                     val shopsResult = shopsDeferred.await()
                     val itemsResult = itemsDeferred.await()
 
-                    if (shopsResult.isSuccess) {
-                        _shops.value = shopsResult.getOrNull().orEmpty()
-                    }
+                    val visibleShops = shopsResult.getOrNull()
+                        .orEmpty()
+                        .filter { shop ->
+                            !shop.isBlocked &&
+                                    !shop.isDeleted
+                        }
 
-                    if (itemsResult.isSuccess) {
-                        _menuItems.value = itemsResult.getOrNull().orEmpty()
-                    }
+                    _shops.value = visibleShops
+
+                    val visibleShopIds = visibleShops
+                        .map { it.shopId }
+                        .toSet()
+
+                    _menuItems.value = itemsResult.getOrNull()
+                        .orEmpty()
+                        .filter { item ->
+                            item.shopId in visibleShopIds
+                        }
                 }
+
+            } catch (e: Exception) {
+                _shops.value = emptyList()
+                _menuItems.value = emptyList()
             } finally {
                 _isLoading.value = false
             }

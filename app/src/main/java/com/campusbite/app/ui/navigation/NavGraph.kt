@@ -29,6 +29,7 @@ import com.campusbite.app.ui.screens.splash.SplashScreen
 import com.campusbite.app.ui.viewmodel.AuthViewModel
 import com.campusbite.app.ui.viewmodel.CartViewModel
 import com.campusbite.app.ui.viewmodel.HomeViewModel
+import com.campusbite.app.ui.screens.profile.AdminProfileScreen
 
 @Composable
 fun NavGraph(
@@ -286,15 +287,9 @@ fun NavGraph(
         }
 
         composable(Routes.ADMIN_PROFILE) {
-            StudentProfileScreen(
+            AdminProfileScreen(
                 onNavigateBack = {
                     navController.popBackStack()
-                },
-                onNavigateToOrderStatus = { orderId ->
-                    navController.navigate(Routes.orderStatus(orderId))
-                },
-                onNavigateToOrderHistory = {
-                    navController.navigate(Routes.ORDER_HISTORY)
                 },
                 onLogout = {
                     authViewModel.logout()

@@ -13,21 +13,26 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -45,6 +50,14 @@ import com.campusbite.app.ui.viewmodel.AdminShop
 import com.campusbite.app.ui.viewmodel.AdminUser
 import com.campusbite.app.ui.viewmodel.AdminViewModel
 
+private data class ConfirmAction(
+    val title: String,
+    val message: String,
+    val confirmText: String,
+    val isDanger: Boolean = false,
+    val onConfirm: () -> Unit
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AdminDashboardScreen(
@@ -55,13 +68,17 @@ fun AdminDashboardScreen(
     val users by viewModel.users.collectAsState()
     val pendingShopkeepers by viewModel.pendingShopkeepers.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
+    val message by viewModel.message.collectAsState()
 
     var tabIndex by remember { mutableStateOf(0) }
+    var confirmAction by remember { mutableStateOf<ConfirmAction?>(null) }
+
+    val activeShops = shops.filter { !it.isDeleted }
 
     val tabs = listOf(
         "Pending (${pendingShopkeepers.size})",
-        "Shops",
-        "Users"
+        "Shops (${activeShops.size})",
+        "Users (${users.size})"
     )
 
     Scaffold(
@@ -84,18 +101,19 @@ fun AdminDashboardScreen(
             )
         }
     ) { padding ->
+
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
         ) {
-            TabRow(
-                selectedTabIndex = tabIndex
-            ) {
+            TabRow(selectedTabIndex = tabIndex) {
                 tabs.forEachIndexed { index, title ->
                     Tab(
                         selected = tabIndex == index,
-                        onClick = { tabIndex = index },
+                        onClick = {
+                            tabIndex = index
+                        },
                         text = {
                             Text(
                                 text = title,
@@ -108,6 +126,25 @@ fun AdminDashboardScreen(
                         }
                     )
                 }
+            }
+
+            if (!message.isNullOrBlank()) {
+                Text(
+                    text = message ?: "",
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 8.dp),
+                    color = if (
+                        message?.contains("failed", ignoreCase = true) == true ||
+                        message?.contains("missing", ignoreCase = true) == true ||
+                        message?.contains("error", ignoreCase = true) == true
+                    ) {
+                        MaterialTheme.colorScheme.error
+                    } else {
+                        MaterialTheme.colorScheme.primary
+                    },
+                    fontWeight = FontWeight.SemiBold
+                )
             }
 
             if (isLoading) {
@@ -123,17 +160,262 @@ fun AdminDashboardScreen(
             when (tabIndex) {
                 0 -> PendingShopkeepersTab(
                     pendingShopkeepers = pendingShopkeepers,
-                    viewModel = viewModel
+                    onApprove = { user ->
+                        confirmAction = ConfirmAction(
+                            title = "Approve Shopkeeper?",
+                            message = "This will approve ${user.name.ifBlank { user.email }} and create or activate their shop.",
+                            confirmText = "Approve"
+                        ) {
+                            viewModel.setShopkeeperApproved(
+                                userDocId = user.docId,
+                                approved = true
+                            )
+                        }
+                    },
+                    onBlock = { user ->
+                        confirmAction = ConfirmAction(
+                            title = "Block Request?",
+                            message = "This will block ${user.name.ifBlank { user.email }} from approval.",
+                            confirmText = "Block",
+                            isDanger = true
+                        ) {
+                            viewModel.setUserBlocked(
+                                userDocId = user.docId,
+                                blocked = true
+                            )
+                        }
+                    },
+                    onRemove = { user ->
+                        confirmAction = ConfirmAction(
+                            title = "Remove Pending Request?",
+                            message = "This will remove the shopkeeper request and convert this account back to student.",
+                            confirmText = "Remove",
+                            isDanger = true
+                        ) {
+                            viewModel.removePendingShopkeeper(
+                                userDocId = user.docId
+                            )
+                        }
+                    }
                 )
 
                 1 -> ShopsTab(
-                    shops = shops,
-                    viewModel = viewModel
+                    shops = activeShops,
+                    onApprovedChange = { shop, approved ->
+                        confirmAction = ConfirmAction(
+                            title = if (approved) {
+                                "Approve Shop?"
+                            } else {
+                                "Remove Shop Approval?"
+                            },
+                            message = if (approved) {
+                                "This shop will become visible after approval if it is not blocked."
+                            } else {
+                                "This shop will no longer be treated as approved."
+                            },
+                            confirmText = if (approved) {
+                                "Approve"
+                            } else {
+                                "Remove Approval"
+                            },
+                            isDanger = !approved
+                        ) {
+                            viewModel.setShopApproved(
+                                shopDocId = shop.docId,
+                                approved = approved,
+                                shopId = shop.shopId
+                            )
+                        }
+                    },
+                    onOpenChange = { shop, open ->
+                        viewModel.setShopOpen(
+                            shopDocId = shop.docId,
+                            open = open
+                        )
+                    },
+                    onBlockToggle = { shop ->
+                        val shouldBlock = !shop.isBlocked
+
+                        confirmAction = ConfirmAction(
+                            title = if (shouldBlock) {
+                                "Block Shop?"
+                            } else {
+                                "Unblock Shop?"
+                            },
+                            message = if (shouldBlock) {
+                                "This shop will be hidden from students and marked closed."
+                            } else {
+                                "This shop can become visible again if approved."
+                            },
+                            confirmText = if (shouldBlock) {
+                                "Block"
+                            } else {
+                                "Unblock"
+                            },
+                            isDanger = shouldBlock
+                        ) {
+                            viewModel.setShopBlocked(
+                                shopDocId = shop.docId,
+                                shopId = shop.shopId,
+                                blocked = shouldBlock
+                            )
+                        }
+                    },
+                    onDelete = { shop ->
+                        confirmAction = ConfirmAction(
+                            title = "Delete Shop Completely?",
+                            message = "This will delete the shop and its menu items, and remove the shop link from its shopkeeper. This action cannot be easily undone.",
+                            confirmText = "Delete",
+                            isDanger = true
+                        ) {
+                            viewModel.deleteShopCompletely(
+                                shopDocId = shop.docId,
+                                shopId = shop.shopId
+                            )
+                        }
+                    }
                 )
 
                 2 -> UsersTab(
                     users = users,
-                    viewModel = viewModel
+                    onRoleChange = { user, role ->
+                        confirmAction = ConfirmAction(
+                            title = "Change User Role?",
+                            message = "Change ${user.name.ifBlank { user.email }} role to $role?",
+                            confirmText = "Change"
+                        ) {
+                            viewModel.setUserRole(
+                                userDocId = user.docId,
+                                role = role
+                            )
+                        }
+                    },
+                    onBlockedChange = { user, blocked ->
+                        confirmAction = ConfirmAction(
+                            title = if (blocked) {
+                                "Block User?"
+                            } else {
+                                "Unblock User?"
+                            },
+                            message = if (blocked) {
+                                "This user may lose access to app actions."
+                            } else {
+                                "This user will be allowed again."
+                            },
+                            confirmText = if (blocked) {
+                                "Block"
+                            } else {
+                                "Unblock"
+                            },
+                            isDanger = blocked
+                        ) {
+                            viewModel.setUserBlocked(
+                                userDocId = user.docId,
+                                blocked = blocked
+                            )
+                        }
+                    },
+                    onShopkeeperApprovedChange = { user, approved ->
+                        confirmAction = ConfirmAction(
+                            title = if (approved) {
+                                "Approve Shopkeeper?"
+                            } else {
+                                "Move Shopkeeper To Pending?"
+                            },
+                            message = if (approved) {
+                                "This will approve the shopkeeper and create or activate their shop."
+                            } else {
+                                "This will remove shopkeeper approval."
+                            },
+                            confirmText = if (approved) {
+                                "Approve"
+                            } else {
+                                "Move Pending"
+                            },
+                            isDanger = !approved
+                        ) {
+                            viewModel.setShopkeeperApproved(
+                                userDocId = user.docId,
+                                approved = approved
+                            )
+                        }
+                    }
+                )
+            }
+        }
+    }
+
+    confirmAction?.let { action ->
+        ConfirmDialog(
+            action = action,
+            onDismiss = {
+                confirmAction = null
+            },
+            onConfirm = {
+                action.onConfirm()
+                confirmAction = null
+            }
+        )
+    }
+}
+
+@Composable
+private fun PendingShopkeepersTab(
+    pendingShopkeepers: List<AdminUser>,
+    onApprove: (AdminUser) -> Unit,
+    onBlock: (AdminUser) -> Unit,
+    onRemove: (AdminUser) -> Unit
+) {
+    var query by remember { mutableStateOf("") }
+
+    val filteredUsers = pendingShopkeepers.filter { user ->
+        matchesUserSearch(user, query)
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(12.dp)
+    ) {
+        AdminSearchBar(
+            query = query,
+            onQueryChange = {
+                query = it
+            },
+            placeholder = "Search pending shopkeepers..."
+        )
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        if (filteredUsers.isEmpty()) {
+            EmptyState(
+                text = if (query.isBlank()) {
+                    "No pending shopkeeper requests"
+                } else {
+                    "No pending request found"
+                }
+            )
+            return@Column
+        }
+
+        LazyColumn(
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            items(
+                items = filteredUsers,
+                key = { user -> user.docId }
+            ) { user ->
+                PendingShopkeeperCard(
+                    user = user,
+                    onApprove = {
+                        onApprove(user)
+                    },
+                    onBlock = {
+                        onBlock(user)
+                    },
+                    onRemove = {
+                        onRemove(user)
+                    }
                 )
             }
         }
@@ -141,95 +423,65 @@ fun AdminDashboardScreen(
 }
 
 @Composable
-private fun PendingShopkeepersTab(
-    pendingShopkeepers: List<AdminUser>,
-    viewModel: AdminViewModel
+private fun PendingShopkeeperCard(
+    user: AdminUser,
+    onApprove: () -> Unit,
+    onBlock: () -> Unit,
+    onRemove: () -> Unit
 ) {
-    if (pendingShopkeepers.isEmpty()) {
-        Box(
-            modifier = Modifier.fillMaxSize(),
-            contentAlignment = Alignment.Center
+    Card(
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp)
         ) {
             Text(
-                text = "No pending shopkeeper requests",
-                style = MaterialTheme.typography.titleMedium
+                text = user.name.ifBlank { "Unnamed Shopkeeper" },
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
             )
-        }
-        return
-    }
 
-    LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        items(
-            items = pendingShopkeepers,
-            key = { user -> user.docId }
-        ) { user ->
-            Card(
-                modifier = Modifier.fillMaxWidth()
+            Spacer(modifier = Modifier.height(4.dp))
+
+            Text("Email: ${user.email.ifBlank { "Not available" }}")
+            Text("Phone: ${user.phone.ifBlank { "Not available" }}")
+            Text("Role: ${user.role}")
+
+            if (user.shopId.isNotBlank()) {
+                Text("ShopId: ${user.shopId}")
+            }
+
+            Text(
+                text = "Status: Pending approval",
+                color = MaterialTheme.colorScheme.error,
+                fontWeight = FontWeight.SemiBold
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Column(
-                    modifier = Modifier.padding(14.dp)
+                Button(
+                    onClick = onApprove,
+                    modifier = Modifier.weight(1f)
                 ) {
-                    Text(
-                        text = user.name.ifBlank { "Unnamed Shopkeeper" },
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
-                    )
+                    Text("Approve")
+                }
 
-                    Spacer(modifier = Modifier.height(4.dp))
+                OutlinedButton(
+                    onClick = onBlock,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("Block")
+                }
 
-                    Text(
-                        text = "Email: ${user.email.ifBlank { "Not available" }}"
-                    )
-
-                    Text(
-                        text = "Phone: ${user.phone.ifBlank { "Not available" }}"
-                    )
-
-                    Text(
-                        text = "Role: ${user.role}"
-                    )
-
-                    Text(
-                        text = "Status: Pending approval",
-                        color = MaterialTheme.colorScheme.error,
-                        fontWeight = FontWeight.SemiBold
-                    )
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Button(
-                            onClick = {
-                                viewModel.setShopkeeperApproved(
-                                    userDocId = user.docId,
-                                    approved = true
-                                )
-                            },
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text("Approve")
-                        }
-
-                        OutlinedButton(
-                            onClick = {
-                                viewModel.setUserBlocked(
-                                    userDocId = user.docId,
-                                    blocked = true
-                                )
-                            },
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text("Block")
-                        }
-                    }
+                OutlinedButton(
+                    onClick = onRemove,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("Remove")
                 }
             }
         }
@@ -239,101 +491,174 @@ private fun PendingShopkeepersTab(
 @Composable
 private fun ShopsTab(
     shops: List<AdminShop>,
-    viewModel: AdminViewModel
+    onApprovedChange: (AdminShop, Boolean) -> Unit,
+    onOpenChange: (AdminShop, Boolean) -> Unit,
+    onBlockToggle: (AdminShop) -> Unit,
+    onDelete: (AdminShop) -> Unit
 ) {
-    if (shops.isEmpty()) {
-        Box(
-            modifier = Modifier.fillMaxSize(),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                text = "No shops created yet",
-                style = MaterialTheme.typography.titleMedium
-            )
-        }
-        return
+    var query by remember { mutableStateOf("") }
+
+    val filteredShops = shops.filter { shop ->
+        val q = query.trim().lowercase()
+
+        q.isBlank() ||
+                shop.name.lowercase().contains(q) ||
+                shop.shopId.lowercase().contains(q) ||
+                shop.ownerUid.lowercase().contains(q)
     }
 
-    LazyColumn(
+    Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+            .padding(12.dp)
     ) {
-        items(
-            items = shops,
-            key = { shop -> shop.docId }
-        ) { shop ->
-            Card(
-                modifier = Modifier.fillMaxWidth()
+        AdminSearchBar(
+            query = query,
+            onQueryChange = {
+                query = it
+            },
+            placeholder = "Search shops..."
+        )
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        if (filteredShops.isEmpty()) {
+            EmptyState(
+                text = if (query.isBlank()) {
+                    "No shops created yet"
+                } else {
+                    "No shop found"
+                }
+            )
+            return@Column
+        }
+
+        LazyColumn(
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            items(
+                items = filteredShops,
+                key = { shop -> shop.docId }
+            ) { shop ->
+                ShopAdminCard(
+                    shop = shop,
+                    onApprovedChange = {
+                        onApprovedChange(shop, it)
+                    },
+                    onOpenChange = {
+                        onOpenChange(shop, it)
+                    },
+                    onBlockToggle = {
+                        onBlockToggle(shop)
+                    },
+                    onDelete = {
+                        onDelete(shop)
+                    }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ShopAdminCard(
+    shop: AdminShop,
+    onApprovedChange: (Boolean) -> Unit,
+    onOpenChange: (Boolean) -> Unit,
+    onBlockToggle: () -> Unit,
+    onDelete: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp)
+        ) {
+            Text(
+                text = shop.name.ifBlank { "Unnamed Shop" },
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            Text("ShopId: ${shop.shopId.ifBlank { "Not available" }}")
+            Text("OwnerUid: ${shop.ownerUid.ifBlank { "Not assigned" }}")
+
+            Text(
+                text = when {
+                    shop.isBlocked -> "Status: Blocked"
+                    shop.isApproved -> "Status: Approved"
+                    else -> "Status: Not approved"
+                },
+                color = when {
+                    shop.isBlocked -> MaterialTheme.colorScheme.error
+                    shop.isApproved -> MaterialTheme.colorScheme.primary
+                    else -> MaterialTheme.colorScheme.error
+                },
+                fontWeight = FontWeight.SemiBold
+            )
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Column(
-                    modifier = Modifier.padding(14.dp)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Approved")
+
+                    Switch(
+                        checked = shop.isApproved,
+                        enabled = !shop.isBlocked,
+                        onCheckedChange = onApprovedChange
+                    )
+                }
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Open")
+
+                    Switch(
+                        checked = shop.isOpen,
+                        enabled = !shop.isBlocked && shop.isApproved,
+                        onCheckedChange = onOpenChange
+                    )
+                }
+            }
+
+            HorizontalDivider(
+                modifier = Modifier.padding(vertical = 10.dp)
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                OutlinedButton(
+                    onClick = onBlockToggle,
+                    modifier = Modifier.weight(1f)
                 ) {
                     Text(
-                        text = shop.name.ifBlank { "Unnamed Shop" },
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
+                        text = if (shop.isBlocked) {
+                            "Unblock"
+                        } else {
+                            "Block"
+                        }
                     )
+                }
 
-                    Spacer(modifier = Modifier.height(4.dp))
-
-                    Text(text = "ShopId: ${shop.shopId.ifBlank { "Not available" }}")
-                    Text(text = "OwnerUid: ${shop.ownerUid.ifBlank { "Not assigned" }}")
-
+                OutlinedButton(
+                    onClick = onDelete,
+                    modifier = Modifier.weight(1f)
+                ) {
                     Text(
-                        text = if (shop.isApproved) {
-                            "Status: Approved"
-                        } else {
-                            "Status: Not approved"
-                        },
-                        color = if (shop.isApproved) {
-                            MaterialTheme.colorScheme.primary
-                        } else {
-                            MaterialTheme.colorScheme.error
-                        },
-                        fontWeight = FontWeight.SemiBold
+                        text = "Delete",
+                        color = MaterialTheme.colorScheme.error
                     )
-
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text("Approved")
-
-                            Switch(
-                                checked = shop.isApproved,
-                                onCheckedChange = {
-                                    viewModel.setShopApproved(
-                                        shopDocId = shop.docId,
-                                        approved = it,
-                                        shopId = shop.shopId
-                                    )
-                                }
-                            )
-                        }
-
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text("Open")
-
-                            Switch(
-                                checked = shop.isOpen,
-                                onCheckedChange = {
-                                    viewModel.setShopOpen(
-                                        shopDocId = shop.docId,
-                                        open = it
-                                    )
-                                }
-                            )
-                        }
-                    }
                 }
             }
         }
@@ -343,132 +668,156 @@ private fun ShopsTab(
 @Composable
 private fun UsersTab(
     users: List<AdminUser>,
-    viewModel: AdminViewModel
+    onRoleChange: (AdminUser, String) -> Unit,
+    onBlockedChange: (AdminUser, Boolean) -> Unit,
+    onShopkeeperApprovedChange: (AdminUser, Boolean) -> Unit
 ) {
-    if (users.isEmpty()) {
-        Box(
-            modifier = Modifier.fillMaxSize(),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                text = "No users found",
-                style = MaterialTheme.typography.titleMedium
-            )
-        }
-        return
+    var query by remember { mutableStateOf("") }
+
+    val filteredUsers = users.filter { user ->
+        matchesUserSearch(user, query)
     }
 
-    LazyColumn(
+    Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+            .padding(12.dp)
     ) {
-        items(
-            items = users,
-            key = { user -> user.docId }
-        ) { user ->
-            Card(
-                modifier = Modifier.fillMaxWidth()
+        AdminSearchBar(
+            query = query,
+            onQueryChange = {
+                query = it
+            },
+            placeholder = "Search users..."
+        )
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        if (filteredUsers.isEmpty()) {
+            EmptyState(
+                text = if (query.isBlank()) {
+                    "No users found"
+                } else {
+                    "No user found"
+                }
+            )
+            return@Column
+        }
+
+        LazyColumn(
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            items(
+                items = filteredUsers,
+                key = { user -> user.docId }
+            ) { user ->
+                UserAdminCard(
+                    user = user,
+                    onRoleChange = { role ->
+                        onRoleChange(user, role)
+                    },
+                    onBlockedChange = { blocked ->
+                        onBlockedChange(user, blocked)
+                    },
+                    onShopkeeperApprovedChange = { approved ->
+                        onShopkeeperApprovedChange(user, approved)
+                    }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun UserAdminCard(
+    user: AdminUser,
+    onRoleChange: (String) -> Unit,
+    onBlockedChange: (Boolean) -> Unit,
+    onShopkeeperApprovedChange: (Boolean) -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp)
+        ) {
+            Text(
+                text = user.name.ifBlank { "Unnamed User" },
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            Text("Email: ${user.email.ifBlank { "Not available" }}")
+            Text("Phone: ${user.phone.ifBlank { "Not available" }}")
+            Text("Role: ${user.role}")
+
+            if (user.role == "shopkeeper") {
+                Text(
+                    text = if (user.isApproved) {
+                        "Approval: Approved"
+                    } else {
+                        "Approval: Pending"
+                    },
+                    color = if (user.isApproved) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.error
+                    },
+                    fontWeight = FontWeight.SemiBold
+                )
+
+                if (user.shopId.isNotBlank()) {
+                    Text("ShopId: ${user.shopId}")
+                }
+            }
+
+            if (user.isBlocked) {
+                Text(
+                    text = "Blocked",
+                    color = MaterialTheme.colorScheme.error,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(
-                    modifier = Modifier.padding(14.dp)
+                RoleDropdown(
+                    currentRole = user.role,
+                    onRoleChange = onRoleChange
+                )
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = user.name.ifBlank { "Unnamed User" },
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
+                    Text("Blocked")
+
+                    Switch(
+                        checked = user.isBlocked,
+                        onCheckedChange = onBlockedChange
                     )
+                }
+            }
 
-                    Spacer(modifier = Modifier.height(4.dp))
+            if (user.role == "shopkeeper") {
+                Spacer(modifier = Modifier.height(8.dp))
 
-                    Text(
-                        text = "Email: ${user.email.ifBlank { "Not available" }}"
+                Row(
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Approved")
+
+                    Switch(
+                        checked = user.isApproved,
+                        enabled = !user.isBlocked,
+                        onCheckedChange = onShopkeeperApprovedChange
                     )
-
-                    Text(
-                        text = "Phone: ${user.phone.ifBlank { "Not available" }}"
-                    )
-
-                    Text(
-                        text = "Role: ${user.role}"
-                    )
-
-                    if (user.role == "shopkeeper") {
-                        Text(
-                            text = if (user.isApproved) {
-                                "Approval: Approved"
-                            } else {
-                                "Approval: Pending"
-                            },
-                            color = if (user.isApproved) {
-                                MaterialTheme.colorScheme.primary
-                            } else {
-                                MaterialTheme.colorScheme.error
-                            },
-                            fontWeight = FontWeight.SemiBold
-                        )
-
-                        if (user.shopId.isNotBlank()) {
-                            Text(
-                                text = "ShopId: ${user.shopId}"
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        RoleDropdown(
-                            currentRole = user.role,
-                            onRoleChange = { role ->
-                                viewModel.setUserRole(
-                                    userDocId = user.docId,
-                                    role = role
-                                )
-                            }
-                        )
-
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text("Blocked")
-
-                            Switch(
-                                checked = user.isBlocked,
-                                onCheckedChange = { blocked ->
-                                    viewModel.setUserBlocked(
-                                        userDocId = user.docId,
-                                        blocked = blocked
-                                    )
-                                }
-                            )
-                        }
-                    }
-
-                    if (user.role == "shopkeeper") {
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text("Approved")
-
-                            Switch(
-                                checked = user.isApproved,
-                                onCheckedChange = { approved ->
-                                    viewModel.setShopkeeperApproved(
-                                        userDocId = user.docId,
-                                        approved = approved
-                                    )
-                                }
-                            )
-                        }
-                    }
                 }
             }
         }
@@ -476,15 +825,94 @@ private fun UsersTab(
 }
 
 @Composable
+private fun AdminSearchBar(
+    query: String,
+    onQueryChange: (String) -> Unit,
+    placeholder: String
+) {
+    OutlinedTextField(
+        value = query,
+        onValueChange = onQueryChange,
+        modifier = Modifier.fillMaxWidth(),
+        singleLine = true,
+        leadingIcon = {
+            Icon(
+                imageVector = Icons.Default.Search,
+                contentDescription = null
+            )
+        },
+        placeholder = {
+            Text(placeholder)
+        }
+    )
+}
+
+@Composable
+private fun EmptyState(
+    text: String
+) {
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.titleMedium
+        )
+    }
+}
+
+@Composable
+private fun ConfirmDialog(
+    action: ConfirmAction,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(action.title)
+        },
+        text = {
+            Text(action.message)
+        },
+        confirmButton = {
+            TextButton(
+                onClick = onConfirm
+            ) {
+                Text(
+                    text = action.confirmText,
+                    color = if (action.isDanger) {
+                        MaterialTheme.colorScheme.error
+                    } else {
+                        Orange
+                    }
+                )
+            }
+        },
+        dismissButton = {
+            TextButton(
+                onClick = onDismiss
+            ) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
+@Composable
 private fun RoleDropdown(
     currentRole: String,
     onRoleChange: (String) -> Unit
 ) {
-    val roles = listOf("student", "shopkeeper", "admin")
+    val roles = listOf(
+        "student",
+        "shopkeeper",
+        "admin"
+    )
 
-    var expanded by remember { mutableStateOf(false) }
-    var selected by remember(currentRole) {
-        mutableStateOf(currentRole)
+    var expanded by remember {
+        mutableStateOf(false)
     }
 
     Box {
@@ -493,7 +921,7 @@ private fun RoleDropdown(
                 expanded = true
             }
         ) {
-            Text(selected)
+            Text(currentRole)
         }
 
         DropdownMenu(
@@ -508,7 +936,6 @@ private fun RoleDropdown(
                         Text(role)
                     },
                     onClick = {
-                        selected = role
                         onRoleChange(role)
                         expanded = false
                     }
@@ -516,4 +943,18 @@ private fun RoleDropdown(
             }
         }
     }
+}
+
+private fun matchesUserSearch(
+    user: AdminUser,
+    query: String
+): Boolean {
+    val q = query.trim().lowercase()
+
+    return q.isBlank() ||
+            user.name.lowercase().contains(q) ||
+            user.email.lowercase().contains(q) ||
+            user.phone.lowercase().contains(q) ||
+            user.role.lowercase().contains(q) ||
+            user.shopId.lowercase().contains(q)
 }

@@ -132,7 +132,33 @@ class ProfileViewModel @Inject constructor(
     private fun isValidTime(time: String): Boolean {
         return Regex("^([01]\\d|2[0-3]):[0-5]\\d$").matches(time)
     }
+    fun closeShopBeforeLogout(
+        onComplete: () -> Unit
+    ) {
+        val shopId = _userProfile.value?.shopId.orEmpty()
 
+        if (shopId.isBlank()) {
+            onComplete()
+            return
+        }
+
+        firestore.collection("shops")
+            .document(shopId)
+            .update(
+                mapOf(
+                    "isOpen" to false,
+                    "lastActiveAt" to System.currentTimeMillis()
+                )
+            )
+            .addOnSuccessListener {
+                _message.value = "Shop closed successfully"
+                onComplete()
+            }
+            .addOnFailureListener {
+                _message.value = it.message ?: "Failed to close shop"
+                onComplete()
+            }
+    }
     fun clearMessage() {
         _message.value = null
     }

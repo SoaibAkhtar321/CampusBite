@@ -1,5 +1,8 @@
 package com.campusbite.app.ui.screens.profile
 
+import android.content.Intent
+import android.net.Uri
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -51,6 +54,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -58,6 +62,12 @@ import com.campusbite.app.ui.viewmodel.OrderViewModel
 import com.google.firebase.auth.FirebaseAuth
 
 private val BrandOrange = Color(0xFFFF6B00)
+
+private const val SUPPORT_EMAIL = "support.campusbite@gmail.com"
+
+// Change this if you want another WhatsApp support number.
+// Format: country code + number, without + sign.
+private const val SUPPORT_WHATSAPP_NUMBER = "918957833269"
 
 @Composable
 fun StudentProfileScreen(
@@ -67,6 +77,8 @@ fun StudentProfileScreen(
     onLogout: () -> Unit,
     orderViewModel: OrderViewModel = hiltViewModel()
 ) {
+    val context = LocalContext.current
+
     var showLogoutDialog by remember { mutableStateOf(false) }
     var notificationsEnabled by remember { mutableStateOf(true) }
     var darkModeEnabled by remember { mutableStateOf(false) }
@@ -200,6 +212,7 @@ fun StudentProfileScreen(
 
                         Column {
                             Text("Order Notifications")
+
                             Text(
                                 text = "Get updates about your orders",
                                 style = MaterialTheme.typography.bodySmall,
@@ -210,14 +223,18 @@ fun StudentProfileScreen(
 
                     Switch(
                         checked = notificationsEnabled,
-                        onCheckedChange = { notificationsEnabled = it },
+                        onCheckedChange = {
+                            notificationsEnabled = it
+                        },
                         colors = SwitchDefaults.colors(
                             checkedTrackColor = BrandOrange
                         )
                     )
                 }
 
-                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                HorizontalDivider(
+                    modifier = Modifier.padding(vertical = 8.dp)
+                )
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -234,6 +251,7 @@ fun StudentProfileScreen(
 
                         Column {
                             Text("Dark Mode")
+
                             Text(
                                 text = "UI toggle only for now",
                                 style = MaterialTheme.typography.bodySmall,
@@ -244,20 +262,26 @@ fun StudentProfileScreen(
 
                     Switch(
                         checked = darkModeEnabled,
-                        onCheckedChange = { darkModeEnabled = it },
+                        onCheckedChange = {
+                            darkModeEnabled = it
+                        },
                         colors = SwitchDefaults.colors(
                             checkedTrackColor = BrandOrange
                         )
                     )
                 }
 
-                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                HorizontalDivider(
+                    modifier = Modifier.padding(vertical = 8.dp)
+                )
 
                 ActionRow(
                     icon = Icons.Outlined.Logout,
                     label = "Logout",
                     tint = MaterialTheme.colorScheme.error,
-                    onClick = { showLogoutDialog = true }
+                    onClick = {
+                        showLogoutDialog = true
+                    }
                 )
             }
 
@@ -265,10 +289,40 @@ fun StudentProfileScreen(
                 title = "Help & Support",
                 icon = Icons.Outlined.SupportAgent
             ) {
+                Text(
+                    text = "Need help with an order, payment, or app issue?",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
                 ActionRow(
                     icon = Icons.Outlined.SupportAgent,
-                    label = "Contact Support",
-                    onClick = {}
+                    label = "WhatsApp Support",
+                    trailingText = "Fast help",
+                    onClick = {
+                        openWhatsAppSupport(
+                            context = context,
+                            userEmail = currentUser?.email.orEmpty()
+                        )
+                    }
+                )
+
+                HorizontalDivider(
+                    modifier = Modifier.padding(vertical = 8.dp)
+                )
+
+                ActionRow(
+                    icon = Icons.Outlined.SupportAgent,
+                    label = "Email Support",
+                    trailingText = SUPPORT_EMAIL,
+                    onClick = {
+                        openEmailSupport(
+                            context = context,
+                            userEmail = currentUser?.email.orEmpty()
+                        )
+                    }
                 )
             }
         }
@@ -308,6 +362,71 @@ fun StudentProfileScreen(
                 }
             }
         )
+    }
+}
+
+private fun openWhatsAppSupport(
+    context: android.content.Context,
+    userEmail: String
+) {
+    val message = """
+        Hi CampusBite Support,
+        I need help with my order/payment issue.
+        
+        User Email: $userEmail
+    """.trimIndent()
+
+    val encodedMessage = Uri.encode(message)
+
+    val uri = Uri.parse(
+        "https://wa.me/$SUPPORT_WHATSAPP_NUMBER?text=$encodedMessage"
+    )
+
+    val intent = Intent(Intent.ACTION_VIEW, uri)
+
+    try {
+        context.startActivity(intent)
+    } catch (e: Exception) {
+        Toast.makeText(
+            context,
+            "WhatsApp is not available on this device.",
+            Toast.LENGTH_SHORT
+        ).show()
+    }
+}
+
+private fun openEmailSupport(
+    context: android.content.Context,
+    userEmail: String
+) {
+    val intent = Intent(Intent.ACTION_SENDTO).apply {
+        data = Uri.parse("mailto:$SUPPORT_EMAIL")
+        putExtra(Intent.EXTRA_SUBJECT, "CampusBite Support")
+        putExtra(
+            Intent.EXTRA_TEXT,
+            """
+            Hi CampusBite Support,
+            
+            I need help with:
+            
+            User Email: $userEmail
+            """.trimIndent()
+        )
+    }
+
+    try {
+        context.startActivity(
+            Intent.createChooser(
+                intent,
+                "Contact CampusBite Support"
+            )
+        )
+    } catch (e: Exception) {
+        Toast.makeText(
+            context,
+            "No email app found on this device.",
+            Toast.LENGTH_SHORT
+        ).show()
     }
 }
 

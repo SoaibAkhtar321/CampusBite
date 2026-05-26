@@ -19,7 +19,9 @@ data class AdminShop(
     val name: String = "",
     val ownerUid: String = "",
     val isOpen: Boolean = false,
-    val isApproved: Boolean = false
+    val isApproved: Boolean = false,
+    val isBlocked: Boolean = false,
+    val isDeleted: Boolean = false
 )
 
 data class AdminUser(
@@ -47,7 +49,8 @@ class AdminViewModel @Inject constructor(
     val users: StateFlow<List<AdminUser>> = _users.asStateFlow()
 
     private val _pendingShopkeepers = MutableStateFlow<List<AdminUser>>(emptyList())
-    val pendingShopkeepers: StateFlow<List<AdminUser>> = _pendingShopkeepers.asStateFlow()
+    val pendingShopkeepers: StateFlow<List<AdminUser>> =
+        _pendingShopkeepers.asStateFlow()
 
     private val _isLoading = MutableStateFlow(true)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
@@ -75,23 +78,26 @@ class AdminViewModel @Inject constructor(
                     return@addSnapshotListener
                 }
 
-                val shopList = snapshot?.documents?.map { doc ->
-                    AdminShop(
-                        docId = doc.id,
-                        shopId = doc.getString("shopId") ?: doc.id,
-                        name = doc.getString("name") ?: "",
-                        ownerUid = doc.getString("ownerUid")
-                            ?: doc.getString("ownerId")
-                            ?: "",
-                        isOpen = doc.getBoolean("isOpen") ?: false,
-                        isApproved = doc.getBoolean("isApproved") ?: false
-                    )
-                } ?: emptyList()
+                val shopList = snapshot?.documents
+                    ?.map { doc ->
+                        AdminShop(
+                            docId = doc.id,
+                            shopId = doc.getString("shopId") ?: doc.id,
+                            name = doc.getString("name") ?: "",
+                            ownerUid = doc.getString("ownerUid")
+                                ?: doc.getString("ownerId")
+                                ?: "",
+                            isOpen = doc.getBoolean("isOpen") ?: false,
+                            isApproved = doc.getBoolean("isApproved") ?: false,
+                            isBlocked = doc.getBoolean("isBlocked") ?: false,
+                            isDeleted = doc.getBoolean("isDeleted") ?: false
+                        )
+                    }
+                    ?.sortedBy { it.name.lowercase() }
+                    ?: emptyList()
 
-                _shops.value = shopList.sortedBy { it.name.lowercase() }
+                _shops.value = shopList
                 _isLoading.value = false
-
-                Log.d("AdminViewModel", "Loaded shops: ${shopList.size}")
             }
     }
 
@@ -107,27 +113,29 @@ class AdminViewModel @Inject constructor(
                     return@addSnapshotListener
                 }
 
-                val userList = snapshot?.documents?.map { doc ->
-                    val role = doc.getString("role") ?: "student"
+                val userList = snapshot?.documents
+                    ?.map { doc ->
+                        val role = doc.getString("role") ?: "student"
 
-                    val isApproved = doc.getBoolean("isApproved")
-                        ?: (role != "shopkeeper")
+                        val isApproved = doc.getBoolean("isApproved")
+                            ?: (role != "shopkeeper")
 
-                    AdminUser(
-                        docId = doc.id,
-                        uid = doc.getString("uid") ?: doc.id,
-                        name = doc.getString("name") ?: "",
-                        email = doc.getString("email") ?: "",
-                        phone = doc.getString("phone")
-                            ?: doc.getString("phoneNumber")
-                            ?: "",
-                        role = role,
-                        shopId = doc.getString("shopId") ?: "",
-                        isApproved = isApproved,
-                        isBlocked = doc.getBoolean("isBlocked") ?: false,
-                        createdAt = doc.getLong("createdAt") ?: 0L
-                    )
-                } ?: emptyList()
+                        AdminUser(
+                            docId = doc.id,
+                            uid = doc.getString("uid") ?: doc.id,
+                            name = doc.getString("name") ?: "",
+                            email = doc.getString("email") ?: "",
+                            phone = doc.getString("phone")
+                                ?: doc.getString("phoneNumber")
+                                ?: "",
+                            role = role,
+                            shopId = doc.getString("shopId") ?: "",
+                            isApproved = isApproved,
+                            isBlocked = doc.getBoolean("isBlocked") ?: false,
+                            createdAt = doc.getLong("createdAt") ?: 0L
+                        )
+                    }
+                    ?: emptyList()
 
                 _users.value = userList.sortedWith(
                     compareBy<AdminUser> { it.role }
@@ -136,14 +144,13 @@ class AdminViewModel @Inject constructor(
 
                 _pendingShopkeepers.value = userList
                     .filter { user ->
-                        user.role == "shopkeeper" && !user.isApproved && !user.isBlocked
+                        user.role == "shopkeeper" &&
+                                !user.isApproved &&
+                                !user.isBlocked
                     }
                     .sortedByDescending { it.createdAt }
 
                 _isLoading.value = false
-
-                Log.d("AdminViewModel", "Loaded users: ${userList.size}")
-                Log.d("AdminViewModel", "Pending shopkeepers: ${_pendingShopkeepers.value.size}")
             }
     }
 
@@ -158,7 +165,9 @@ class AdminViewModel @Inject constructor(
                     return@launch
                 }
 
-                val userRef = firestore.collection("users").document(userDocId)
+                val userRef = firestore.collection("users")
+                    .document(userDocId)
+
                 val userSnapshot = userRef.get().await()
 
                 if (!userSnapshot.exists()) {
@@ -169,9 +178,11 @@ class AdminViewModel @Inject constructor(
                 val uid = userSnapshot.getString("uid") ?: userDocId
                 val name = userSnapshot.getString("name") ?: "Unnamed Shop"
                 val email = userSnapshot.getString("email") ?: ""
+
                 val phone = userSnapshot.getString("phone")
                     ?: userSnapshot.getString("phoneNumber")
                     ?: ""
+
                 val role = userSnapshot.getString("role") ?: "student"
                 val existingShopId = userSnapshot.getString("shopId") ?: ""
 
@@ -197,7 +208,9 @@ class AdminViewModel @Inject constructor(
                     generateShopId(name, uid)
                 }
 
-                val shopRef = firestore.collection("shops").document(finalShopId)
+                val shopRef = firestore.collection("shops")
+                    .document(finalShopId)
+
                 val shopSnapshot = shopRef.get().await()
 
                 if (!shopSnapshot.exists()) {
@@ -205,15 +218,26 @@ class AdminViewModel @Inject constructor(
                         "shopId" to finalShopId,
                         "name" to name,
                         "description" to "",
+
                         "ownerUid" to uid,
                         "ownerEmail" to email,
                         "ownerPhone" to phone,
+
+                        "phone" to phone,
+
                         "isOpen" to false,
                         "isApproved" to true,
+                        "isBlocked" to false,
+                        "isDeleted" to false,
+
+                        "upiId" to "",
+
                         "openingTime" to "08:00",
                         "closingTime" to "20:00",
+
                         "maxOrdersPerSlot" to 5,
                         "closedSlots" to emptyList<String>(),
+
                         "createdAt" to System.currentTimeMillis()
                     )
 
@@ -222,9 +246,12 @@ class AdminViewModel @Inject constructor(
                     shopRef.update(
                         mapOf(
                             "isApproved" to true,
+                            "isBlocked" to false,
+                            "isDeleted" to false,
                             "ownerUid" to uid,
                             "ownerEmail" to email,
-                            "ownerPhone" to phone
+                            "ownerPhone" to phone,
+                            "phone" to phone
                         )
                     ).await()
                 }
@@ -232,16 +259,12 @@ class AdminViewModel @Inject constructor(
                 userRef.update(
                     mapOf(
                         "isApproved" to true,
+                        "isBlocked" to false,
                         "shopId" to finalShopId
                     )
                 ).await()
 
                 _message.value = "Shopkeeper approved and shop created"
-
-                Log.d(
-                    "AdminViewModel",
-                    "Approved shopkeeper. userDocId=$userDocId, shopId=$finalShopId"
-                )
 
             } catch (e: Exception) {
                 Log.e("AdminViewModel", "Failed to approve shopkeeper", e)
@@ -322,6 +345,143 @@ class AdminViewModel @Inject constructor(
         }
     }
 
+    fun setShopBlocked(
+        shopDocId: String,
+        shopId: String,
+        blocked: Boolean
+    ) {
+        viewModelScope.launch {
+            try {
+                val finalShopDocId = shopDocId.ifBlank { shopId }
+
+                if (finalShopDocId.isBlank()) {
+                    _message.value = "Shop ID missing"
+                    return@launch
+                }
+
+                firestore.collection("shops")
+                    .document(finalShopDocId)
+                    .update(
+                        mapOf(
+                            "isBlocked" to blocked,
+                            "isOpen" to false,
+                            "isApproved" to !blocked
+                        )
+                    )
+                    .await()
+
+                val finalShopId = shopId.ifBlank { finalShopDocId }
+
+                val usersSnapshot = firestore.collection("users")
+                    .whereEqualTo("shopId", finalShopId)
+                    .get()
+                    .await()
+
+                usersSnapshot.documents.forEach { userDoc ->
+                    userDoc.reference.update(
+                        mapOf(
+                            "isApproved" to !blocked,
+                            "isBlocked" to blocked
+                        )
+                    ).await()
+                }
+
+                _message.value = if (blocked) {
+                    "Shop blocked successfully"
+                } else {
+                    "Shop unblocked successfully"
+                }
+
+            } catch (e: Exception) {
+                Log.e("AdminViewModel", "Failed to block/unblock shop", e)
+                _message.value = e.message ?: "Failed to update shop"
+            }
+        }
+    }
+
+    fun deleteShopCompletely(
+        shopDocId: String,
+        shopId: String
+    ) {
+        viewModelScope.launch {
+            try {
+                val finalShopId = shopId.ifBlank { shopDocId }
+
+                if (finalShopId.isBlank()) {
+                    _message.value = "Shop ID missing"
+                    return@launch
+                }
+
+                val menuSnapshot = firestore.collection("menuItems")
+                    .whereEqualTo("shopId", finalShopId)
+                    .get()
+                    .await()
+
+                menuSnapshot.documents.forEach { menuDoc ->
+                    menuDoc.reference.delete().await()
+                }
+
+                val usersSnapshot = firestore.collection("users")
+                    .whereEqualTo("shopId", finalShopId)
+                    .get()
+                    .await()
+
+                usersSnapshot.documents.forEach { userDoc ->
+                    userDoc.reference.update(
+                        mapOf(
+                            "shopId" to "",
+                            "role" to "student",
+                            "isApproved" to true,
+                            "isBlocked" to false
+                        )
+                    ).await()
+                }
+
+                firestore.collection("shops")
+                    .document(shopDocId)
+                    .delete()
+                    .await()
+
+                _message.value = "Shop deleted completely"
+
+            } catch (e: Exception) {
+                Log.e("AdminViewModel", "Failed to delete shop", e)
+                _message.value = e.message ?: "Failed to delete shop"
+            }
+        }
+    }
+
+    fun removePendingShopkeeper(
+        userDocId: String
+    ) {
+        viewModelScope.launch {
+            try {
+                if (userDocId.isBlank()) {
+                    _message.value = "User ID missing"
+                    return@launch
+                }
+
+                firestore.collection("users")
+                    .document(userDocId)
+                    .update(
+                        mapOf(
+                            "role" to "student",
+                            "isApproved" to true,
+                            "isBlocked" to false,
+                            "shopId" to ""
+                        )
+                    )
+                    .await()
+
+                _message.value = "Pending request removed"
+
+            } catch (e: Exception) {
+                Log.e("AdminViewModel", "Failed to remove pending request", e)
+                _message.value = e.message ?: "Failed to remove request"
+            }
+        }
+    }
+
     fun setUserBlocked(
         userDocId: String,
         blocked: Boolean
@@ -371,16 +531,19 @@ class AdminViewModel @Inject constructor(
                 when (cleanRole) {
                     "shopkeeper" -> {
                         updates["isApproved"] = false
+                        updates["isBlocked"] = false
                         updates["shopId"] = ""
                     }
 
                     "student" -> {
                         updates["isApproved"] = true
+                        updates["isBlocked"] = false
                         updates["shopId"] = ""
                     }
 
                     "admin" -> {
                         updates["isApproved"] = true
+                        updates["isBlocked"] = false
                         updates["shopId"] = ""
                     }
                 }
