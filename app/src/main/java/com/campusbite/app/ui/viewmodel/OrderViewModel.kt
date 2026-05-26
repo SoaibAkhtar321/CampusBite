@@ -69,18 +69,13 @@ class OrderViewModel @Inject constructor(
     val userOrders: StateFlow<List<Order>> = _userOrders
 
     private var activeOrderListener: ListenerRegistration? = null
+    private var currentOrderListener: ListenerRegistration? = null
 
     fun placeOrder(order: Order) {
         viewModelScope.launch {
             _orderState.value = OrderState.Loading
 
             try {
-                Log.d("OrderVM", "placeOrder() called")
-                Log.d("OrderVM", "shopId: ${order.shopId}")
-                Log.d("OrderVM", "items count: ${order.items.size}")
-                Log.d("OrderVM", "pickupSlot: ${order.pickupSlot}")
-                Log.d("OrderVM", "totalPrice: ${order.totalPrice}")
-
                 if (order.shopId.isBlank()) {
                     _orderState.value = OrderState.Error("Shop ID is missing.")
                     return@launch
@@ -118,24 +113,17 @@ class OrderViewModel @Inject constructor(
                 if (result.isSuccess) {
                     val orderId = result.getOrNull().orEmpty()
 
-                    Log.d("OrderVM", "Order placed successfully: $orderId")
-
                     _orderState.value = OrderState.Success(orderId)
                     listenToOrderById(orderId)
+                    listenToActiveOrder()
                 } else {
                     val message = result.exceptionOrNull()?.message ?: "Failed to place order"
-
-                    Log.e("OrderVM", "Order failed: $message")
-
                     _orderState.value = OrderState.Error(message)
                 }
 
             } catch (e: Exception) {
                 Log.e("OrderVM", "Exception while placing order", e)
-
-                _orderState.value = OrderState.Error(
-                    e.message ?: "Failed to place order"
-                )
+                _orderState.value = OrderState.Error(e.message ?: "Failed to place order")
             }
         }
     }
@@ -143,13 +131,34 @@ class OrderViewModel @Inject constructor(
     fun listenToOrderById(orderId: String) {
         if (orderId.isBlank()) return
 
-        orderRepository.listenToOrder(orderId) { order ->
+        currentOrderListener?.remove()
+
+        currentOrderListener = orderRepository.listenToOrder(orderId) { order ->
             val previousStatus = _currentOrder.value?.status
+            val newStatus = order?.status
 
             _currentOrder.value = order
 
-            if (previousStatus != "ready" && order?.status == "ready") {
-                showOrderReadyNotification(orderId)
+            if (previousStatus == null || newStatus == null) return@listenToOrder
+
+            if (previousStatus != newStatus) {
+                when (newStatus) {
+                    "preparing" -> {
+                        showOrderStatusNotification(
+                            orderId = orderId,
+                            title = "Order Accepted 🍳",
+                            message = "Your order has been accepted and is being prepared."
+                        )
+                    }
+
+                    "ready" -> {
+                        showOrderStatusNotification(
+                            orderId = orderId,
+                            title = "Order Ready 🎉",
+                            message = "Your food is ready for pickup."
+                        )
+                    }
+                }
             }
         }
     }
@@ -160,11 +169,12 @@ class OrderViewModel @Inject constructor(
     }
 
     fun listenToActiveOrder(userId: String) {
+        if (userId.isBlank()) return
+
         activeOrderListener?.remove()
 
         activeOrderListener = firestore.collection("orders")
             .whereEqualTo("studentId", userId)
-            .whereIn("status", listOf("pending", "accepted", "preparing", "ready"))
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
                     Log.e("OrderVM", "Active order listener error", error)
@@ -172,18 +182,30 @@ class OrderViewModel @Inject constructor(
                     return@addSnapshotListener
                 }
 
-                val latestOrder = snapshot?.documents
+                val allOrders = snapshot?.documents
                     ?.mapNotNull { doc ->
                         try {
                             doc.toObject(Order::class.java)
                         } catch (e: Exception) {
-                            Log.e("OrderVM", "Failed to parse active order", e)
+                            Log.e("OrderVM", "Failed to parse order", e)
                             null
                         }
                     }
-                    ?.maxByOrNull { it.createdAt }
+                    ?.sortedByDescending { it.createdAt }
+                    ?: emptyList()
 
-                _activeOrder.value = latestOrder
+                _userOrders.value = allOrders
+
+                val activeStatuses = listOf(
+                    "pending",
+                    "accepted",
+                    "preparing",
+                    "ready"
+                )
+
+                _activeOrder.value = allOrders.firstOrNull { order ->
+                    order.status.lowercase() in activeStatuses
+                }
             }
     }
 
@@ -239,11 +261,7 @@ class OrderViewModel @Inject constructor(
                     .get()
                     .await()
 
-                val shop = shopDoc.toObject(Shop::class.java)
-
-                _selectedShop.value = shop
-
-                Log.d("OrderVM", "Loaded shop: ${shop?.name}, isOpen: ${shop?.isOpen}")
+                _selectedShop.value = shopDoc.toObject(Shop::class.java)
 
             } catch (e: Exception) {
                 Log.e("OrderVM", "Failed to load shop", e)
@@ -275,12 +293,7 @@ class OrderViewModel @Inject constructor(
                     .get()
                     .await()
 
-                Log.d("OrderVM", "shopDoc exists: ${shopDoc.exists()}")
-                Log.d("OrderVM", "shopDoc data: ${shopDoc.data}")
-
                 val shop = shopDoc.toObject(Shop::class.java)
-
-                Log.d("OrderVM", "shop deserialized: ${shop?.name ?: "NULL"}")
 
                 if (shop == null) {
                     _selectedShop.value = null
@@ -288,13 +301,12 @@ class OrderViewModel @Inject constructor(
                     return@launch
                 }
 
+                _selectedShop.value = shop
+
                 if (!shop.isOpen) {
-                    _selectedShop.value = shop
                     _slotUiState.value = SlotUiState(message = "This shop is currently closed.")
                     return@launch
                 }
-
-                _selectedShop.value = shop
 
                 val displayFormatter = DateTimeFormatter.ofPattern("hh:mm a")
                 val timeFormatter = DateTimeFormatter.ofPattern("HH:mm")
@@ -347,7 +359,8 @@ class OrderViewModel @Inject constructor(
 
                 if (generatedSlots.isEmpty()) {
                     _slotUiState.value = SlotUiState(
-                        message = "Shop opening time is ${formatShopTime(shop.openingTime)}. No pickup slots available yet."
+                        message = "Shop opening time is ${formatShopTime(shop.openingTime)}. No pickup slots available yet.",
+                        isLoading = false
                     )
                     return@launch
                 }
@@ -374,13 +387,11 @@ class OrderViewModel @Inject constructor(
                 _slotUiState.value = SlotUiState(
                     slots = availableSlots,
                     message = when {
-                        availableSlots.isEmpty() -> {
+                        availableSlots.isEmpty() ->
                             "All pickup slots are full, closed, or unavailable right now."
-                        }
 
-                        shopClosingDateTime.isBefore(maxWindowEnd) -> {
+                        shopClosingDateTime.isBefore(maxWindowEnd) ->
                             "Shop closing time is ${formatShopTime(shop.closingTime)}. Slots after that are unavailable."
-                        }
 
                         else -> ""
                     },
@@ -389,7 +400,6 @@ class OrderViewModel @Inject constructor(
 
             } catch (e: Exception) {
                 Log.e("OrderVM", "Failed to load pickup slots", e)
-
                 _slotUiState.value = SlotUiState(
                     message = "Failed to load pickup slots.",
                     isLoading = false
@@ -404,7 +414,8 @@ class OrderViewModel @Inject constructor(
         formatter: DateTimeFormatter
     ): LocalTime {
         return try {
-            LocalTime.parse(value.ifBlank { fallback.format(formatter) }, formatter)
+            val cleanValue = value.trim().replace("\"", "")
+            LocalTime.parse(cleanValue.ifBlank { fallback.format(formatter) }, formatter)
         } catch (e: Exception) {
             fallback
         }
@@ -448,8 +459,10 @@ class OrderViewModel @Inject constructor(
 
     private fun formatShopTime(timeValue: String): String {
         return try {
+            val cleanValue = timeValue.trim().replace("\"", "")
+
             val time = LocalTime.parse(
-                timeValue,
+                cleanValue,
                 DateTimeFormatter.ofPattern("HH:mm")
             )
 
@@ -459,7 +472,11 @@ class OrderViewModel @Inject constructor(
         }
     }
 
-    private fun showOrderReadyNotification(orderId: String) {
+    private fun showOrderStatusNotification(
+        orderId: String,
+        title: String,
+        message: String
+    ) {
         val channelId = "order_updates"
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -478,8 +495,8 @@ class OrderViewModel @Inject constructor(
 
         val notification = NotificationCompat.Builder(appContext, channelId)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
-            .setContentTitle("Order Ready 🎉")
-            .setContentText("Your food is ready for pickup.")
+            .setContentTitle(title)
+            .setContentText(message)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setAutoCancel(true)
             .build()
@@ -492,13 +509,14 @@ class OrderViewModel @Inject constructor(
 
             if (hasPermission) {
                 NotificationManagerCompat.from(appContext)
-                    .notify(orderId.hashCode(), notification)
+                    .notify("${orderId}_$title".hashCode(), notification)
             }
         } else {
             NotificationManagerCompat.from(appContext)
-                .notify(orderId.hashCode(), notification)
+                .notify("${orderId}_$title".hashCode(), notification)
         }
     }
+
     fun setError(message: String) {
         _orderState.value = OrderState.Error(message)
     }
@@ -506,5 +524,6 @@ class OrderViewModel @Inject constructor(
     override fun onCleared() {
         super.onCleared()
         activeOrderListener?.remove()
+        currentOrderListener?.remove()
     }
 }

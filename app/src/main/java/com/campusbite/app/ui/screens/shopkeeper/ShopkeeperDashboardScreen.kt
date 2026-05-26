@@ -7,6 +7,9 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import android.content.Intent
+import android.net.Uri
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -211,6 +214,7 @@ private fun OrderCard(order: Order, onUpdateStatus: (String) -> Unit) {
             SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date(order.createdAt))
         else ""
     }
+    val context = LocalContext.current
 
     Card(
         shape = RoundedCornerShape(16.dp),
@@ -309,6 +313,108 @@ private fun OrderCard(order: Order, onUpdateStatus: (String) -> Unit) {
                         )
                     }
                 }
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = Orange_10
+                    )
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp)
+                    ) {
+
+                        Text(
+                            text = "Payment Verification",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp,
+                            color = Orange
+                        )
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        InfoRow(
+                            label = "UPI Payer",
+                            value = order.upiPayerName.ifBlank {
+                                "Not provided"
+                            }
+                        )
+
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        InfoRow(
+                            label = "Student",
+                            value = order.studentName
+                        )
+
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        InfoRow(
+                            label = "Phone",
+                            value = order.studentPhone
+                        )
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        Row(
+                            horizontalArrangement =
+                                Arrangement.spacedBy(10.dp)
+                        ) {
+
+                            OutlinedButton(
+                                onClick = {
+                                    val intent = Intent(
+                                        Intent.ACTION_DIAL,
+                                        Uri.parse(
+                                            "tel:${order.studentPhone}"
+                                        )
+                                    )
+
+                                    context.startActivity(intent)
+                                },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(
+                                    Icons.Default.Call,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
+                                )
+
+                                Spacer(modifier = Modifier.width(6.dp))
+
+                                Text("Call")
+                            }
+
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = when (order.paymentStatus) {
+                                    "verified" ->
+                                        Color(0xFF2E7D32)
+
+                                    else ->
+                                        Color(0xFFE65100)
+                                }
+                            ) {
+                                Text(
+                                    text = when (order.paymentStatus) {
+                                        "verified" ->
+                                            "PAID"
+
+                                        else ->
+                                            "VERIFY PAYMENT"
+                                    },
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 11.sp,
+                                    modifier = Modifier.padding(
+                                        horizontal = 10.dp,
+                                        vertical = 6.dp
+                                    )
+                                )
+                            }
+                        }
+                    }
+                }
 
                 HorizontalDivider(
                     modifier = Modifier.padding(vertical = 10.dp),
@@ -352,11 +458,29 @@ private fun OrderCard(order: Order, onUpdateStatus: (String) -> Unit) {
                 Spacer(Modifier.height(12.dp))
 
                 when (order.status) {
-                    "pending" -> ActionButton(
-                        label = "Accept & Start Preparing",
-                        color = StatusPending,
-                        onClick = { onUpdateStatus("preparing") }
-                    )
+                    "pending" -> {
+
+                        if (order.paymentStatus != "verified") {
+
+                            ActionButton(
+                                label = "Payment Received & Accept",
+                                color = StatusPending,
+                                onClick = {
+                                    onUpdateStatus("preparing")
+                                }
+                            )
+
+                        } else {
+
+                            ActionButton(
+                                label = "Start Preparing",
+                                color = StatusPending,
+                                onClick = {
+                                    onUpdateStatus("preparing")
+                                }
+                            )
+                        }
+                    }
                     "preparing" -> ActionButton(
                         label = "Mark as Ready for Pickup",
                         color = StatusPreparing,
@@ -506,6 +630,33 @@ private fun StatusBadge(status: String) {
             fontWeight = FontWeight.ExtraBold,
             color = color,
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+        )
+    }
+}
+@Composable
+private fun InfoRow(
+    label: String,
+    value: String
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement =
+            Arrangement.SpaceBetween
+    ) {
+
+        Text(
+            text = label,
+            fontSize = 12.sp,
+            color = MaterialTheme.colorScheme
+                .onSurfaceVariant
+        )
+
+        Text(
+            text = value,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme
+                .onSurface
         )
     }
 }

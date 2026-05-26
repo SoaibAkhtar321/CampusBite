@@ -13,6 +13,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import coil.compose.AsyncImage
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -83,6 +84,16 @@ import android.content.Intent
 import android.net.Uri
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.layout.navigationBarsPadding
+import android.graphics.Bitmap
+import androidx.compose.foundation.Image
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.FilterQuality
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.qrcode.QRCodeWriter
+import java.net.URLEncoder
+import androidx.compose.runtime.*
+import androidx.compose.runtime.remember
+import java.util.Locale
 private val Orange_10 = Orange.copy(alpha = 0.12f)
 
 @OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
@@ -105,6 +116,9 @@ fun CartScreen(
     val slotMessage = slotUiState.message
 
     var selectedSlot by remember { mutableStateOf("") }
+    var paymentDone by remember { mutableStateOf(false) }
+    var upiPayerName by remember { mutableStateOf("") }
+
 
     val expandedNoteItemId = remember { mutableStateOf<String?>(null) }
     val noteDrafts = remember { mutableStateMapOf<String, String>() }
@@ -113,6 +127,58 @@ fun CartScreen(
     val cartPrepTime = cartItems.maxOfOrNull { it.prepTimeMinutes } ?: 0
     val focusManager = LocalFocusManager.current
     val context = LocalContext.current
+    val shopUpiId = selectedShop?.upiId.orEmpty()
+    val shopName = selectedShop?.name ?: "CampusBite"
+    val totalAmount = String.format(
+            Locale.US,
+    "%.2f",
+    cartViewModel.totalPrice
+    )
+
+    val upiQrContent = remember(
+        shopUpiId,
+        shopName,
+        totalAmount
+    ) {
+
+        if (
+            shopUpiId.isBlank() ||
+            !shopUpiId.contains("@")
+        ) {
+
+            ""
+
+        } else {
+
+            val encodedName =
+                URLEncoder.encode(
+                    shopName,
+                    "UTF-8"
+                )
+
+            val encodedNote =
+                URLEncoder.encode(
+                    "CampusBite Order",
+                    "UTF-8"
+                )
+
+            "upi://pay" +
+                    "?pa=$shopUpiId" +
+                    "&pn=$encodedName" +
+                    "&am=$totalAmount" +
+                    "&cu=INR" +
+                    "&tn=$encodedNote"
+        }
+
+    }
+
+    val qrBitmap = remember(upiQrContent) {
+        if (upiQrContent.isBlank()) {
+            null
+        } else {
+            generateQrBitmap(upiQrContent)
+        }
+    }
 
     LaunchedEffect(shopId) {
         if (shopId.isNotBlank()) {
@@ -284,53 +350,148 @@ fun CartScreen(
                 }
 
                 item {
+                    val canShowPaymentSection =
+                        selectedShop?.isOpen == true &&
+                                selectedSlot.isNotBlank() &&
+                                availableSlots.isNotEmpty() &&
+                                cartItems.isNotEmpty() &&
+                                shopId.isNotBlank() &&
+                                shopUpiId.isNotBlank()
+
                     Spacer(modifier = Modifier.height(6.dp))
 
-                    SectionLabel(text = "Payment Method")
+                    SectionLabel(text = "Payment")
 
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(Orange_10)
-                            .border(1.5.dp, Orange, RoundedCornerShape(12.dp))
-                            .padding(horizontal = 14.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(20.dp)
-                                .clip(CircleShape)
-                                .background(Orange),
-                            contentAlignment = Alignment.Center
+                    if (!canShowPaymentSection) {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(16.dp),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
+                            )
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Check,
-                                contentDescription = null,
-                                tint = Color.White,
-                                modifier = Modifier.size(13.dp)
-                            )
-                        }
-
-                        Spacer(modifier = Modifier.width(12.dp))
-
-                        Column {
                             Text(
-                                text = "UPI Payment",
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-
-                            Text(
-                                text = "Pay using GPay / PhonePe / Paytm",
-                                fontSize = 11.sp,
+                                text = when {
+                                    selectedShop?.isOpen == false -> "Shop is closed. Payment is disabled."
+                                    availableSlots.isEmpty() -> "No pickup slots available. Payment is disabled."
+                                    selectedSlot.isBlank() -> "Select a pickup slot to continue payment."
+                                    shopUpiId.isBlank() -> "Shop UPI ID is missing."
+                                    else -> "Payment is currently unavailable."
+                                },
+                                modifier = Modifier.padding(16.dp),
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
+                    } else {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(18.dp),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surface
+                            ),
+                            elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(16.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(
+                                    text = shopName,
+                                    fontSize = 17.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+
+                                Spacer(modifier = Modifier.height(8.dp))
+
+                                Text(
+                                    text = "Scan this QR using any UPI app",
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+
+                                Spacer(modifier = Modifier.height(14.dp))
+
+                                qrBitmap?.let {
+                                    Image(
+                                        bitmap = it.asImageBitmap(),
+                                        contentDescription = "UPI QR Code",
+                                        modifier = Modifier
+                                            .size(230.dp)
+                                            .clip(RoundedCornerShape(16.dp))
+                                            .border(
+                                                width = 1.dp,
+                                                color = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f),
+                                                shape = RoundedCornerShape(16.dp)
+                                            ),
+                                        filterQuality = FilterQuality.None
+                                    )
+                                }
+
+                                Spacer(modifier = Modifier.height(14.dp))
+
+                                Text(
+                                    text = "Amount: ₹${cartViewModel.totalPrice.toInt()}",
+                                    fontSize = 22.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = Orange
+                                )
+
+                                Spacer(modifier = Modifier.height(16.dp))
+
+                                OutlinedTextField(
+                                    value = upiPayerName,
+                                    onValueChange = {
+                                        upiPayerName = it
+                                        paymentDone = false
+                                    },
+                                    label = { Text("Enter your UPI name") },
+                                    placeholder = { Text("Name visible to shopkeeper after payment") },
+                                    singleLine = true,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(14.dp),
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedBorderColor = Orange,
+                                        cursorColor = Orange
+                                    )
+                                )
+
+                                Spacer(modifier = Modifier.height(12.dp))
+
+                                Button(
+                                    onClick = { paymentDone = true },
+                                    enabled = upiPayerName.trim().isNotBlank(),
+                                    modifier = Modifier.fillMaxWidth(),
+                                    colors = ButtonDefaults.buttonColors(containerColor = Orange),
+                                    shape = RoundedCornerShape(14.dp)
+                                ) {
+                                    Text(
+                                        text = if (paymentDone) "Payment Marked Done ✓" else "I Have Paid",
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+
+                                if (paymentDone) {
+                                    Spacer(modifier = Modifier.height(8.dp))
+
+                                    Text(
+                                        text = "Now place your order. Shopkeeper will verify payment.",
+                                        fontSize = 12.sp,
+                                        color = Color(0xFF2E7D32),
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                }
+                            }
+                        }
                     }
+
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+
                 }
 
                 item {
@@ -399,8 +560,10 @@ fun CartScreen(
                     availableSlots.isNotEmpty() &&
                     cartItems.isNotEmpty() &&
                     shopId.isNotBlank() &&
+                    shopUpiId.isNotBlank() &&
+                    paymentDone &&
+                    upiPayerName.trim().isNotBlank() &&
                     orderState !is OrderState.Loading
-
             Button(
                 onClick = {
                     val upiId = selectedShop?.upiId ?: ""
@@ -462,8 +625,10 @@ fun CartScreen(
                         status = "pending",
                         pickupSlot = selectedSlot,
                         pickupDate = LocalDate.now().toString(),
-                        paymentMethod = "UPI",
-                        paymentStatus = "pending_verification"
+                        paymentMethod = "UPI_QR",
+                        paymentStatus = "pending_verification",
+                        upiPayerName = upiPayerName.trim(),
+                        shopkeeperPhone = selectedShop?.phone ?: ""
                     )
 
                     orderViewModel.placeOrder(order)
@@ -496,6 +661,7 @@ fun CartScreen(
                 } else {
                     Text(
                         text = when {
+
                             shopId.isBlank() ->
                                 "Shop not found"
 
@@ -505,20 +671,29 @@ fun CartScreen(
                             selectedShop?.isOpen == false ->
                                 "🔒 Shop is Closed"
 
-                            selectedShop?.upiId.isNullOrBlank() ->
+                            shopUpiId.isBlank() ->
                                 "Shop UPI ID Missing"
 
                             isLoadingSlots ->
-                                "Loading slots..."
+                                "Loading pickup slots..."
 
                             availableSlots.isEmpty() ->
-                                "No Slots Available"
+                                "No Pickup Slots Available"
 
                             selectedSlot.isBlank() ->
-                                "Select a pickup slot first"
+                                "Select Pickup Slot"
+
+                            upiPayerName.trim().isBlank() ->
+                                "Enter UPI payer name"
+
+                            !paymentDone ->
+                                "Scan QR & Confirm Payment"
+
+                            orderState is OrderState.Loading ->
+                                "Placing Order..."
 
                             else ->
-                                "Pay & Place Order  •  ₹${cartViewModel.totalPrice.toInt()}"
+                                "Place Order  •  ₹${cartViewModel.totalPrice.toInt()}"
                         },
                         fontSize = 15.sp,
                         fontWeight = FontWeight.Bold,
@@ -838,4 +1013,37 @@ private fun SectionLabel(
         fontWeight = FontWeight.Bold,
         color = MaterialTheme.colorScheme.onBackground
     )
+}
+private fun generateQrBitmap(
+    content: String,
+    size: Int = 700
+): Bitmap {
+    val bitMatrix = QRCodeWriter().encode(
+        content,
+        BarcodeFormat.QR_CODE,
+        size,
+        size
+    )
+
+    val bitmap = Bitmap.createBitmap(
+        size,
+        size,
+        Bitmap.Config.RGB_565
+    )
+
+    for (x in 0 until size) {
+        for (y in 0 until size) {
+            bitmap.setPixel(
+                x,
+                y,
+                if (bitMatrix[x, y]) {
+                    android.graphics.Color.BLACK
+                } else {
+                    android.graphics.Color.WHITE
+                }
+            )
+        }
+    }
+
+    return bitmap
 }

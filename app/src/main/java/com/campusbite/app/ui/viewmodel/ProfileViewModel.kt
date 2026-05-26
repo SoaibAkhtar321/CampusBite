@@ -21,6 +21,15 @@ class ProfileViewModel @Inject constructor(
     private val _upiId = MutableStateFlow("")
     val upiId = _upiId.asStateFlow()
 
+    private val _openingTime = MutableStateFlow("08:00")
+    val openingTime = _openingTime.asStateFlow()
+
+    private val _closingTime = MutableStateFlow("21:00")
+    val closingTime = _closingTime.asStateFlow()
+
+    private val _maxOrdersPerSlot = MutableStateFlow(5)
+    val maxOrdersPerSlot = _maxOrdersPerSlot.asStateFlow()
+
     private val _message = MutableStateFlow<String?>(null)
     val message = _message.asStateFlow()
 
@@ -41,7 +50,7 @@ class ProfileViewModel @Inject constructor(
                 val shopId = user?.shopId.orEmpty()
 
                 if (shopId.isNotBlank()) {
-                    fetchShopUpiId(shopId)
+                    fetchShopDetails(shopId)
                 }
             }
             .addOnFailureListener {
@@ -49,21 +58,29 @@ class ProfileViewModel @Inject constructor(
             }
     }
 
-    private fun fetchShopUpiId(shopId: String) {
+    private fun fetchShopDetails(shopId: String) {
         firestore.collection("shops")
             .document(shopId)
             .get()
             .addOnSuccessListener { doc ->
                 _upiId.value = doc.getString("upiId") ?: ""
+                _openingTime.value = doc.getString("openingTime") ?: "08:00"
+                _closingTime.value = doc.getString("closingTime") ?: "21:00"
+                _maxOrdersPerSlot.value =
+                    doc.getLong("maxOrdersPerSlot")?.toInt() ?: 5
             }
             .addOnFailureListener {
-                _message.value = it.message ?: "Failed to load UPI ID"
+                _message.value = it.message ?: "Failed to load shop details"
             }
     }
 
-    fun updateUpiId(newUpiId: String) {
-        val user = _userProfile.value
-        val shopId = user?.shopId.orEmpty()
+    fun updateShopSettings(
+        newUpiId: String,
+        newOpeningTime: String,
+        newClosingTime: String,
+        newMaxOrdersPerSlot: String
+    ) {
+        val shopId = _userProfile.value?.shopId.orEmpty()
 
         if (shopId.isBlank()) {
             _message.value = "Shop ID not found"
@@ -71,27 +88,49 @@ class ProfileViewModel @Inject constructor(
         }
 
         val cleanUpiId = newUpiId.trim()
+        val cleanOpeningTime = newOpeningTime.trim().replace("\"", "")
+        val cleanClosingTime = newClosingTime.trim().replace("\"", "")
+        val cleanMaxOrders = newMaxOrdersPerSlot.trim().toIntOrNull()
 
-        if (cleanUpiId.isBlank()) {
-            _message.value = "UPI ID cannot be empty"
-            return
-        }
-
-        if (!cleanUpiId.contains("@")) {
+        if (cleanUpiId.isBlank() || !cleanUpiId.contains("@")) {
             _message.value = "Enter a valid UPI ID"
             return
         }
 
+        if (!isValidTime(cleanOpeningTime) || !isValidTime(cleanClosingTime)) {
+            _message.value = "Use valid time format like 08:00 or 21:00"
+            return
+        }
+
+        if (cleanMaxOrders == null || cleanMaxOrders <= 0) {
+            _message.value = "Max orders per slot must be greater than 0"
+            return
+        }
+
+        val updates = mapOf(
+            "upiId" to cleanUpiId,
+            "openingTime" to cleanOpeningTime,
+            "closingTime" to cleanClosingTime,
+            "maxOrdersPerSlot" to cleanMaxOrders
+        )
+
         firestore.collection("shops")
             .document(shopId)
-            .update("upiId", cleanUpiId)
+            .update(updates)
             .addOnSuccessListener {
                 _upiId.value = cleanUpiId
-                _message.value = "UPI ID updated successfully"
+                _openingTime.value = cleanOpeningTime
+                _closingTime.value = cleanClosingTime
+                _maxOrdersPerSlot.value = cleanMaxOrders
+                _message.value = "Shop settings updated successfully"
             }
             .addOnFailureListener {
-                _message.value = it.message ?: "Failed to update UPI ID"
+                _message.value = it.message ?: "Failed to update shop settings"
             }
+    }
+
+    private fun isValidTime(time: String): Boolean {
+        return Regex("^([01]\\d|2[0-3]):[0-5]\\d$").matches(time)
     }
 
     fun clearMessage() {
