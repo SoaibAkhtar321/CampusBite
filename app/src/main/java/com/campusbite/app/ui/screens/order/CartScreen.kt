@@ -1,6 +1,6 @@
 package com.campusbite.app.ui.screens.order
 
-import android.util.Log
+import android.graphics.Bitmap
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
@@ -8,12 +8,12 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import coil.compose.AsyncImage
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -23,18 +23,17 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -64,6 +63,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.FilterQuality
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -79,23 +80,18 @@ import com.campusbite.app.ui.viewmodel.CartViewModel
 import com.campusbite.app.ui.viewmodel.HomeViewModel
 import com.campusbite.app.ui.viewmodel.OrderState
 import com.campusbite.app.ui.viewmodel.OrderViewModel
-import java.time.LocalDate
-
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.foundation.layout.navigationBarsPadding
-import android.graphics.Bitmap
-import androidx.compose.foundation.Image
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.FilterQuality
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
 import java.net.URLEncoder
-import androidx.compose.runtime.*
-import androidx.compose.runtime.remember
+import java.time.LocalDate
 import java.util.Locale
+
 private val Orange_10 = Orange.copy(alpha = 0.12f)
 
-@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
+@OptIn(
+    ExperimentalLayoutApi::class,
+    ExperimentalMaterial3Api::class
+)
 @Composable
 fun CartScreen(
     onNavigateBack: () -> Unit,
@@ -118,48 +114,68 @@ fun CartScreen(
     var paymentDone by remember { mutableStateOf(false) }
     var upiPayerName by remember { mutableStateOf("") }
 
-
     val expandedNoteItemId = remember { mutableStateOf<String?>(null) }
     val noteDrafts = remember { mutableStateMapOf<String, String>() }
 
     val shopId = currentShopId ?: ""
     val cartPrepTime = cartItems.maxOfOrNull { it.prepTimeMinutes } ?: 0
     val focusManager = LocalFocusManager.current
-    val context = LocalContext.current
+
+    val shopLoaded = selectedShop != null
+
+    val isShopAcceptingOrders =
+        selectedShop?.let { shop ->
+            shop.isOpen &&
+                    !shop.isBlocked &&
+                    !shop.isDeleted
+        } ?: false
+
     val shopUpiId = selectedShop?.upiId.orEmpty()
     val shopName = selectedShop?.name ?: "CampusBite"
+
     val totalAmount = String.format(
-            Locale.US,
-    "%.2f",
-    cartViewModel.totalPrice
+        Locale.US,
+        "%.2f",
+        cartViewModel.totalPrice
     )
+
+    val canShowPayment =
+        shopLoaded &&
+                isShopAcceptingOrders &&
+                !isLoadingSlots &&
+                availableSlots.isNotEmpty() &&
+                selectedSlot.isNotBlank() &&
+                cartItems.isNotEmpty() &&
+                shopId.isNotBlank() &&
+                shopUpiId.isNotBlank()
+
+    val canOrder =
+        canShowPayment &&
+                paymentDone &&
+                upiPayerName.trim().isNotBlank() &&
+                orderState !is OrderState.Loading &&
+                orderState !is OrderState.Error
 
     val upiQrContent = remember(
         shopUpiId,
         shopName,
         totalAmount
     ) {
-
         if (
             shopUpiId.isBlank() ||
             !shopUpiId.contains("@")
         ) {
-
             ""
-
         } else {
+            val encodedName = URLEncoder.encode(
+                shopName,
+                "UTF-8"
+            )
 
-            val encodedName =
-                URLEncoder.encode(
-                    shopName,
-                    "UTF-8"
-                )
-
-            val encodedNote =
-                URLEncoder.encode(
-                    "CampusBite Order",
-                    "UTF-8"
-                )
+            val encodedNote = URLEncoder.encode(
+                "CampusBite Order",
+                "UTF-8"
+            )
 
             "upi://pay" +
                     "?pa=$shopUpiId" +
@@ -168,7 +184,6 @@ fun CartScreen(
                     "&cu=INR" +
                     "&tn=$encodedNote"
         }
-
     }
 
     val qrBitmap = remember(upiQrContent) {
@@ -181,24 +196,56 @@ fun CartScreen(
 
     LaunchedEffect(shopId) {
         if (shopId.isNotBlank()) {
-            orderViewModel.loadShop(shopId)
-        }
-
-        if (shopId.isNotBlank() && homeViewModel != null) {
-            val shop = homeViewModel.shops.value.find { it.shopId == shopId }
-            if (shop != null) {
-                orderViewModel.setSelectedShop(shop)
-            }
+            orderViewModel.listenToShopAvailability(shopId)
         }
     }
 
-    LaunchedEffect(shopId, cartPrepTime, cartItems.size) {
-        if (shopId.isNotBlank() && cartItems.isNotEmpty()) {
-            selectedSlot = ""
+    LaunchedEffect(
+        shopId,
+        cartPrepTime,
+        cartItems.size,
+        isShopAcceptingOrders
+    ) {
+        selectedSlot = ""
+        paymentDone = false
+
+        if (
+            shopId.isNotBlank() &&
+            cartItems.isNotEmpty() &&
+            isShopAcceptingOrders
+        ) {
             orderViewModel.loadAvailableSlots(
                 shopId = shopId,
                 cartPrepTimeMinutes = cartPrepTime
             )
+        }
+    }
+
+    LaunchedEffect(
+        isShopAcceptingOrders,
+        availableSlots
+    ) {
+        if (!isShopAcceptingOrders) {
+            selectedSlot = ""
+            paymentDone = false
+        }
+
+        if (
+            selectedSlot.isNotBlank() &&
+            selectedSlot !in availableSlots
+        ) {
+            selectedSlot = ""
+            paymentDone = false
+        }
+    }
+
+    LaunchedEffect(selectedSlot) {
+        paymentDone = false
+    }
+
+    LaunchedEffect(canShowPayment) {
+        if (!canShowPayment) {
+            paymentDone = false
         }
     }
 
@@ -207,6 +254,8 @@ fun CartScreen(
             is OrderState.Success -> {
                 cartViewModel.clearCart()
                 selectedSlot = ""
+                paymentDone = false
+                upiPayerName = ""
                 onOrderPlaced(state.orderId)
                 orderViewModel.resetState()
             }
@@ -226,7 +275,9 @@ fun CartScreen(
                     )
                 },
                 navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
+                    IconButton(
+                        onClick = onNavigateBack
+                    ) {
                         Icon(
                             imageVector = Icons.Default.ArrowBack,
                             contentDescription = "Back"
@@ -234,7 +285,8 @@ fun CartScreen(
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background
+                    containerColor =
+                        MaterialTheme.colorScheme.background
                 )
             )
         }
@@ -261,20 +313,25 @@ fun CartScreen(
                 ) { item ->
                     CartItemCard(
                         item = item,
-                        isNoteExpanded = expandedNoteItemId.value == item.itemId,
-                        noteDraft = noteDrafts[item.itemId] ?: item.cookingNote,
+                        isNoteExpanded =
+                            expandedNoteItemId.value == item.itemId,
+                        noteDraft =
+                            noteDrafts[item.itemId] ?: item.cookingNote,
                         onToggleNote = {
                             focusManager.clearFocus()
 
                             expandedNoteItemId.value =
-                                if (expandedNoteItemId.value == item.itemId) {
+                                if (
+                                    expandedNoteItemId.value == item.itemId
+                                ) {
                                     null
                                 } else {
                                     item.itemId
                                 }
 
                             if (noteDrafts[item.itemId] == null) {
-                                noteDrafts[item.itemId] = item.cookingNote
+                                noteDrafts[item.itemId] =
+                                    item.cookingNote
                             }
                         },
                         onNoteDraftChange = { draft ->
@@ -285,6 +342,7 @@ fun CartScreen(
                                 item.itemId,
                                 noteDrafts[item.itemId] ?: ""
                             )
+
                             expandedNoteItemId.value = null
                             focusManager.clearFocus()
                         }
@@ -303,16 +361,45 @@ fun CartScreen(
                             SlotShimmer()
                         }
 
+                        !shopLoaded -> {
+                            Text(
+                                text = "Checking shop availability...",
+                                fontSize = 13.sp,
+                                color =
+                                    MaterialTheme
+                                        .colorScheme
+                                        .onSurfaceVariant,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+
+                        !isShopAcceptingOrders -> {
+                            Text(
+                                text =
+                                    slotMessage.ifBlank {
+                                        "This shop is currently not accepting orders."
+                                    },
+                                fontSize = 13.sp,
+                                color = MaterialTheme.colorScheme.error,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+
                         availableSlots.isNotEmpty() -> {
                             FlowRow(
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                                horizontalArrangement =
+                                    Arrangement.spacedBy(8.dp),
+                                verticalArrangement =
+                                    Arrangement.spacedBy(8.dp)
                             ) {
                                 availableSlots.forEach { slot ->
                                     SlotChip(
                                         slot = slot,
-                                        isSelected = selectedSlot == slot,
-                                        onClick = { selectedSlot = slot }
+                                        isSelected =
+                                            selectedSlot == slot,
+                                        onClick = {
+                                            selectedSlot = slot
+                                        }
                                     )
                                 }
                             }
@@ -323,7 +410,8 @@ fun CartScreen(
                                 Text(
                                     text = slotMessage,
                                     fontSize = 12.sp,
-                                    color = MaterialTheme.colorScheme.error,
+                                    color =
+                                        MaterialTheme.colorScheme.error,
                                     fontWeight = FontWeight.Medium
                                 )
                             }
@@ -340,157 +428,74 @@ fun CartScreen(
 
                         else -> {
                             Text(
-                                text = "Pickup slots will appear here.",
+                                text = "No pickup slots available right now.",
                                 fontSize = 13.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                color =
+                                    MaterialTheme
+                                        .colorScheme
+                                        .onSurfaceVariant
                             )
                         }
                     }
                 }
 
                 item {
-                    val canShowPaymentSection =
-                        selectedShop?.isOpen == true &&
-                                selectedSlot.isNotBlank() &&
-                                availableSlots.isNotEmpty() &&
-                                cartItems.isNotEmpty() &&
-                                shopId.isNotBlank() &&
-                                shopUpiId.isNotBlank()
-
                     Spacer(modifier = Modifier.height(6.dp))
 
                     SectionLabel(text = "Payment")
 
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    if (!canShowPaymentSection) {
-                        Card(
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(16.dp),
-                            colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
-                            )
-                        ) {
-                            Text(
-                                text = when {
-                                    selectedShop?.isOpen == false -> "Shop is closed. Payment is disabled."
-                                    availableSlots.isEmpty() -> "No pickup slots available. Payment is disabled."
-                                    selectedSlot.isBlank() -> "Select a pickup slot to continue payment."
-                                    shopUpiId.isBlank() -> "Shop UPI ID is missing."
-                                    else -> "Payment is currently unavailable."
-                                },
-                                modifier = Modifier.padding(16.dp),
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                    when {
+                        !shopLoaded || isLoadingSlots -> {
+                            DisabledPaymentCard(
+                                text = "Checking shop availability..."
                             )
                         }
-                    } else {
-                        Card(
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(18.dp),
-                            colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.surface
-                            ),
-                            elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
-                        ) {
-                            Column(
-                                modifier = Modifier.padding(16.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally
-                            ) {
-                                Text(
-                                    text = shopName,
-                                    fontSize = 17.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
 
-                                Spacer(modifier = Modifier.height(8.dp))
+                        !isShopAcceptingOrders -> {
+                            DisabledPaymentCard(
+                                text = "Shop is currently closed. Payment is disabled."
+                            )
+                        }
 
-                                Text(
-                                    text = "Scan this QR using any UPI app",
-                                    fontSize = 12.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
+                        availableSlots.isEmpty() -> {
+                            DisabledPaymentCard(
+                                text = "No pickup slots available. Payment is disabled."
+                            )
+                        }
 
-                                Spacer(modifier = Modifier.height(14.dp))
+                        selectedSlot.isBlank() -> {
+                            DisabledPaymentCard(
+                                text = "Select a pickup slot to continue payment."
+                            )
+                        }
 
-                                qrBitmap?.let {
-                                    Image(
-                                        bitmap = it.asImageBitmap(),
-                                        contentDescription = "UPI QR Code",
-                                        modifier = Modifier
-                                            .size(230.dp)
-                                            .clip(RoundedCornerShape(16.dp))
-                                            .border(
-                                                width = 1.dp,
-                                                color = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f),
-                                                shape = RoundedCornerShape(16.dp)
-                                            ),
-                                        filterQuality = FilterQuality.None
-                                    )
+                        shopUpiId.isBlank() -> {
+                            DisabledPaymentCard(
+                                text = "Shop payment QR is not available."
+                            )
+                        }
+
+                        else -> {
+                            PaymentQrCard(
+                                shopName = shopName,
+                                qrBitmap = qrBitmap,
+                                totalPrice = cartViewModel.totalPrice,
+                                upiPayerName = upiPayerName,
+                                paymentDone = paymentDone,
+                                onUpiPayerNameChange = {
+                                    upiPayerName = it
+                                    paymentDone = false
+                                },
+                                onPaymentDone = {
+                                    paymentDone = true
                                 }
-
-                                Spacer(modifier = Modifier.height(14.dp))
-
-                                Text(
-                                    text = "Amount: ₹${cartViewModel.totalPrice.toInt()}",
-                                    fontSize = 22.sp,
-                                    fontWeight = FontWeight.ExtraBold,
-                                    color = Orange
-                                )
-
-                                Spacer(modifier = Modifier.height(16.dp))
-
-                                OutlinedTextField(
-                                    value = upiPayerName,
-                                    onValueChange = {
-                                        upiPayerName = it
-                                        paymentDone = false
-                                    },
-                                    label = { Text("Enter your UPI name") },
-                                    placeholder = { Text("Name visible to shopkeeper after payment") },
-                                    singleLine = true,
-                                    modifier = Modifier.fillMaxWidth(),
-                                    shape = RoundedCornerShape(14.dp),
-                                    colors = OutlinedTextFieldDefaults.colors(
-                                        focusedBorderColor = Orange,
-                                        cursorColor = Orange
-                                    )
-                                )
-
-                                Spacer(modifier = Modifier.height(12.dp))
-
-                                Button(
-                                    onClick = { paymentDone = true },
-                                    enabled = upiPayerName.trim().isNotBlank(),
-                                    modifier = Modifier.fillMaxWidth(),
-                                    colors = ButtonDefaults.buttonColors(containerColor = Orange),
-                                    shape = RoundedCornerShape(14.dp)
-                                ) {
-                                    Text(
-                                        text = if (paymentDone) "Payment Marked Done ✓" else "I Have Paid",
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-
-                                if (paymentDone) {
-                                    Spacer(modifier = Modifier.height(8.dp))
-
-                                    Text(
-                                        text = "Now place your order. Shopkeeper will verify payment.",
-                                        fontSize = 12.sp,
-                                        color = Color(0xFF2E7D32),
-                                        fontWeight = FontWeight.SemiBold
-                                    )
-                                }
-                            }
+                            )
                         }
                     }
 
-
                     Spacer(modifier = Modifier.height(10.dp))
-
-
                 }
 
                 item {
@@ -498,7 +503,8 @@ fun CartScreen(
                         Spacer(modifier = Modifier.height(4.dp))
 
                         Text(
-                            text = (orderState as OrderState.Error).message,
+                            text =
+                                (orderState as OrderState.Error).message,
                             color = MaterialTheme.colorScheme.error,
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Bold
@@ -510,25 +516,34 @@ fun CartScreen(
                     Spacer(modifier = Modifier.height(4.dp))
 
                     HorizontalDivider(
-                        color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
+                        color =
+                            MaterialTheme
+                                .colorScheme
+                                .outline
+                                .copy(alpha = 0.2f)
                     )
 
                     Spacer(modifier = Modifier.height(12.dp))
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
+                        horizontalArrangement =
+                            Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column {
                             Text(
                                 text = "Total Amount",
                                 fontSize = 13.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                color =
+                                    MaterialTheme
+                                        .colorScheme
+                                        .onSurfaceVariant
                             )
 
                             Text(
-                                text = "₹${cartViewModel.totalPrice.toInt()}",
+                                text =
+                                    "₹${cartViewModel.totalPrice.toInt()}",
                                 fontSize = 26.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = Orange
@@ -539,10 +554,20 @@ fun CartScreen(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(20.dp))
                                 .background(Orange_10)
-                                .padding(horizontal = 14.dp, vertical = 6.dp)
+                                .padding(
+                                    horizontal = 14.dp,
+                                    vertical = 6.dp
+                                )
                         ) {
                             Text(
-                                text = "${cartViewModel.itemCount} item${if (cartViewModel.itemCount > 1) "s" else ""}",
+                                text =
+                                    "${cartViewModel.itemCount} item${
+                                        if (cartViewModel.itemCount > 1) {
+                                            "s"
+                                        } else {
+                                            ""
+                                        }
+                                    }",
                                 fontSize = 13.sp,
                                 color = Orange,
                                 fontWeight = FontWeight.SemiBold
@@ -554,26 +579,28 @@ fun CartScreen(
                 }
             }
 
-            val canOrder = selectedShop?.isOpen == true &&
-                    selectedSlot.isNotBlank() &&
-                    availableSlots.isNotEmpty() &&
-                    cartItems.isNotEmpty() &&
-                    shopId.isNotBlank() &&
-                    shopUpiId.isNotBlank() &&
-                    paymentDone &&
-                    upiPayerName.trim().isNotBlank() &&
-                    orderState !is OrderState.Loading
             Button(
                 onClick = {
-                    val upiId = selectedShop?.upiId ?: ""
+                    if (!isShopAcceptingOrders) {
+                        orderViewModel.setError(
+                            "This shop is currently not accepting orders."
+                        )
+                        return@Button
+                    }
 
-                    if (upiId.isBlank()) {
+                    if (!canShowPayment) {
+                        orderViewModel.setError(
+                            "Payment is not allowed right now. Please check shop status and pickup slot."
+                        )
+                        return@Button
+                    }
+
+                    if (shopUpiId.isBlank()) {
                         orderViewModel.setError(
                             "UPI ID is missing for this shop."
                         )
                         return@Button
                     }
-
 
                     val order = Order(
                         shopId = shopId,
@@ -618,21 +645,17 @@ fun CartScreen(
                 } else {
                     Text(
                         text = when {
-
                             shopId.isBlank() ->
                                 "Shop not found"
 
                             cartItems.isEmpty() ->
                                 "Cart is Empty"
 
-                            selectedShop?.isOpen == false ->
+                            !shopLoaded || isLoadingSlots ->
+                                "Checking Shop..."
+
+                            !isShopAcceptingOrders ->
                                 "🔒 Shop is Closed"
-
-                            shopUpiId.isBlank() ->
-                                "Shop UPI ID Missing"
-
-                            isLoadingSlots ->
-                                "Loading pickup slots..."
 
                             availableSlots.isEmpty() ->
                                 "No Pickup Slots Available"
@@ -640,14 +663,14 @@ fun CartScreen(
                             selectedSlot.isBlank() ->
                                 "Select Pickup Slot"
 
+                            shopUpiId.isBlank() ->
+                                "Shop UPI ID Missing"
+
                             upiPayerName.trim().isBlank() ->
                                 "Enter UPI payer name"
 
                             !paymentDone ->
                                 "Scan QR & Confirm Payment"
-
-                            orderState is OrderState.Loading ->
-                                "Placing Order..."
 
                             else ->
                                 "Place Order  •  ₹${cartViewModel.totalPrice.toInt()}"
@@ -657,6 +680,157 @@ fun CartScreen(
                         textAlign = TextAlign.Center
                     )
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DisabledPaymentCard(
+    text: String
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor =
+                MaterialTheme
+                    .colorScheme
+                    .surfaceVariant
+                    .copy(alpha = 0.35f)
+        )
+    ) {
+        Text(
+            text = text,
+            modifier = Modifier.padding(16.dp),
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+@Composable
+private fun PaymentQrCard(
+    shopName: String,
+    qrBitmap: Bitmap?,
+    totalPrice: Double,
+    upiPayerName: String,
+    paymentDone: Boolean,
+    onUpiPayerNameChange: (String) -> Unit,
+    onPaymentDone: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface
+        ),
+        elevation = CardDefaults.cardElevation(
+            defaultElevation = 1.dp
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                text = shopName,
+                fontSize = 17.sp,
+                fontWeight = FontWeight.Bold
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Text(
+                text = "Scan this QR using any UPI app",
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            qrBitmap?.let {
+                Image(
+                    bitmap = it.asImageBitmap(),
+                    contentDescription = "UPI QR Code",
+                    modifier = Modifier
+                        .size(230.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .border(
+                            width = 1.dp,
+                            color =
+                                MaterialTheme
+                                    .colorScheme
+                                    .outline
+                                    .copy(alpha = 0.25f),
+                            shape = RoundedCornerShape(16.dp)
+                        ),
+                    filterQuality = FilterQuality.None
+                )
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            Text(
+                text = "Amount: ₹${totalPrice.toInt()}",
+                fontSize = 22.sp,
+                fontWeight = FontWeight.ExtraBold,
+                color = Orange
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            OutlinedTextField(
+                value = upiPayerName,
+                onValueChange = onUpiPayerNameChange,
+                label = {
+                    Text("Enter your UPI name")
+                },
+                placeholder = {
+                    Text("Name visible to shopkeeper after payment")
+                },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = Orange,
+                    cursorColor = Orange
+                )
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Button(
+                onClick = onPaymentDone,
+                enabled = upiPayerName.trim().isNotBlank(),
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Orange
+                ),
+                shape = RoundedCornerShape(14.dp)
+            ) {
+                Text(
+                    text =
+                        if (paymentDone) {
+                            "Payment Marked Done ✓"
+                        } else {
+                            "I Have Paid"
+                        },
+                    fontWeight = FontWeight.Bold
+                )
+            }
+
+            if (paymentDone) {
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Text(
+                    text =
+                        "Now place your order. Shopkeeper will verify payment.",
+                    fontSize = 12.sp,
+                    color = Color(0xFF2E7D32),
+                    fontWeight = FontWeight.SemiBold
+                )
             }
         }
     }
@@ -678,14 +852,17 @@ private fun CartItemCard(
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surface
         ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+        elevation = CardDefaults.cardElevation(
+            defaultElevation = 1.dp
+        )
     ) {
         Column(
             modifier = Modifier.padding(14.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
+                horizontalArrangement =
+                    Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(
@@ -701,27 +878,40 @@ private fun CartItemCard(
                     Spacer(modifier = Modifier.height(3.dp))
 
                     Text(
-                        text = "₹${item.price.toInt()} × ${item.quantity}",
+                        text =
+                            "₹${item.price.toInt()} × ${item.quantity}",
                         fontSize = 13.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color =
+                            MaterialTheme
+                                .colorScheme
+                                .onSurfaceVariant
                     )
 
                     if (item.prepTimeMinutes > 0) {
                         Text(
                             text = "⏱ ${item.prepTimeMinutes} min prep",
                             fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            color =
+                                MaterialTheme
+                                    .colorScheme
+                                    .onSurfaceVariant
                         )
                     }
 
-                    if (item.cookingNote.isNotBlank() && !isNoteExpanded) {
+                    if (
+                        item.cookingNote.isNotBlank() &&
+                        !isNoteExpanded
+                    ) {
                         Spacer(modifier = Modifier.height(5.dp))
 
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(6.dp))
                                 .background(Orange_10)
-                                .padding(horizontal = 8.dp, vertical = 3.dp)
+                                .padding(
+                                    horizontal = 8.dp,
+                                    vertical = 3.dp
+                                )
                         ) {
                             Text(
                                 text = "📝 ${item.cookingNote}",
@@ -737,7 +927,8 @@ private fun CartItemCard(
                     horizontalAlignment = Alignment.End
                 ) {
                     Text(
-                        text = "₹${(item.price * item.quantity).toInt()}",
+                        text =
+                            "₹${(item.price * item.quantity).toInt()}",
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Bold,
                         color = Orange
@@ -748,9 +939,20 @@ private fun CartItemCard(
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(8.dp))
-                            .background(if (isNoteExpanded) Orange else Orange_10)
-                            .clickable { onToggleNote() }
-                            .padding(horizontal = 8.dp, vertical = 5.dp)
+                            .background(
+                                if (isNoteExpanded) {
+                                    Orange
+                                } else {
+                                    Orange_10
+                                }
+                            )
+                            .clickable {
+                                onToggleNote()
+                            }
+                            .padding(
+                                horizontal = 8.dp,
+                                vertical = 5.dp
+                            )
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically
@@ -758,16 +960,31 @@ private fun CartItemCard(
                             Icon(
                                 imageVector = Icons.Default.Edit,
                                 contentDescription = "Add note",
-                                tint = if (isNoteExpanded) Color.White else Orange,
+                                tint =
+                                    if (isNoteExpanded) {
+                                        Color.White
+                                    } else {
+                                        Orange
+                                    },
                                 modifier = Modifier.size(13.dp)
                             )
 
                             Spacer(modifier = Modifier.width(4.dp))
 
                             Text(
-                                text = if (item.cookingNote.isBlank()) "Add note" else "Edit note",
+                                text =
+                                    if (item.cookingNote.isBlank()) {
+                                        "Add note"
+                                    } else {
+                                        "Edit note"
+                                    },
                                 fontSize = 11.sp,
-                                color = if (isNoteExpanded) Color.White else Orange,
+                                color =
+                                    if (isNoteExpanded) {
+                                        Color.White
+                                    } else {
+                                        Orange
+                                    },
                                 fontWeight = FontWeight.SemiBold
                             )
                         }
@@ -784,7 +1001,11 @@ private fun CartItemCard(
                     Spacer(modifier = Modifier.height(10.dp))
 
                     HorizontalDivider(
-                        color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f)
+                        color =
+                            MaterialTheme
+                                .colorScheme
+                                .outline
+                                .copy(alpha = 0.15f)
                     )
 
                     Spacer(modifier = Modifier.height(10.dp))
@@ -793,7 +1014,10 @@ private fun CartItemCard(
                         text = "Cooking Preferences",
                         fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color =
+                            MaterialTheme
+                                .colorScheme
+                                .onSurfaceVariant
                     )
 
                     Spacer(modifier = Modifier.height(4.dp))
@@ -808,11 +1032,14 @@ private fun CartItemCard(
                     )
 
                     FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                        horizontalArrangement =
+                            Arrangement.spacedBy(6.dp),
+                        verticalArrangement =
+                            Arrangement.spacedBy(6.dp),
                         modifier = Modifier.padding(bottom = 8.dp)
                     ) {
                         suggestions.forEach { suggestion ->
+
                             val isSelected = noteDraft
                                 .split(",")
                                 .map { it.trim() }
@@ -821,7 +1048,13 @@ private fun CartItemCard(
                             Box(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(20.dp))
-                                    .background(if (isSelected) Orange else Orange_10)
+                                    .background(
+                                        if (isSelected) {
+                                            Orange
+                                        } else {
+                                            Orange_10
+                                        }
+                                    )
                                     .clickable {
                                         val current = noteDraft
                                             .split(",")
@@ -835,14 +1068,24 @@ private fun CartItemCard(
                                             current.add(suggestion)
                                         }
 
-                                        onNoteDraftChange(current.joinToString(", "))
+                                        onNoteDraftChange(
+                                            current.joinToString(", ")
+                                        )
                                     }
-                                    .padding(horizontal = 10.dp, vertical = 5.dp)
+                                    .padding(
+                                        horizontal = 10.dp,
+                                        vertical = 5.dp
+                                    )
                             ) {
                                 Text(
                                     text = suggestion,
                                     fontSize = 11.sp,
-                                    color = if (isSelected) Color.White else Orange,
+                                    color =
+                                        if (isSelected) {
+                                            Color.White
+                                        } else {
+                                            Orange
+                                        },
                                     fontWeight = FontWeight.Medium
                                 )
                             }
@@ -856,7 +1099,10 @@ private fun CartItemCard(
                             Text(
                                 text = "e.g. extra spicy, no onion...",
                                 fontSize = 13.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                color =
+                                    MaterialTheme
+                                        .colorScheme
+                                        .onSurfaceVariant
                             )
                         },
                         modifier = Modifier.fillMaxWidth(),
@@ -864,14 +1110,20 @@ private fun CartItemCard(
                         singleLine = true,
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = Orange,
-                            unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f),
+                            unfocusedBorderColor =
+                                MaterialTheme
+                                    .colorScheme
+                                    .outline
+                                    .copy(alpha = 0.4f),
                             cursorColor = Orange
                         ),
                         keyboardOptions = KeyboardOptions(
                             imeAction = ImeAction.Done
                         ),
                         keyboardActions = KeyboardActions(
-                            onDone = { onNoteSaved() }
+                            onDone = {
+                                onNoteSaved()
+                            }
                         )
                     )
 
@@ -906,19 +1158,37 @@ private fun SlotChip(
     onClick: () -> Unit
 ) {
     val bgColor by animateColorAsState(
-        targetValue = if (isSelected) Orange else MaterialTheme.colorScheme.surface,
+        targetValue =
+            if (isSelected) {
+                Orange
+            } else {
+                MaterialTheme.colorScheme.surface
+            },
         animationSpec = tween(180),
         label = "slot_bg"
     )
 
     val textColor by animateColorAsState(
-        targetValue = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurface,
+        targetValue =
+            if (isSelected) {
+                Color.White
+            } else {
+                MaterialTheme.colorScheme.onSurface
+            },
         animationSpec = tween(180),
         label = "slot_text"
     )
 
     val borderColor by animateColorAsState(
-        targetValue = if (isSelected) Orange else MaterialTheme.colorScheme.outline.copy(alpha = 0.4f),
+        targetValue =
+            if (isSelected) {
+                Orange
+            } else {
+                MaterialTheme
+                    .colorScheme
+                    .outline
+                    .copy(alpha = 0.4f)
+            },
         animationSpec = tween(180),
         label = "slot_border"
     )
@@ -927,15 +1197,29 @@ private fun SlotChip(
         modifier = Modifier
             .clip(RoundedCornerShape(10.dp))
             .background(bgColor)
-            .border(1.dp, borderColor, RoundedCornerShape(10.dp))
-            .clickable { onClick() }
-            .padding(horizontal = 14.dp, vertical = 9.dp),
+            .border(
+                width = 1.dp,
+                color = borderColor,
+                shape = RoundedCornerShape(10.dp)
+            )
+            .clickable {
+                onClick()
+            }
+            .padding(
+                horizontal = 14.dp,
+                vertical = 9.dp
+            ),
         contentAlignment = Alignment.Center
     ) {
         Text(
             text = slot,
             fontSize = 13.sp,
-            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+            fontWeight =
+                if (isSelected) {
+                    FontWeight.Bold
+                } else {
+                    FontWeight.Normal
+                },
             color = textColor
         )
     }
@@ -971,6 +1255,7 @@ private fun SectionLabel(
         color = MaterialTheme.colorScheme.onBackground
     )
 }
+
 private fun generateQrBitmap(
     content: String,
     size: Int = 700
