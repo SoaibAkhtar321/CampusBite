@@ -16,6 +16,7 @@ import com.campusbite.app.data.model.Order
 import com.campusbite.app.data.model.Shop
 import com.campusbite.app.data.repository.OrderRepository
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -72,6 +73,11 @@ class OrderViewModel @Inject constructor(
     private var currentOrderListener: ListenerRegistration? = null
     private var shopAvailabilityListener: ListenerRegistration? = null
 
+    private data class ShopTimeWindow(
+        val openingDateTime: LocalDateTime,
+        val closingDateTime: LocalDateTime
+    )
+
     fun listenToShopAvailability(shopId: String) {
         shopAvailabilityListener?.remove()
 
@@ -87,22 +93,7 @@ class OrderViewModel @Inject constructor(
 
         viewModelScope.launch {
             try {
-                val directDoc = firestore.collection("shops")
-                    .document(shopId)
-                    .get()
-                    .await()
-
-                val actualDoc = if (directDoc.exists()) {
-                    directDoc
-                } else {
-                    firestore.collection("shops")
-                        .whereEqualTo("shopId", shopId)
-                        .limit(1)
-                        .get()
-                        .await()
-                        .documents
-                        .firstOrNull()
-                }
+                val actualDoc = getShopDocumentByIdOrField(shopId)
 
                 if (actualDoc == null || !actualDoc.exists()) {
                     _selectedShop.value = null
@@ -114,10 +105,8 @@ class OrderViewModel @Inject constructor(
                     return@launch
                 }
 
-                val actualDocId = actualDoc.id
-
                 shopAvailabilityListener = firestore.collection("shops")
-                    .document(actualDocId)
+                    .document(actualDoc.id)
                     .addSnapshotListener { snapshot, error ->
 
                         if (error != null) {
@@ -142,37 +131,7 @@ class OrderViewModel @Inject constructor(
                             return@addSnapshotListener
                         }
 
-                        val shop = Shop(
-                            shopId = snapshot.getString("shopId") ?: snapshot.id,
-                            name = snapshot.getString("name") ?: "",
-                            description = snapshot.getString("description") ?: "",
-                            imageUrl = snapshot.getString("imageUrl") ?: "",
-
-                            isOpen = snapshot.getBoolean("isOpen") ?: false,
-                            isApproved = snapshot.getBoolean("isApproved") ?: false,
-                            isBlocked = snapshot.getBoolean("isBlocked") ?: false,
-                            isDeleted = snapshot.getBoolean("isDeleted") ?: false,
-
-                            openingTime = snapshot.getString("openingTime") ?: "08:00",
-                            closingTime = snapshot.getString("closingTime") ?: "21:00",
-
-                            maxOrdersPerSlot =
-                                snapshot.getLong("maxOrdersPerSlot")?.toInt() ?: 5,
-
-                            closedSlots =
-                                snapshot.get("closedSlots") as? List<String> ?: emptyList(),
-
-                            upiId = snapshot.getString("upiId") ?: "",
-                            phone = snapshot.getString("phone")
-                                ?: snapshot.getString("ownerPhone")
-                                ?: "",
-
-                            ownerUid = snapshot.getString("ownerUid") ?: "",
-                            ownerEmail = snapshot.getString("ownerEmail") ?: "",
-                            ownerPhone = snapshot.getString("ownerPhone") ?: "",
-
-                            createdAt = snapshot.getLong("createdAt") ?: 0L
-                        )
+                        val shop = buildShopFromSnapshot(snapshot)
 
                         val isAcceptingOrders =
                             shop.isOpen &&
@@ -185,6 +144,15 @@ class OrderViewModel @Inject constructor(
                             _slotUiState.value = SlotUiState(
                                 slots = emptyList(),
                                 message = "This shop is currently not accepting orders.",
+                                isLoading = false
+                            )
+                            return@addSnapshotListener
+                        }
+
+                        if (!isWithinWorkingHours(shop)) {
+                            _slotUiState.value = SlotUiState(
+                                slots = emptyList(),
+                                message = getClosedMessage(shop),
                                 isLoading = false
                             )
                         }
@@ -202,6 +170,7 @@ class OrderViewModel @Inject constructor(
             }
         }
     }
+
     fun placeOrder(order: Order) {
         viewModelScope.launch {
             _orderState.value = OrderState.Loading
@@ -222,71 +191,28 @@ class OrderViewModel @Inject constructor(
                     return@launch
                 }
 
-                val directShopDoc = firestore.collection("shops")
-                    .document(order.shopId)
-                    .get()
-                    .await()
-
-                val shopDoc = if (directShopDoc.exists()) {
-                    directShopDoc
-                } else {
-                    firestore.collection("shops")
-                        .whereEqualTo("shopId", order.shopId)
-                        .limit(1)
-                        .get()
-                        .await()
-                        .documents
-                        .firstOrNull()
-                }
+                val shopDoc = getShopDocumentByIdOrField(order.shopId)
 
                 if (shopDoc == null || !shopDoc.exists()) {
                     _orderState.value = OrderState.Error("Shop not found.")
                     return@launch
                 }
 
-                val isOpen = shopDoc.getBoolean("isOpen") ?: false
-                val isBlocked = shopDoc.getBoolean("isBlocked") ?: false
-                val isDeleted = shopDoc.getBoolean("isDeleted") ?: false
+                val shop = buildShopFromSnapshot(shopDoc)
 
-                if (!isOpen || isBlocked || isDeleted) {
+                val isAcceptingOrders =
+                    shop.isOpen &&
+                            !shop.isBlocked &&
+                            !shop.isDeleted
+
+                if (!isAcceptingOrders) {
                     _orderState.value = OrderState.Error(
                         "This shop is currently not accepting orders."
                     )
                     return@launch
                 }
 
-                val shop = shopDoc.toObject(Shop::class.java)
-
-                if (shop == null) {
-                    _orderState.value = OrderState.Error("Shop details not found.")
-                    return@launch
-                }
-
-                val now = LocalDateTime.now()
-                val openingTime = parseShopTime(
-                    value = shop.openingTime,
-                    fallback = LocalTime.of(8, 0)
-                )
-                val closingTime = parseShopTime(
-                    value = shop.closingTime,
-                    fallback = LocalTime.of(21, 0)
-                )
-
-                val openingDateTime = LocalDateTime.of(
-                    now.toLocalDate(),
-                    openingTime
-                )
-
-                val closingDateTime = LocalDateTime.of(
-                    now.toLocalDate(),
-                    closingTime
-                )
-
-                val isWithinWorkingHours =
-                    !now.isBefore(openingDateTime) &&
-                            now.isBefore(closingDateTime)
-
-                if (!isWithinWorkingHours) {
+                if (!isWithinWorkingHours(shop)) {
                     _orderState.value = OrderState.Error(
                         "This shop is currently closed."
                     )
@@ -301,8 +227,11 @@ class OrderViewModel @Inject constructor(
                     .await()
                     .size()
 
-                val isSlotClosedByShop = shop.closedSlots.contains(order.pickupSlot)
-                val hasCapacity = orderCount < shop.maxOrdersPerSlot
+                val isSlotClosedByShop =
+                    shop.closedSlots.contains(order.pickupSlot)
+
+                val hasCapacity =
+                    orderCount < shop.maxOrdersPerSlot
 
                 if (isSlotClosedByShop || !hasCapacity) {
                     _orderState.value = OrderState.Error(
@@ -327,6 +256,7 @@ class OrderViewModel @Inject constructor(
 
             } catch (e: Exception) {
                 Log.e("OrderVM", "Exception while placing order", e)
+
                 _orderState.value = OrderState.Error(
                     e.message ?: "Failed to place order"
                 )
@@ -465,12 +395,14 @@ class OrderViewModel @Inject constructor(
                     return@launch
                 }
 
-                val shopDoc = firestore.collection("shops")
-                    .document(shopId)
-                    .get()
-                    .await()
+                val shopDoc = getShopDocumentByIdOrField(shopId)
 
-                _selectedShop.value = shopDoc.toObject(Shop::class.java)
+                _selectedShop.value =
+                    if (shopDoc != null && shopDoc.exists()) {
+                        buildShopFromSnapshot(shopDoc)
+                    } else {
+                        null
+                    }
 
             } catch (e: Exception) {
                 Log.e("OrderVM", "Failed to load shop", e)
@@ -505,14 +437,9 @@ class OrderViewModel @Inject constructor(
                     return@launch
                 }
 
-                val shopDoc = firestore.collection("shops")
-                    .document(shopId)
-                    .get()
-                    .await()
+                val shopDoc = getShopDocumentByIdOrField(shopId)
 
-                val shop = shopDoc.toObject(Shop::class.java)
-
-                if (shop == null) {
+                if (shopDoc == null || !shopDoc.exists()) {
                     _selectedShop.value = null
                     _slotUiState.value = SlotUiState(
                         slots = emptyList(),
@@ -522,6 +449,7 @@ class OrderViewModel @Inject constructor(
                     return@launch
                 }
 
+                val shop = buildShopFromSnapshot(shopDoc)
                 _selectedShop.value = shop
 
                 val isAcceptingOrders =
@@ -538,14 +466,23 @@ class OrderViewModel @Inject constructor(
                     return@launch
                 }
 
-                if (!isWithinWorkingHours(shop)) {
+                val now = LocalDateTime.now()
+                val timeWindow = getShopTimeWindow(
+                    shop = shop,
+                    now = now
+                )
+
+                val openingDateTime = timeWindow.openingDateTime
+                val closingDateTime = timeWindow.closingDateTime
+
+                val isWithinWorkingHours =
+                    !now.isBefore(openingDateTime) &&
+                            now.isBefore(closingDateTime)
+
+                if (!isWithinWorkingHours) {
                     _slotUiState.value = SlotUiState(
                         slots = emptyList(),
-                        message = "This shop is currently closed. Orders are accepted between ${
-                            formatShopTime(shop.openingTime)
-                        } - ${
-                            formatShopTime(shop.closingTime)
-                        }.",
+                        message = getClosedMessage(shop),
                         isLoading = false
                     )
                     return@launch
@@ -553,27 +490,6 @@ class OrderViewModel @Inject constructor(
 
                 val displayFormatter = DateTimeFormatter.ofPattern("hh:mm a")
                 val today = LocalDate.now().toString()
-                val now = LocalDateTime.now()
-
-                val openingTime = parseShopTime(
-                    value = shop.openingTime,
-                    fallback = LocalTime.of(8, 0)
-                )
-
-                val closingTime = parseShopTime(
-                    value = shop.closingTime,
-                    fallback = LocalTime.of(21, 0)
-                )
-
-                val openingDateTime = LocalDateTime.of(
-                    now.toLocalDate(),
-                    openingTime
-                )
-
-                val closingDateTime = LocalDateTime.of(
-                    now.toLocalDate(),
-                    closingTime
-                )
 
                 val earliestTime = now.plusMinutes(
                     cartPrepTimeMinutes.toLong()
@@ -602,6 +518,7 @@ class OrderViewModel @Inject constructor(
                     generatedSlots.add(
                         slot.toLocalTime().format(displayFormatter)
                     )
+
                     slot = slot.plusMinutes(15)
                 }
 
@@ -642,7 +559,7 @@ class OrderViewModel @Inject constructor(
                         availableSlots.isEmpty() ->
                             "All pickup slots are full or temporarily unavailable."
 
-                        endTime == closingDateTime ->
+                        closingDateTime.isBefore(maxWindowEnd) ->
                             "Slots are shown only until shop closing time: ${
                                 formatShopTime(shop.closingTime)
                             }."
@@ -664,9 +581,70 @@ class OrderViewModel @Inject constructor(
         }
     }
 
-    private fun isWithinWorkingHours(shop: Shop): Boolean {
-        val now = LocalDateTime.now()
+    private suspend fun getShopDocumentByIdOrField(
+        shopId: String
+    ): DocumentSnapshot? {
+        val directDoc = firestore.collection("shops")
+            .document(shopId)
+            .get()
+            .await()
 
+        if (directDoc.exists()) {
+            return directDoc
+        }
+
+        return firestore.collection("shops")
+            .whereEqualTo("shopId", shopId)
+            .limit(1)
+            .get()
+            .await()
+            .documents
+            .firstOrNull()
+    }
+
+    private fun buildShopFromSnapshot(
+        snapshot: DocumentSnapshot
+    ): Shop {
+        return Shop(
+            shopId = snapshot.getString("shopId") ?: snapshot.id,
+            name = snapshot.getString("name") ?: "",
+            description = snapshot.getString("description") ?: "",
+            imageUrl = snapshot.getString("imageUrl") ?: "",
+
+            isOpen = snapshot.getBoolean("isOpen") ?: false,
+            isApproved = snapshot.getBoolean("isApproved") ?: false,
+            isBlocked = snapshot.getBoolean("isBlocked") ?: false,
+            isDeleted = snapshot.getBoolean("isDeleted") ?: false,
+
+            openingTime = snapshot.getString("openingTime") ?: "08:00",
+            closingTime = snapshot.getString("closingTime") ?: "21:00",
+
+            maxOrdersPerSlot =
+                snapshot.getLong("maxOrdersPerSlot")?.toInt() ?: 5,
+
+            closedSlots =
+                (snapshot.get("closedSlots") as? List<*>)
+                    ?.filterIsInstance<String>()
+                    ?: emptyList(),
+
+            upiId = snapshot.getString("upiId") ?: "",
+
+            phone = snapshot.getString("phone")
+                ?: snapshot.getString("ownerPhone")
+                ?: "",
+
+            ownerUid = snapshot.getString("ownerUid") ?: "",
+            ownerEmail = snapshot.getString("ownerEmail") ?: "",
+            ownerPhone = snapshot.getString("ownerPhone") ?: "",
+
+            createdAt = snapshot.getLong("createdAt") ?: 0L
+        )
+    }
+
+    private fun getShopTimeWindow(
+        shop: Shop,
+        now: LocalDateTime = LocalDateTime.now()
+    ): ShopTimeWindow {
         val openingTime = parseShopTime(
             value = shop.openingTime,
             fallback = LocalTime.of(8, 0)
@@ -677,18 +655,43 @@ class OrderViewModel @Inject constructor(
             fallback = LocalTime.of(21, 0)
         )
 
-        val openingDateTime = LocalDateTime.of(
+        var openingDateTime = LocalDateTime.of(
             now.toLocalDate(),
             openingTime
         )
 
-        val closingDateTime = LocalDateTime.of(
+        var closingDateTime = LocalDateTime.of(
             now.toLocalDate(),
             closingTime
         )
 
-        return !now.isBefore(openingDateTime) &&
-                now.isBefore(closingDateTime)
+        val isOvernightTiming =
+            !closingTime.isAfter(openingTime)
+
+        if (isOvernightTiming) {
+            if (now.toLocalTime().isBefore(closingTime)) {
+                openingDateTime = openingDateTime.minusDays(1)
+            } else {
+                closingDateTime = closingDateTime.plusDays(1)
+            }
+        }
+
+        return ShopTimeWindow(
+            openingDateTime = openingDateTime,
+            closingDateTime = closingDateTime
+        )
+    }
+
+    private fun isWithinWorkingHours(shop: Shop): Boolean {
+        val now = LocalDateTime.now()
+
+        val timeWindow = getShopTimeWindow(
+            shop = shop,
+            now = now
+        )
+
+        return !now.isBefore(timeWindow.openingDateTime) &&
+                now.isBefore(timeWindow.closingDateTime)
     }
 
     private fun parseShopTime(
@@ -743,6 +746,14 @@ class OrderViewModel @Inject constructor(
         } catch (e: Exception) {
             timeValue.trim().replace("\"", "")
         }
+    }
+
+    private fun getClosedMessage(shop: Shop): String {
+        return "This shop is currently closed. Orders are accepted between ${
+            formatShopTime(shop.openingTime)
+        } - ${
+            formatShopTime(shop.closingTime)
+        }."
     }
 
     private fun showOrderStatusNotification(

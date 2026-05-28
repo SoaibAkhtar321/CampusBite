@@ -31,6 +31,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.campusbite.app.ui.viewmodel.ProfileViewModel
 
+
 private val BrandOrange = Color(0xFFFF6B00)
 
 private const val SUPPORT_EMAIL = "support.campusbite@gmail.com"
@@ -38,6 +39,20 @@ private const val SUPPORT_EMAIL = "support.campusbite@gmail.com"
 // Change this if you want another WhatsApp support number.
 // Format: country code + number, without + sign.
 private const val SUPPORT_WHATSAPP_NUMBER = "918957833269"
+private const val WEBSITE_BASE_URL =
+    "https://campus-bite-website-agj0r1s50-campus-bite-s-projects.vercel.app"
+
+private const val PRIVACY_POLICY_URL =
+    "$WEBSITE_BASE_URL/privacy-policy"
+
+private const val TERMS_URL =
+    "$WEBSITE_BASE_URL/terms-and-conditions"
+
+private const val REFUND_POLICY_URL =
+    "$WEBSITE_BASE_URL/refund-cancellation-policy"
+
+private const val CONTACT_URL =
+    "$WEBSITE_BASE_URL/contact-us"
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -46,7 +61,7 @@ fun ShopkeeperProfileScreen(
     onLogout: () -> Unit,
     viewModel: ProfileViewModel = hiltViewModel()
 ) {
-    val context = LocalContext.current
+
 
     val userProfile by viewModel.userProfile.collectAsState()
     val currentUpiId by viewModel.upiId.collectAsState()
@@ -62,6 +77,7 @@ fun ShopkeeperProfileScreen(
     var openingInput by remember { mutableStateOf("") }
     var closingInput by remember { mutableStateOf("") }
     var maxOrdersInput by remember { mutableStateOf("") }
+    val context = LocalContext.current
 
     LaunchedEffect(
         currentUpiId,
@@ -381,6 +397,58 @@ fun ShopkeeperProfileScreen(
                     }
                 )
             }
+            SectionCard(
+                title = "Legal & Policies",
+                icon = Icons.Outlined.Settings
+            ) {
+                ActionRow(
+                    icon = Icons.Outlined.Settings,
+                    label = "Privacy Policy",
+                    trailingText = "Data usage",
+                    onClick = {
+                        openWebPage(context, PRIVACY_POLICY_URL)
+                    }
+                )
+
+                HorizontalDivider(
+                    modifier = Modifier.padding(vertical = 8.dp)
+                )
+
+                ActionRow(
+                    icon = Icons.Outlined.Settings,
+                    label = "Terms & Conditions",
+                    trailingText = "App rules",
+                    onClick = {
+                        openWebPage(context, TERMS_URL)
+                    }
+                )
+
+                HorizontalDivider(
+                    modifier = Modifier.padding(vertical = 8.dp)
+                )
+
+                ActionRow(
+                    icon = Icons.Outlined.Settings,
+                    label = "Refund & Cancellation Policy",
+                    trailingText = "Refund support",
+                    onClick = {
+                        openWebPage(context, REFUND_POLICY_URL)
+                    }
+                )
+
+                HorizontalDivider(
+                    modifier = Modifier.padding(vertical = 8.dp)
+                )
+
+                ActionRow(
+                    icon = Icons.Outlined.SupportAgent,
+                    label = "Contact Us",
+                    trailingText = "Support",
+                    onClick = {
+                        openWebPage(context, CONTACT_URL)
+                    }
+                )
+            }
 
             SectionCard(
                 title = "Settings",
@@ -626,4 +694,15 @@ private fun InfoText(
     )
 
     Spacer(modifier = Modifier.height(6.dp))
+}
+private fun openWebPage(
+    context: android.content.Context,
+    url: String
+) {
+    val intent = Intent(
+        Intent.ACTION_VIEW,
+        Uri.parse(url)
+    )
+
+    context.startActivity(intent)
 }
