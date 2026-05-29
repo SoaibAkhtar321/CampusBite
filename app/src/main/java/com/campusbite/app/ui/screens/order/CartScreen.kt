@@ -801,6 +801,24 @@ private fun PaymentQrCard(
 
             Spacer(modifier = Modifier.height(12.dp))
 
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Orange_10)
+                    .padding(12.dp)
+            ) {
+                Text(
+                    text = "⚠️ Shopkeeper will verify your UPI payment. False claims may block your account.",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Orange,
+                    lineHeight = 17.sp
+                )
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
             Button(
                 onClick = onPaymentDone,
                 enabled = upiPayerName.trim().isNotBlank(),
@@ -813,7 +831,7 @@ private fun PaymentQrCard(
                 Text(
                     text =
                         if (paymentDone) {
-                            "Payment Marked Done ✓"
+                            "I Have Paid ✓"
                         } else {
                             "I Have Paid"
                         },
@@ -825,11 +843,11 @@ private fun PaymentQrCard(
                 Spacer(modifier = Modifier.height(8.dp))
 
                 Text(
-                    text =
-                        "Now place your order. Shopkeeper will verify payment.",
+                    text = "Payment will be verified by the shopkeeper before preparing your order.",
                     fontSize = 12.sp,
                     color = Color(0xFF2E7D32),
-                    fontWeight = FontWeight.SemiBold
+                    fontWeight = FontWeight.SemiBold,
+                    textAlign = TextAlign.Center
                 )
             }
         }

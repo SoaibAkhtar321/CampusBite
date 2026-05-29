@@ -42,6 +42,7 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -58,8 +59,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.campusbite.app.ui.viewmodel.OrderViewModel
-import com.campusbite.app.ui.viewmodel.ProfileViewModel
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FirebaseFirestore
 
 private val BrandOrange = Color(0xFFFF6B00)
 
@@ -86,48 +87,88 @@ fun StudentProfileScreen(
     onNavigateToOrderStatus: (String) -> Unit,
     onNavigateToOrderHistory: () -> Unit,
     onLogout: () -> Unit,
-    orderViewModel: OrderViewModel = hiltViewModel(),
-    profileViewModel: ProfileViewModel = hiltViewModel()
+    orderViewModel: OrderViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
+    val currentUser = FirebaseAuth.getInstance().currentUser
 
     var showLogoutDialog by remember { mutableStateOf(false) }
     var notificationsEnabled by remember { mutableStateOf(true) }
 
+    var firestoreName by remember { mutableStateOf("") }
+    var firestoreEmail by remember { mutableStateOf("") }
+    var firestorePhone by remember { mutableStateOf("") }
+
     val activeOrder by orderViewModel.activeOrder.collectAsState()
     val userOrders by orderViewModel.userOrders.collectAsState()
-    val userProfile by profileViewModel.userProfile.collectAsState()
 
-    val currentUser = FirebaseAuth.getInstance().currentUser
+    DisposableEffect(currentUser?.uid) {
+        val uid = currentUser?.uid
 
-    val displayEmail =
-        userProfile?.email?.trim()
-            ?.ifBlank { null }
-            ?: currentUser?.email?.trim()
-            ?: "No Email"
+        if (uid.isNullOrBlank()) {
+            onDispose { }
+        } else {
+            val registration = FirebaseFirestore.getInstance()
+                .collection("users")
+                .document(uid)
+                .addSnapshotListener { snapshot, _ ->
+                    if (snapshot != null && snapshot.exists()) {
+                        firestoreName = snapshot.getString("name").orEmpty()
+                        firestoreEmail = snapshot.getString("email").orEmpty()
 
-    val displayName =
-        userProfile?.name?.trim()
-            ?.ifBlank { null }
-            ?: currentUser?.displayName?.trim()
-                ?.ifBlank { null }
-            ?: currentUser?.email
-                ?.substringBefore("@")
-                ?.trim()
-                ?.replaceFirstChar { char ->
-                    if (char.isLowerCase()) {
-                        char.titlecase()
-                    } else {
-                        char.toString()
+                        firestorePhone =
+                            snapshot.getString("phone")
+                                ?: snapshot.getString("phoneNumber")
+                                        ?: snapshot.getString("mobile")
+                                        ?: ""
                     }
                 }
-            ?: "Student"
+
+            onDispose {
+                registration.remove()
+            }
+        }
+    }
+
+    val displayEmail =
+        firestoreEmail.trim()
+            .ifBlank {
+                currentUser?.email?.trim().orEmpty()
+            }
+            .ifBlank {
+                "No Email"
+            }
+
+    val displayName =
+        firestoreName.trim()
+            .ifBlank {
+                currentUser?.displayName?.trim().orEmpty()
+            }
+            .ifBlank {
+                currentUser?.email
+                    ?.substringBefore("@")
+                    ?.trim()
+                    ?.replaceFirstChar { char ->
+                        if (char.isLowerCase()) {
+                            char.titlecase()
+                        } else {
+                            char.toString()
+                        }
+                    }
+                    .orEmpty()
+            }
+            .ifBlank {
+                "Student"
+            }
 
     val displayPhone =
-        userProfile?.phone?.trim()
-            ?.ifBlank { null }
-            ?: currentUser?.phoneNumber?.trim()
-            ?: "Phone not added"
+        firestorePhone.trim()
+            .ifBlank {
+                currentUser?.phoneNumber?.trim().orEmpty()
+            }
+            .ifBlank {
+                "Phone not added"
+            }
 
     LaunchedEffect(currentUser?.uid) {
         val uid = currentUser?.uid
@@ -275,7 +316,6 @@ fun StudentProfileScreen(
                     )
                 }
 
-
                 HorizontalDivider(
                     modifier = Modifier.padding(vertical = 8.dp)
                 )
@@ -417,7 +457,7 @@ private fun openWhatsAppSupport(
     val message = """
         Hi CampusBite Support,
         I need help with my order/payment issue.
-        
+
         User Email: ${userEmail.ifBlank { "Not available" }}
     """.trimIndent()
 
@@ -459,9 +499,9 @@ private fun openEmailSupport(
             Intent.EXTRA_TEXT,
             """
             Hi CampusBite Support,
-            
+
             I need help with:
-            
+
             User Email: ${userEmail.ifBlank { "Not available" }}
             """.trimIndent()
         )
