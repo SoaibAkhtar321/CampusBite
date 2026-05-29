@@ -23,7 +23,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronRight
-import androidx.compose.material.icons.outlined.DarkMode
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Logout
 import androidx.compose.material.icons.outlined.Notifications
@@ -59,19 +58,18 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.campusbite.app.ui.viewmodel.OrderViewModel
+import com.campusbite.app.ui.viewmodel.ProfileViewModel
 import com.google.firebase.auth.FirebaseAuth
-
-
 
 private val BrandOrange = Color(0xFFFF6B00)
 
 private const val SUPPORT_EMAIL = "support.campusbite@gmail.com"
 
-// Change this if you want another WhatsApp support number.
 // Format: country code + number, without + sign.
 private const val SUPPORT_WHATSAPP_NUMBER = "918957833269"
+
 private const val WEBSITE_BASE_URL =
-    "https://campus-bite-website-agj0r1s50-campus-bite-s-projects.vercel.app"
+    "https://thecampusbite.vercel.app"
 
 private const val PRIVACY_POLICY_URL =
     "$WEBSITE_BASE_URL/privacy-policy"
@@ -82,27 +80,54 @@ private const val TERMS_URL =
 private const val REFUND_POLICY_URL =
     "$WEBSITE_BASE_URL/refund-cancellation-policy"
 
-private const val CONTACT_URL =
-    "$WEBSITE_BASE_URL/contact-us"
-
 @Composable
 fun StudentProfileScreen(
     onNavigateBack: () -> Unit,
     onNavigateToOrderStatus: (String) -> Unit,
     onNavigateToOrderHistory: () -> Unit,
     onLogout: () -> Unit,
-    orderViewModel: OrderViewModel = hiltViewModel()
+    orderViewModel: OrderViewModel = hiltViewModel(),
+    profileViewModel: ProfileViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
 
     var showLogoutDialog by remember { mutableStateOf(false) }
     var notificationsEnabled by remember { mutableStateOf(true) }
-    var darkModeEnabled by remember { mutableStateOf(false) }
 
     val activeOrder by orderViewModel.activeOrder.collectAsState()
     val userOrders by orderViewModel.userOrders.collectAsState()
+    val userProfile by profileViewModel.userProfile.collectAsState()
 
     val currentUser = FirebaseAuth.getInstance().currentUser
+
+    val displayEmail =
+        userProfile?.email?.trim()
+            ?.ifBlank { null }
+            ?: currentUser?.email?.trim()
+            ?: "No Email"
+
+    val displayName =
+        userProfile?.name?.trim()
+            ?.ifBlank { null }
+            ?: currentUser?.displayName?.trim()
+                ?.ifBlank { null }
+            ?: currentUser?.email
+                ?.substringBefore("@")
+                ?.trim()
+                ?.replaceFirstChar { char ->
+                    if (char.isLowerCase()) {
+                        char.titlecase()
+                    } else {
+                        char.toString()
+                    }
+                }
+            ?: "Student"
+
+    val displayPhone =
+        userProfile?.phone?.trim()
+            ?.ifBlank { null }
+            ?: currentUser?.phoneNumber?.trim()
+            ?: "Phone not added"
 
     LaunchedEffect(currentUser?.uid) {
         val uid = currentUser?.uid
@@ -125,9 +150,9 @@ fun StudentProfileScreen(
         ) {
 
             StudentHeaderCard(
-                name = currentUser?.displayName ?: "Student",
-                email = currentUser?.email ?: "No Email",
-                phone = currentUser?.phoneNumber ?: "Phone not added"
+                name = displayName,
+                email = displayEmail,
+                phone = displayPhone
             )
 
             if (
@@ -218,7 +243,9 @@ fun StudentProfileScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         Icon(
                             imageVector = Icons.Outlined.Notifications,
                             contentDescription = null
@@ -248,44 +275,6 @@ fun StudentProfileScreen(
                     )
                 }
 
-                HorizontalDivider(
-                    modifier = Modifier.padding(vertical = 8.dp)
-                )
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Outlined.DarkMode,
-                            contentDescription = null
-                        )
-
-                        Spacer(modifier = Modifier.width(12.dp))
-
-                        Column {
-                            Text("Dark Mode")
-
-                            Text(
-                                text = "UI toggle only for now",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-
-                    Switch(
-                        checked = darkModeEnabled,
-                        onCheckedChange = {
-                            darkModeEnabled = it
-                        },
-                        colors = SwitchDefaults.colors(
-                            checkedTrackColor = BrandOrange
-                        )
-                    )
-                }
 
                 HorizontalDivider(
                     modifier = Modifier.padding(vertical = 8.dp)
@@ -320,7 +309,7 @@ fun StudentProfileScreen(
                     onClick = {
                         openWhatsAppSupport(
                             context = context,
-                            userEmail = currentUser?.email.orEmpty()
+                            userEmail = displayEmail
                         )
                     }
                 )
@@ -336,63 +325,51 @@ fun StudentProfileScreen(
                     onClick = {
                         openEmailSupport(
                             context = context,
-                            userEmail = currentUser?.email.orEmpty()
+                            userEmail = displayEmail
                         )
                     }
                 )
             }
+
             SectionCard(
-                    title = "Legal & Policies",
-            icon = Icons.Outlined.Settings
+                title = "Legal & Policies",
+                icon = Icons.Outlined.Settings
             ) {
-            ActionRow(
-                icon = Icons.Outlined.Settings,
-                label = "Privacy Policy",
-                trailingText = "Data usage",
-                onClick = {
-                    openWebPage(context, PRIVACY_POLICY_URL)
-                }
-            )
+                ActionRow(
+                    icon = Icons.Outlined.Settings,
+                    label = "Privacy Policy",
+                    trailingText = "Data usage",
+                    onClick = {
+                        openWebPage(context, PRIVACY_POLICY_URL)
+                    }
+                )
 
-            HorizontalDivider(
-                modifier = Modifier.padding(vertical = 8.dp)
-            )
+                HorizontalDivider(
+                    modifier = Modifier.padding(vertical = 8.dp)
+                )
 
-            ActionRow(
-                icon = Icons.Outlined.Settings,
-                label = "Terms & Conditions",
-                trailingText = "App rules",
-                onClick = {
-                    openWebPage(context, TERMS_URL)
-                }
-            )
+                ActionRow(
+                    icon = Icons.Outlined.Settings,
+                    label = "Terms & Conditions",
+                    trailingText = "App rules",
+                    onClick = {
+                        openWebPage(context, TERMS_URL)
+                    }
+                )
 
-            HorizontalDivider(
-                modifier = Modifier.padding(vertical = 8.dp)
-            )
+                HorizontalDivider(
+                    modifier = Modifier.padding(vertical = 8.dp)
+                )
 
-            ActionRow(
-                icon = Icons.Outlined.Settings,
-                label = "Refund & Cancellation Policy",
-                trailingText = "Refund support",
-                onClick = {
-                    openWebPage(context, REFUND_POLICY_URL)
-                }
-            )
-
-            HorizontalDivider(
-                modifier = Modifier.padding(vertical = 8.dp)
-            )
-
-            ActionRow(
-                icon = Icons.Outlined.SupportAgent,
-                label = "Contact Us",
-                trailingText = "Support",
-                onClick = {
-                    openWebPage(context, CONTACT_URL)
-                }
-            )
-        }
+                ActionRow(
+                    icon = Icons.Outlined.Settings,
+                    label = "Refund & Cancellation Policy",
+                    trailingText = "Refund support",
+                    onClick = {
+                        openWebPage(context, REFUND_POLICY_URL)
+                    }
+                )
+            }
         }
     }
 
@@ -441,7 +418,7 @@ private fun openWhatsAppSupport(
         Hi CampusBite Support,
         I need help with my order/payment issue.
         
-        User Email: $userEmail
+        User Email: ${userEmail.ifBlank { "Not available" }}
     """.trimIndent()
 
     val encodedMessage = Uri.encode(message)
@@ -450,7 +427,10 @@ private fun openWhatsAppSupport(
         "https://wa.me/$SUPPORT_WHATSAPP_NUMBER?text=$encodedMessage"
     )
 
-    val intent = Intent(Intent.ACTION_VIEW, uri)
+    val intent = Intent(
+        Intent.ACTION_VIEW,
+        uri
+    )
 
     try {
         context.startActivity(intent)
@@ -469,7 +449,12 @@ private fun openEmailSupport(
 ) {
     val intent = Intent(Intent.ACTION_SENDTO).apply {
         data = Uri.parse("mailto:$SUPPORT_EMAIL")
-        putExtra(Intent.EXTRA_SUBJECT, "CampusBite Support")
+
+        putExtra(
+            Intent.EXTRA_SUBJECT,
+            "CampusBite Support"
+        )
+
         putExtra(
             Intent.EXTRA_TEXT,
             """
@@ -477,7 +462,7 @@ private fun openEmailSupport(
             
             I need help with:
             
-            User Email: $userEmail
+            User Email: ${userEmail.ifBlank { "Not available" }}
             """.trimIndent()
         )
     }
@@ -498,12 +483,37 @@ private fun openEmailSupport(
     }
 }
 
+private fun openWebPage(
+    context: android.content.Context,
+    url: String
+) {
+    val intent = Intent(
+        Intent.ACTION_VIEW,
+        Uri.parse(url)
+    )
+
+    try {
+        context.startActivity(intent)
+    } catch (e: Exception) {
+        Toast.makeText(
+            context,
+            "No browser found on this device.",
+            Toast.LENGTH_SHORT
+        ).show()
+    }
+}
+
 @Composable
 private fun StudentHeaderCard(
     name: String,
     email: String,
     phone: String
 ) {
+    val profileInitial =
+        name.trim().firstOrNull()?.uppercaseChar()?.toString()
+            ?: email.trim().firstOrNull()?.uppercaseChar()?.toString()
+            ?: "U"
+
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(18.dp),
@@ -523,7 +533,7 @@ private fun StudentHeaderCard(
                 contentAlignment = Alignment.Center
             ) {
                 Text(
-                    text = name.firstOrNull()?.uppercase() ?: "S",
+                    text = profileInitial,
                     color = Color.White,
                     style = MaterialTheme.typography.headlineMedium,
                     fontWeight = FontWeight.Bold
@@ -534,7 +544,7 @@ private fun StudentHeaderCard(
 
             Column {
                 Text(
-                    text = name,
+                    text = name.ifBlank { "Student" },
                     color = Color.White,
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold
@@ -543,7 +553,7 @@ private fun StudentHeaderCard(
                 Spacer(modifier = Modifier.height(2.dp))
 
                 Text(
-                    text = email,
+                    text = email.ifBlank { "No Email" },
                     color = Color.White.copy(alpha = 0.9f),
                     style = MaterialTheme.typography.bodyMedium
                 )
@@ -551,7 +561,7 @@ private fun StudentHeaderCard(
                 Spacer(modifier = Modifier.height(2.dp))
 
                 Text(
-                    text = phone,
+                    text = phone.ifBlank { "Phone not added" },
                     color = Color.White.copy(alpha = 0.85f),
                     style = MaterialTheme.typography.bodySmall
                 )
@@ -597,7 +607,6 @@ private fun SectionCard(
         }
     }
 }
-
 
 @Composable
 private fun ActionRow(
@@ -647,15 +656,4 @@ private fun ActionRow(
             )
         }
     }
-}
-private fun openWebPage(
-    context: android.content.Context,
-    url: String
-) {
-    val intent = Intent(
-        Intent.ACTION_VIEW,
-        Uri.parse(url)
-    )
-
-    context.startActivity(intent)
 }

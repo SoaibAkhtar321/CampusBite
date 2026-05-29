@@ -5,7 +5,18 @@ import android.net.Uri
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -18,8 +29,28 @@ import androidx.compose.material.icons.outlined.Payments
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Store
 import androidx.compose.material.icons.outlined.SupportAgent
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -31,16 +62,15 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.campusbite.app.ui.viewmodel.ProfileViewModel
 
-
 private val BrandOrange = Color(0xFFFF6B00)
 
 private const val SUPPORT_EMAIL = "support.campusbite@gmail.com"
 
-// Change this if you want another WhatsApp support number.
 // Format: country code + number, without + sign.
 private const val SUPPORT_WHATSAPP_NUMBER = "918957833269"
+
 private const val WEBSITE_BASE_URL =
-    "https://campus-bite-website-agj0r1s50-campus-bite-s-projects.vercel.app"
+    "https://thecampusbite.vercel.app"
 
 private const val PRIVACY_POLICY_URL =
     "$WEBSITE_BASE_URL/privacy-policy"
@@ -51,9 +81,6 @@ private const val TERMS_URL =
 private const val REFUND_POLICY_URL =
     "$WEBSITE_BASE_URL/refund-cancellation-policy"
 
-private const val CONTACT_URL =
-    "$WEBSITE_BASE_URL/contact-us"
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ShopkeeperProfileScreen(
@@ -61,14 +88,14 @@ fun ShopkeeperProfileScreen(
     onLogout: () -> Unit,
     viewModel: ProfileViewModel = hiltViewModel()
 ) {
-
-
     val userProfile by viewModel.userProfile.collectAsState()
     val currentUpiId by viewModel.upiId.collectAsState()
     val openingTime by viewModel.openingTime.collectAsState()
     val closingTime by viewModel.closingTime.collectAsState()
     val maxOrdersPerSlot by viewModel.maxOrdersPerSlot.collectAsState()
     val message by viewModel.message.collectAsState()
+
+    val context = LocalContext.current
 
     var showLogoutDialog by remember { mutableStateOf(false) }
     var isEditingShopSettings by remember { mutableStateOf(false) }
@@ -77,7 +104,14 @@ fun ShopkeeperProfileScreen(
     var openingInput by remember { mutableStateOf("") }
     var closingInput by remember { mutableStateOf("") }
     var maxOrdersInput by remember { mutableStateOf("") }
-    val context = LocalContext.current
+
+    val displayName = userProfile?.name?.trim().orEmpty()
+    val displayEmail = userProfile?.email?.trim().orEmpty()
+
+    val profileInitial =
+        displayName.firstOrNull()?.uppercaseChar()?.toString()
+            ?: displayEmail.firstOrNull()?.uppercaseChar()?.toString()
+            ?: "U"
 
     LaunchedEffect(
         currentUpiId,
@@ -101,7 +135,9 @@ fun ShopkeeperProfileScreen(
                     )
                 },
                 navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
+                    IconButton(
+                        onClick = onNavigateBack
+                    ) {
                         Icon(
                             imageVector = Icons.Outlined.ArrowBack,
                             contentDescription = "Back"
@@ -140,10 +176,7 @@ fun ShopkeeperProfileScreen(
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = userProfile?.name
-                                ?.firstOrNull()
-                                ?.uppercase()
-                                ?: "S",
+                            text = profileInitial,
                             color = Color.White,
                             style = MaterialTheme.typography.headlineMedium,
                             fontWeight = FontWeight.Bold
@@ -154,14 +187,14 @@ fun ShopkeeperProfileScreen(
 
                     Column {
                         Text(
-                            text = userProfile?.name ?: "Shopkeeper",
+                            text = displayName.ifBlank { "Shopkeeper" },
                             color = Color.White,
                             style = MaterialTheme.typography.titleLarge,
                             fontWeight = FontWeight.Bold
                         )
 
                         Text(
-                            text = userProfile?.email ?: "CampusBite Partner",
+                            text = displayEmail.ifBlank { "CampusBite Partner" },
                             color = Color.White.copy(alpha = 0.85f),
                             style = MaterialTheme.typography.bodyMedium
                         )
@@ -199,9 +232,7 @@ fun ShopkeeperProfileScreen(
                 trailingContent = {
                     TextButton(
                         onClick = {
-                            isEditingShopSettings =
-                                !isEditingShopSettings
-
+                            isEditingShopSettings = !isEditingShopSettings
                             viewModel.clearMessage()
                         }
                     ) {
@@ -257,8 +288,7 @@ fun ShopkeeperProfileScreen(
                     Spacer(modifier = Modifier.height(10.dp))
 
                     Row(
-                        horizontalArrangement =
-                            Arrangement.spacedBy(10.dp)
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         OutlinedTextField(
                             value = openingInput,
@@ -337,10 +367,10 @@ fun ShopkeeperProfileScreen(
                     Spacer(modifier = Modifier.height(8.dp))
 
                     Text(
-                        text = message ?: "",
+                        text = message.orEmpty(),
                         color = if (
                             message?.contains(
-                                "success",
+                                other = "success",
                                 ignoreCase = true
                             ) == true
                         ) {
@@ -373,8 +403,7 @@ fun ShopkeeperProfileScreen(
                         openWhatsAppSupport(
                             context = context,
                             shopId = userProfile?.shopId.orEmpty(),
-                            shopkeeperEmail =
-                                userProfile?.email.orEmpty()
+                            shopkeeperEmail = displayEmail
                         )
                     }
                 )
@@ -391,12 +420,12 @@ fun ShopkeeperProfileScreen(
                         openEmailSupport(
                             context = context,
                             shopId = userProfile?.shopId.orEmpty(),
-                            shopkeeperEmail =
-                                userProfile?.email.orEmpty()
+                            shopkeeperEmail = displayEmail
                         )
                     }
                 )
             }
+
             SectionCard(
                 title = "Legal & Policies",
                 icon = Icons.Outlined.Settings
@@ -435,19 +464,6 @@ fun ShopkeeperProfileScreen(
                         openWebPage(context, REFUND_POLICY_URL)
                     }
                 )
-
-                HorizontalDivider(
-                    modifier = Modifier.padding(vertical = 8.dp)
-                )
-
-                ActionRow(
-                    icon = Icons.Outlined.SupportAgent,
-                    label = "Contact Us",
-                    trailingText = "Support",
-                    onClick = {
-                        openWebPage(context, CONTACT_URL)
-                    }
-                )
             }
 
             SectionCard(
@@ -460,8 +476,7 @@ fun ShopkeeperProfileScreen(
                     },
                     modifier = Modifier.fillMaxWidth(),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor =
-                            MaterialTheme.colorScheme.error
+                        containerColor = MaterialTheme.colorScheme.error
                     )
                 ) {
                     Icon(
@@ -536,7 +551,10 @@ private fun openWhatsAppSupport(
         "https://wa.me/$SUPPORT_WHATSAPP_NUMBER?text=$encodedMessage"
     )
 
-    val intent = Intent(Intent.ACTION_VIEW, uri)
+    val intent = Intent(
+        Intent.ACTION_VIEW,
+        uri
+    )
 
     try {
         context.startActivity(intent)
@@ -586,6 +604,26 @@ private fun openEmailSupport(
         Toast.makeText(
             context,
             "No email app found on this device.",
+            Toast.LENGTH_SHORT
+        ).show()
+    }
+}
+
+private fun openWebPage(
+    context: android.content.Context,
+    url: String
+) {
+    val intent = Intent(
+        Intent.ACTION_VIEW,
+        Uri.parse(url)
+    )
+
+    try {
+        context.startActivity(intent)
+    } catch (e: Exception) {
+        Toast.makeText(
+            context,
+            "No browser found on this device.",
             Toast.LENGTH_SHORT
         ).show()
     }
@@ -694,15 +732,4 @@ private fun InfoText(
     )
 
     Spacer(modifier = Modifier.height(6.dp))
-}
-private fun openWebPage(
-    context: android.content.Context,
-    url: String
-) {
-    val intent = Intent(
-        Intent.ACTION_VIEW,
-        Uri.parse(url)
-    )
-
-    context.startActivity(intent)
 }
