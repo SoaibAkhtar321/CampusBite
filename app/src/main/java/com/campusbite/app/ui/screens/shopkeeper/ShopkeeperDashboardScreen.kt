@@ -29,13 +29,13 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.campusbite.app.data.model.Order
 import com.campusbite.app.ui.theme.Orange
+import com.campusbite.app.ui.viewmodel.ShopkeeperSalesSummary
 import com.campusbite.app.ui.viewmodel.ShopkeeperViewModel
 import java.text.SimpleDateFormat
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 import java.util.*
 
-import androidx.compose.ui.platform.LocalContext
 // ── Semantic status colours ───────────────────────────────────────────────────
 private val StatusPending = Color(0xFFE65100)
 private val StatusPreparing = Color(0xFF1565C0)
@@ -65,6 +65,7 @@ fun ShopkeeperDashboardScreen(
     viewModel: ShopkeeperViewModel = hiltViewModel()
 ) {
     val orders by viewModel.orders.collectAsState()
+    val salesSummary by viewModel.salesSummary.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val shopOpen by viewModel.shopOpen.collectAsState()
     val closedSlots by viewModel.closedSlots.collectAsState()
@@ -138,6 +139,12 @@ fun ShopkeeperDashboardScreen(
             }
 
             item {
+                SalesSummaryCard(
+                    summary = salesSummary
+                )
+            }
+
+            item {
                 SlotControlCard(
                     closedSlots = closedSlots,
                     onToggleSlot = { viewModel.toggleSlot(it) }
@@ -197,6 +204,9 @@ fun ShopkeeperDashboardScreen(
                     order = order,
                     onUpdateStatus = { newStatus ->
                         viewModel.updateOrderStatus(order.orderId, newStatus)
+                    },
+                    onCancelPaymentNotReceived = {
+                        viewModel.cancelOrderForPaymentNotReceived(order.orderId)
                     }
                 )
             }
@@ -204,11 +214,155 @@ fun ShopkeeperDashboardScreen(
     }
 }
 
+
+@Composable
+private fun SalesSummaryCard(
+    summary: ShopkeeperSalesSummary
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp)
+        ) {
+            Text(
+                text = "Sales Summary",
+                fontWeight = FontWeight.ExtraBold,
+                fontSize = 17.sp
+            )
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            Text(
+                text = "Only verified payments are counted in sales.",
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                SalesMetricCard(
+                    title = "Today",
+                    mainValue = "₹${summary.todaySales.toInt()}",
+                    subValue = "${summary.todayOrders} orders",
+                    modifier = Modifier.weight(1f)
+                )
+
+                SalesMetricCard(
+                    title = "This Month",
+                    mainValue = "₹${summary.monthSales.toInt()}",
+                    subValue = "${summary.monthOrders} orders",
+                    modifier = Modifier.weight(1f)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                SalesMetricCard(
+                    title = "Lifetime",
+                    mainValue = "₹${summary.lifetimeSales.toInt()}",
+                    subValue = "${summary.lifetimeOrders} orders",
+                    modifier = Modifier.weight(1f)
+                )
+
+                SalesMetricCard(
+                    title = "Pending Pay",
+                    mainValue = "${summary.pendingPaymentOrders}",
+                    subValue = "need verify",
+                    modifier = Modifier.weight(1f)
+                )
+            }
+
+            if (summary.cancelledOrders > 0) {
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = MaterialTheme.colorScheme.error.copy(alpha = 0.10f)
+                ) {
+                    Text(
+                        text = "Cancelled/payment not received: ${summary.cancelledOrders}",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(
+                            horizontal = 12.dp,
+                            vertical = 8.dp
+                        )
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SalesMetricCard(
+    title: String,
+    mainValue: String,
+    subValue: String,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(14.dp),
+        color = Orange_10,
+        border = androidx.compose.foundation.BorderStroke(
+            width = 1.dp,
+            color = Orange.copy(alpha = 0.25f)
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp)
+        ) {
+            Text(
+                text = title,
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontWeight = FontWeight.SemiBold
+            )
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            Text(
+                text = mainValue,
+                fontSize = 18.sp,
+                color = Orange,
+                fontWeight = FontWeight.ExtraBold
+            )
+
+            Text(
+                text = subValue,
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Order Card
 // ─────────────────────────────────────────────────────────────────────────────
 @Composable
-private fun OrderCard(order: Order, onUpdateStatus: (String) -> Unit) {
+private fun OrderCard(
+    order: Order,
+    onUpdateStatus: (String) -> Unit,
+    onCancelPaymentNotReceived: () -> Unit
+) {
     val statusCol = statusColor(order.status)
     val timeStr = remember(order.createdAt) {
         if (order.createdAt > 0)
@@ -216,6 +370,12 @@ private fun OrderCard(order: Order, onUpdateStatus: (String) -> Unit) {
         else ""
     }
     val context = LocalContext.current
+
+    var showCancelDialog by remember { mutableStateOf(false) }
+
+    val canCancelForPaymentNotReceived =
+        order.status.lowercase() == "pending" &&
+                order.paymentStatus.lowercase() == "pending_verification"
 
 
     Card(
@@ -482,6 +642,31 @@ private fun OrderCard(order: Order, onUpdateStatus: (String) -> Unit) {
                                 }
                             )
                         }
+
+                        if (canCancelForPaymentNotReceived) {
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            OutlinedButton(
+                                onClick = {
+                                    showCancelDialog = true
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(44.dp),
+                                shape = RoundedCornerShape(12.dp),
+                                border = androidx.compose.foundation.BorderStroke(
+                                    1.dp,
+                                    MaterialTheme.colorScheme.error
+                                )
+                            ) {
+                                Text(
+                                    text = "Cancel - Payment Not Received",
+                                    color = MaterialTheme.colorScheme.error,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp
+                                )
+                            }
+                        }
                     }
                     "preparing" -> ActionButton(
                         label = "Mark as Ready for Pickup",
@@ -496,6 +681,45 @@ private fun OrderCard(order: Order, onUpdateStatus: (String) -> Unit) {
                 }
             }
         }
+    }
+
+
+    if (showCancelDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                showCancelDialog = false
+            },
+            title = {
+                Text("Cancel Order?")
+            },
+            text = {
+                Text(
+                    text = "Cancel this order only if payment was not received. This will mark the order as cancelled."
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showCancelDialog = false
+                        onCancelPaymentNotReceived()
+                    }
+                ) {
+                    Text(
+                        text = "Cancel Order",
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        showCancelDialog = false
+                    }
+                ) {
+                    Text("Go Back")
+                }
+            }
+        )
     }
 }
 

@@ -62,6 +62,7 @@ private data class ConfirmAction(
 @Composable
 fun AdminDashboardScreen(
     onNavigateToProfile: () -> Unit,
+    onNavigateToShopReport: (String) -> Unit,
     viewModel: AdminViewModel = hiltViewModel()
 ) {
     val shops by viewModel.shops.collectAsState()
@@ -201,6 +202,9 @@ fun AdminDashboardScreen(
 
                 1 -> ShopsTab(
                     shops = activeShops,
+                    onViewReport = { shop ->
+                        onNavigateToShopReport(shop.shopId.ifBlank { shop.docId })
+                    },
                     onApprovedChange = { shop, approved ->
                         confirmAction = ConfirmAction(
                             title = if (approved) {
@@ -491,6 +495,7 @@ private fun PendingShopkeeperCard(
 @Composable
 private fun ShopsTab(
     shops: List<AdminShop>,
+    onViewReport: (AdminShop) -> Unit,
     onApprovedChange: (AdminShop, Boolean) -> Unit,
     onOpenChange: (AdminShop, Boolean) -> Unit,
     onBlockToggle: (AdminShop) -> Unit,
@@ -542,6 +547,9 @@ private fun ShopsTab(
             ) { shop ->
                 ShopAdminCard(
                     shop = shop,
+                    onViewReport = {
+                        onViewReport(shop)
+                    },
                     onApprovedChange = {
                         onApprovedChange(shop, it)
                     },
@@ -563,6 +571,7 @@ private fun ShopsTab(
 @Composable
 private fun ShopAdminCard(
     shop: AdminShop,
+    onViewReport: () -> Unit,
     onApprovedChange: (Boolean) -> Unit,
     onOpenChange: (Boolean) -> Unit,
     onBlockToggle: () -> Unit,
@@ -598,6 +607,19 @@ private fun ShopAdminCard(
                 },
                 fontWeight = FontWeight.SemiBold
             )
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            OutlinedButton(
+                onClick = onViewReport,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = "View Report",
+                    fontWeight = FontWeight.Bold,
+                    color = Orange
+                )
+            }
 
             Spacer(modifier = Modifier.height(10.dp))
 

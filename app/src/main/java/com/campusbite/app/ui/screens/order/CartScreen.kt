@@ -85,6 +85,13 @@ import com.google.zxing.qrcode.QRCodeWriter
 import java.net.URLEncoder
 import java.time.LocalDate
 import java.util.Locale
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.widget.Toast
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.material3.TextButton
+import androidx.compose.ui.platform.LocalContext
 
 private val Orange_10 = Orange.copy(alpha = 0.12f)
 
@@ -480,6 +487,7 @@ fun CartScreen(
                         else -> {
                             PaymentQrCard(
                                 shopName = shopName,
+                                shopUpiId = shopUpiId,
                                 qrBitmap = qrBitmap,
                                 totalPrice = cartViewModel.totalPrice,
                                 upiPayerName = upiPayerName,
@@ -713,6 +721,7 @@ private fun DisabledPaymentCard(
 @Composable
 private fun PaymentQrCard(
     shopName: String,
+    shopUpiId: String,
     qrBitmap: Bitmap?,
     totalPrice: Double,
     upiPayerName: String,
@@ -720,6 +729,8 @@ private fun PaymentQrCard(
     onUpiPayerNameChange: (String) -> Unit,
     onPaymentDone: () -> Unit
 ) {
+    val context = LocalContext.current
+
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(18.dp),
@@ -759,11 +770,7 @@ private fun PaymentQrCard(
                         .clip(RoundedCornerShape(16.dp))
                         .border(
                             width = 1.dp,
-                            color =
-                                MaterialTheme
-                                    .colorScheme
-                                    .outline
-                                    .copy(alpha = 0.25f),
+                            color = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f),
                             shape = RoundedCornerShape(16.dp)
                         ),
                     filterQuality = FilterQuality.None
@@ -777,6 +784,73 @@ private fun PaymentQrCard(
                 fontSize = 22.sp,
                 fontWeight = FontWeight.ExtraBold,
                 color = Orange
+            )
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
+                )
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(14.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text(
+                            text = "Pay using UPI ID",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontWeight = FontWeight.SemiBold
+                        )
+
+                        Spacer(modifier = Modifier.height(4.dp))
+
+                        SelectionContainer {
+                            Text(
+                                text = shopUpiId,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.width(8.dp))
+
+                    TextButton(
+                        onClick = {
+                            copyTextToClipboard(
+                                context = context,
+                                label = "CampusBite UPI ID",
+                                text = shopUpiId
+                            )
+                        }
+                    ) {
+                        Text(
+                            text = "Copy",
+                            color = Orange,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Text(
+                text = "You can either scan the QR or copy the UPI ID and pay manually.",
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center
             )
 
             Spacer(modifier = Modifier.height(16.dp))
@@ -801,24 +875,6 @@ private fun PaymentQrCard(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(Orange_10)
-                    .padding(12.dp)
-            ) {
-                Text(
-                    text = "⚠️ Shopkeeper will verify your UPI payment. False claims may block your account.",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = Orange,
-                    lineHeight = 17.sp
-                )
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
             Button(
                 onClick = onPaymentDone,
                 enabled = upiPayerName.trim().isNotBlank(),
@@ -829,12 +885,11 @@ private fun PaymentQrCard(
                 shape = RoundedCornerShape(14.dp)
             ) {
                 Text(
-                    text =
-                        if (paymentDone) {
-                            "I Have Paid ✓"
-                        } else {
-                            "I Have Paid"
-                        },
+                    text = if (paymentDone) {
+                        "Payment Marked Done ✓"
+                    } else {
+                        "I Have Paid"
+                    },
                     fontWeight = FontWeight.Bold
                 )
             }
@@ -843,11 +898,10 @@ private fun PaymentQrCard(
                 Spacer(modifier = Modifier.height(8.dp))
 
                 Text(
-                    text = "Payment will be verified by the shopkeeper before preparing your order.",
+                    text = "Now place your order. Shopkeeper will verify payment.",
                     fontSize = 12.sp,
                     color = Color(0xFF2E7D32),
-                    fontWeight = FontWeight.SemiBold,
-                    textAlign = TextAlign.Center
+                    fontWeight = FontWeight.SemiBold
                 )
             }
         }
@@ -1306,4 +1360,26 @@ private fun generateQrBitmap(
     }
 
     return bitmap
+}
+private fun copyTextToClipboard(
+    context: Context,
+    label: String,
+    text: String
+) {
+    val clipboard = context.getSystemService(
+        Context.CLIPBOARD_SERVICE
+    ) as ClipboardManager
+
+    val clip = ClipData.newPlainText(
+        label,
+        text
+    )
+
+    clipboard.setPrimaryClip(clip)
+
+    Toast.makeText(
+        context,
+        "UPI ID copied",
+        Toast.LENGTH_SHORT
+    ).show()
 }

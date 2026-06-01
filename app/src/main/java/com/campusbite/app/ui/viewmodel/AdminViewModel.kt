@@ -3,14 +3,20 @@ package com.campusbite.app.ui.viewmodel
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.campusbite.app.data.model.Order
+import com.google.firebase.firestore.DocumentReference
+import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
+import com.google.firebase.firestore.Query
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import java.time.LocalDate
+import java.time.YearMonth
 import javax.inject.Inject
 
 data class AdminShop(
@@ -37,6 +43,31 @@ data class AdminUser(
     val createdAt: Long = 0L
 )
 
+data class AdminShopReportSummary(
+    val todayOrders: Int = 0,
+    val todaySales: Double = 0.0,
+    val monthOrders: Int = 0,
+    val monthSales: Double = 0.0,
+    val lifetimeOrders: Int = 0,
+    val lifetimeSales: Double = 0.0,
+    val pendingPaymentOrders: Int = 0,
+    val cancelledOrders: Int = 0
+)
+
+data class AdminShopReportState(
+    val isLoading: Boolean = false,
+    val shop: AdminShop? = null,
+    val summary: AdminShopReportSummary = AdminShopReportSummary(),
+    val recentOrders: List<Order> = emptyList(),
+    val error: String = ""
+)
+
+private data class AnalyticsSnapshot(
+    val verifiedOrders: Int = 0,
+    val verifiedSales: Double = 0.0,
+    val cancelledOrders: Int = 0
+)
+
 @HiltViewModel
 class AdminViewModel @Inject constructor(
     private val firestore: FirebaseFirestore
@@ -52,6 +83,10 @@ class AdminViewModel @Inject constructor(
     val pendingShopkeepers: StateFlow<List<AdminUser>> =
         _pendingShopkeepers.asStateFlow()
 
+    private val _shopReportState = MutableStateFlow(AdminShopReportState())
+    val shopReportState: StateFlow<AdminShopReportState> =
+        _shopReportState.asStateFlow()
+
     private val _isLoading = MutableStateFlow(true)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
@@ -60,6 +95,19 @@ class AdminViewModel @Inject constructor(
 
     private var shopsListener: ListenerRegistration? = null
     private var usersListener: ListenerRegistration? = null
+
+    private var shopReportRecentOrdersListener: ListenerRegistration? = null
+    private var shopReportActiveOrdersListener: ListenerRegistration? = null
+    private var shopReportTodayAnalyticsListener: ListenerRegistration? = null
+    private var shopReportMonthAnalyticsListener: ListenerRegistration? = null
+    private var shopReportLifetimeAnalyticsListener: ListenerRegistration? = null
+
+    private var currentReportShop: AdminShop? = null
+    private var reportRecentOrders: List<Order> = emptyList()
+    private var reportActiveOrders: List<Order> = emptyList()
+    private var reportTodayAnalytics = AnalyticsSnapshot()
+    private var reportMonthAnalytics = AnalyticsSnapshot()
+    private var reportLifetimeAnalytics = AnalyticsSnapshot()
 
     init {
         listenToShops()
@@ -152,6 +200,291 @@ class AdminViewModel @Inject constructor(
 
                 _isLoading.value = false
             }
+    }
+
+    /*
+     * Optimized report:
+     * Old version read all orders of a shop.
+     *
+     * New version reads:
+     * 1. shop document
+     * 2. today's analytics document
+     * 3. current month analytics document
+     * 4. lifetime analytics document
+     * 5. active orders only
+     * 6. recent 50 orders only
+     */
+    fun loadShopReport(shopId: String) {
+        clearShopReportListeners()
+
+        if (shopId.isBlank()) {
+            _shopReportState.value = AdminShopReportState(
+                error = "Shop ID is missing."
+            )
+            return
+        }
+
+        _shopReportState.value = AdminShopReportState(isLoading = true)
+
+        currentReportShop = null
+        reportRecentOrders = emptyList()
+        reportActiveOrders = emptyList()
+        reportTodayAnalytics = AnalyticsSnapshot()
+        reportMonthAnalytics = AnalyticsSnapshot()
+        reportLifetimeAnalytics = AnalyticsSnapshot()
+
+        viewModelScope.launch {
+            try {
+                val directDoc = firestore.collection("shops")
+                    .document(shopId)
+                    .get()
+                    .await()
+
+                val shopDoc = if (directDoc.exists()) {
+                    directDoc
+                } else {
+                    firestore.collection("shops")
+                        .whereEqualTo("shopId", shopId)
+                        .limit(1)
+                        .get()
+                        .await()
+                        .documents
+                        .firstOrNull()
+                }
+
+                if (shopDoc == null || !shopDoc.exists()) {
+                    _shopReportState.value = AdminShopReportState(
+                        error = "Shop not found."
+                    )
+                    return@launch
+                }
+
+                currentReportShop = AdminShop(
+                    docId = shopDoc.id,
+                    shopId = shopDoc.getString("shopId") ?: shopDoc.id,
+                    name = shopDoc.getString("name") ?: "",
+                    ownerUid = shopDoc.getString("ownerUid")
+                        ?: shopDoc.getString("ownerId")
+                        ?: "",
+                    isOpen = shopDoc.getBoolean("isOpen") ?: false,
+                    isApproved = shopDoc.getBoolean("isApproved") ?: false,
+                    isBlocked = shopDoc.getBoolean("isBlocked") ?: false,
+                    isDeleted = shopDoc.getBoolean("isDeleted") ?: false
+                )
+
+                startShopReportListeners(
+                    shop = currentReportShop!!
+                )
+
+            } catch (e: Exception) {
+                Log.e("AdminViewModel", "Failed to start shop report", e)
+
+                _shopReportState.value = AdminShopReportState(
+                    error = e.message ?: "Failed to load shop report."
+                )
+            }
+        }
+    }
+
+    private fun startShopReportListeners(
+        shop: AdminShop
+    ) {
+        val today = LocalDate.now().toString()
+        val currentMonth = YearMonth.now().toString()
+
+        shopReportTodayAnalyticsListener = dailyAnalyticsRef(
+            shopId = shop.shopId,
+            date = today
+        ).addSnapshotListener { snapshot, error ->
+            if (error != null) {
+                Log.e("AdminViewModel", "Failed to listen today analytics", error)
+                return@addSnapshotListener
+            }
+
+            reportTodayAnalytics = snapshot.toAnalyticsSnapshot()
+            updateShopReportState()
+        }
+
+        shopReportMonthAnalyticsListener = monthlyAnalyticsRef(
+            shopId = shop.shopId,
+            month = currentMonth
+        ).addSnapshotListener { snapshot, error ->
+            if (error != null) {
+                Log.e("AdminViewModel", "Failed to listen month analytics", error)
+                return@addSnapshotListener
+            }
+
+            reportMonthAnalytics = snapshot.toAnalyticsSnapshot()
+            updateShopReportState()
+        }
+
+        shopReportLifetimeAnalyticsListener = lifetimeAnalyticsRef(
+            shopId = shop.shopId
+        ).addSnapshotListener { snapshot, error ->
+            if (error != null) {
+                Log.e("AdminViewModel", "Failed to listen lifetime analytics", error)
+                return@addSnapshotListener
+            }
+
+            reportLifetimeAnalytics = snapshot.toAnalyticsSnapshot()
+            updateShopReportState()
+        }
+
+        shopReportActiveOrdersListener = firestore.collection("orders")
+            .whereEqualTo("shopId", shop.shopId)
+            .whereIn("status", listOf("pending", "preparing", "ready"))
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.e("AdminViewModel", "Failed to listen active orders", error)
+
+                    _shopReportState.value = _shopReportState.value.copy(
+                        isLoading = false,
+                        error = error.message ?: "Failed to load active orders."
+                    )
+                    return@addSnapshotListener
+                }
+
+                reportActiveOrders = snapshot?.documents
+                    ?.mapNotNull { doc ->
+                        try {
+                            doc.toObject(Order::class.java)
+                        } catch (e: Exception) {
+                            Log.e("AdminViewModel", "Failed to parse active order", e)
+                            null
+                        }
+                    }
+                    ?: emptyList()
+
+                updateShopReportState()
+            }
+
+        shopReportRecentOrdersListener = firestore.collection("orders")
+            .whereEqualTo("shopId", shop.shopId)
+            .orderBy("createdAt", Query.Direction.DESCENDING)
+            .limit(50)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.e("AdminViewModel", "Failed to listen recent orders", error)
+
+                    _shopReportState.value = _shopReportState.value.copy(
+                        isLoading = false,
+                        error = error.message ?: "Failed to load recent orders."
+                    )
+                    return@addSnapshotListener
+                }
+
+                reportRecentOrders = snapshot?.documents
+                    ?.mapNotNull { doc ->
+                        try {
+                            doc.toObject(Order::class.java)
+                        } catch (e: Exception) {
+                            Log.e("AdminViewModel", "Failed to parse recent order", e)
+                            null
+                        }
+                    }
+                    ?: emptyList()
+
+                updateShopReportState()
+            }
+    }
+
+    private fun updateShopReportState() {
+        val shop = currentReportShop ?: return
+        val today = LocalDate.now().toString()
+        val currentMonth = YearMonth.now().toString()
+
+        val activePendingPaymentOrders = reportActiveOrders.filter { order ->
+            order.paymentStatus.lowercase() == "pending_verification"
+        }
+
+        val todayPendingOrders = activePendingPaymentOrders.count { order ->
+            order.pickupDate == today
+        }
+
+        val monthPendingOrders = activePendingPaymentOrders.count { order ->
+            order.pickupDate.startsWith(currentMonth)
+        }
+
+        val summary = AdminShopReportSummary(
+            todayOrders = reportTodayAnalytics.verifiedOrders + todayPendingOrders,
+            todaySales = reportTodayAnalytics.verifiedSales,
+
+            monthOrders = reportMonthAnalytics.verifiedOrders + monthPendingOrders,
+            monthSales = reportMonthAnalytics.verifiedSales,
+
+            lifetimeOrders = reportLifetimeAnalytics.verifiedOrders,
+            lifetimeSales = reportLifetimeAnalytics.verifiedSales,
+
+            pendingPaymentOrders = activePendingPaymentOrders.size,
+            cancelledOrders = reportLifetimeAnalytics.cancelledOrders
+        )
+
+        _shopReportState.value = AdminShopReportState(
+            isLoading = false,
+            shop = shop,
+            summary = summary,
+            recentOrders = reportRecentOrders
+        )
+    }
+
+    private fun dailyAnalyticsRef(
+        shopId: String,
+        date: String
+    ): DocumentReference {
+        return firestore.collection("shopAnalytics")
+            .document(shopId)
+            .collection("daily")
+            .document(date)
+    }
+
+    private fun monthlyAnalyticsRef(
+        shopId: String,
+        month: String
+    ): DocumentReference {
+        return firestore.collection("shopAnalytics")
+            .document(shopId)
+            .collection("monthly")
+            .document(month)
+    }
+
+    private fun lifetimeAnalyticsRef(
+        shopId: String
+    ): DocumentReference {
+        return firestore.collection("shopAnalytics")
+            .document(shopId)
+            .collection("lifetime")
+            .document("summary")
+    }
+
+    private fun DocumentSnapshot?.toAnalyticsSnapshot(): AnalyticsSnapshot {
+        if (this == null || !exists()) {
+            return AnalyticsSnapshot()
+        }
+
+        return AnalyticsSnapshot(
+            verifiedOrders = getLong("verifiedOrders")?.toInt() ?: 0,
+            verifiedSales = getDouble("verifiedSales")
+                ?: getLong("verifiedSales")?.toDouble()
+                ?: 0.0,
+            cancelledOrders = getLong("cancelledOrders")?.toInt() ?: 0
+        )
+    }
+
+    private fun clearShopReportListeners() {
+        shopReportRecentOrdersListener?.remove()
+        shopReportRecentOrdersListener = null
+
+        shopReportActiveOrdersListener?.remove()
+        shopReportActiveOrdersListener = null
+
+        shopReportTodayAnalyticsListener?.remove()
+        shopReportTodayAnalyticsListener = null
+
+        shopReportMonthAnalyticsListener?.remove()
+        shopReportMonthAnalyticsListener = null
+
+        shopReportLifetimeAnalyticsListener?.remove()
+        shopReportLifetimeAnalyticsListener = null
     }
 
     fun setShopkeeperApproved(
@@ -584,5 +917,6 @@ class AdminViewModel @Inject constructor(
         super.onCleared()
         shopsListener?.remove()
         usersListener?.remove()
+        clearShopReportListeners()
     }
 }

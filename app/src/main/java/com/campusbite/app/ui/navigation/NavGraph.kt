@@ -9,9 +9,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavHostController
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.navArgument
 import com.campusbite.app.ui.screens.admin.AdminDashboardScreen
+import com.campusbite.app.ui.screens.admin.AdminShopReportScreen
 import com.campusbite.app.ui.screens.auth.CompleteProfileScreen
 import com.campusbite.app.ui.screens.auth.LoginScreen
 import com.campusbite.app.ui.screens.auth.RegisterScreen
@@ -20,6 +23,7 @@ import com.campusbite.app.ui.screens.home.HomeScreen
 import com.campusbite.app.ui.screens.order.CartScreen
 import com.campusbite.app.ui.screens.order.OrderHistoryScreen
 import com.campusbite.app.ui.screens.order.OrderStatusScreen
+import com.campusbite.app.ui.screens.profile.AdminProfileScreen
 import com.campusbite.app.ui.screens.profile.ShopkeeperProfileScreen
 import com.campusbite.app.ui.screens.profile.StudentProfileScreen
 import com.campusbite.app.ui.screens.shop.ShopDetailScreen
@@ -29,7 +33,6 @@ import com.campusbite.app.ui.screens.splash.SplashScreen
 import com.campusbite.app.ui.viewmodel.AuthViewModel
 import com.campusbite.app.ui.viewmodel.CartViewModel
 import com.campusbite.app.ui.viewmodel.HomeViewModel
-import com.campusbite.app.ui.screens.profile.AdminProfileScreen
 
 @Composable
 fun NavGraph(
@@ -248,6 +251,27 @@ fun NavGraph(
             AdminDashboardScreen(
                 onNavigateToProfile = {
                     navController.navigate(Routes.ADMIN_PROFILE)
+                },
+                onNavigateToShopReport = { shopId ->
+                    navController.navigate(Routes.adminShopReport(shopId))
+                }
+            )
+        }
+
+        composable(
+            route = Routes.ADMIN_SHOP_REPORT,
+            arguments = listOf(
+                navArgument("shopId") {
+                    type = NavType.StringType
+                }
+            )
+        ) { backStackEntry ->
+            val shopId = backStackEntry.arguments?.getString("shopId") ?: ""
+
+            AdminShopReportScreen(
+                shopId = shopId,
+                onNavigateBack = {
+                    navController.popBackStack()
                 }
             )
         }
