@@ -135,6 +135,9 @@ fun AdminProfileScreen(
                 title = "Settings",
                 icon = Icons.Outlined.Logout
             ) {
+
+                Spacer(modifier = Modifier.height(12.dp))
+
                 Button(
                     onClick = {
                         showLogoutDialog = true
