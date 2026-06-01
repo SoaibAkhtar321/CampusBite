@@ -62,7 +62,7 @@ data class AdminShopReportState(
     val error: String = ""
 )
 
-private data class AnalyticsSnapshot(
+private data class AdminAnalyticsSnapshot(
     val verifiedOrders: Int = 0,
     val verifiedSales: Double = 0.0,
     val cancelledOrders: Int = 0
@@ -105,9 +105,9 @@ class AdminViewModel @Inject constructor(
     private var currentReportShop: AdminShop? = null
     private var reportRecentOrders: List<Order> = emptyList()
     private var reportActiveOrders: List<Order> = emptyList()
-    private var reportTodayAnalytics = AnalyticsSnapshot()
-    private var reportMonthAnalytics = AnalyticsSnapshot()
-    private var reportLifetimeAnalytics = AnalyticsSnapshot()
+    private var reportTodayAnalytics = AdminAnalyticsSnapshot()
+    private var reportMonthAnalytics = AdminAnalyticsSnapshot()
+    private var reportLifetimeAnalytics = AdminAnalyticsSnapshot()
 
     init {
         listenToShops()
@@ -229,9 +229,9 @@ class AdminViewModel @Inject constructor(
         currentReportShop = null
         reportRecentOrders = emptyList()
         reportActiveOrders = emptyList()
-        reportTodayAnalytics = AnalyticsSnapshot()
-        reportMonthAnalytics = AnalyticsSnapshot()
-        reportLifetimeAnalytics = AnalyticsSnapshot()
+        reportTodayAnalytics = AdminAnalyticsSnapshot()
+        reportMonthAnalytics = AdminAnalyticsSnapshot()
+        reportLifetimeAnalytics = AdminAnalyticsSnapshot()
 
         viewModelScope.launch {
             try {
@@ -301,7 +301,7 @@ class AdminViewModel @Inject constructor(
                 return@addSnapshotListener
             }
 
-            reportTodayAnalytics = snapshot.toAnalyticsSnapshot()
+            reportTodayAnalytics = snapshot.toAdminAnalyticsSnapshot()
             updateShopReportState()
         }
 
@@ -314,7 +314,7 @@ class AdminViewModel @Inject constructor(
                 return@addSnapshotListener
             }
 
-            reportMonthAnalytics = snapshot.toAnalyticsSnapshot()
+            reportMonthAnalytics = snapshot.toAdminAnalyticsSnapshot()
             updateShopReportState()
         }
 
@@ -326,7 +326,7 @@ class AdminViewModel @Inject constructor(
                 return@addSnapshotListener
             }
 
-            reportLifetimeAnalytics = snapshot.toAnalyticsSnapshot()
+            reportLifetimeAnalytics = snapshot.toAdminAnalyticsSnapshot()
             updateShopReportState()
         }
 
@@ -456,12 +456,12 @@ class AdminViewModel @Inject constructor(
             .document("summary")
     }
 
-    private fun DocumentSnapshot?.toAnalyticsSnapshot(): AnalyticsSnapshot {
+    private fun DocumentSnapshot?.toAdminAnalyticsSnapshot(): AdminAnalyticsSnapshot {
         if (this == null || !exists()) {
-            return AnalyticsSnapshot()
+            return AdminAnalyticsSnapshot()
         }
 
-        return AnalyticsSnapshot(
+        return AdminAnalyticsSnapshot(
             verifiedOrders = getLong("verifiedOrders")?.toInt() ?: 0,
             verifiedSales = getDouble("verifiedSales")
                 ?: getLong("verifiedSales")?.toDouble()

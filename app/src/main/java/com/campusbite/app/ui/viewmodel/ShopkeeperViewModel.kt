@@ -41,7 +41,7 @@ data class ShopkeeperSalesSummary(
     val cancelledOrders: Int = 0
 )
 
-private data class AnalyticsSnapshot(
+private data class ShopkeeperAnalyticsSnapshot(
     val verifiedOrders: Int = 0,
     val verifiedSales: Double = 0.0,
     val cancelledOrders: Int = 0
@@ -85,9 +85,9 @@ class ShopkeeperViewModel @Inject constructor(
     private var monthAnalyticsListener: ListenerRegistration? = null
     private var lifetimeAnalyticsListener: ListenerRegistration? = null
 
-    private var todayAnalytics = AnalyticsSnapshot()
-    private var monthAnalytics = AnalyticsSnapshot()
-    private var lifetimeAnalytics = AnalyticsSnapshot()
+    private var todayAnalytics = ShopkeeperAnalyticsSnapshot()
+    private var monthAnalytics = ShopkeeperAnalyticsSnapshot()
+    private var lifetimeAnalytics = ShopkeeperAnalyticsSnapshot()
 
     private val knownOrderIds = mutableSetOf<String>()
     private var hasLoadedInitialOrders = false
@@ -236,7 +236,7 @@ class ShopkeeperViewModel @Inject constructor(
                     return@addSnapshotListener
                 }
 
-                todayAnalytics = snapshot.toAnalyticsSnapshot()
+                todayAnalytics = snapshot.toShopkeeperAnalyticsSnapshot()
                 updateSalesSummary()
             }
 
@@ -247,7 +247,7 @@ class ShopkeeperViewModel @Inject constructor(
                     return@addSnapshotListener
                 }
 
-                monthAnalytics = snapshot.toAnalyticsSnapshot()
+                monthAnalytics = snapshot.toShopkeeperAnalyticsSnapshot()
                 updateSalesSummary()
             }
 
@@ -258,7 +258,7 @@ class ShopkeeperViewModel @Inject constructor(
                     return@addSnapshotListener
                 }
 
-                lifetimeAnalytics = snapshot.toAnalyticsSnapshot()
+                lifetimeAnalytics = snapshot.toShopkeeperAnalyticsSnapshot()
                 updateSalesSummary()
             }
     }
@@ -579,12 +579,12 @@ class ShopkeeperViewModel @Inject constructor(
             .document("summary")
     }
 
-    private fun DocumentSnapshot?.toAnalyticsSnapshot(): AnalyticsSnapshot {
+    private fun DocumentSnapshot?.toShopkeeperAnalyticsSnapshot(): ShopkeeperAnalyticsSnapshot {
         if (this == null || !exists()) {
-            return AnalyticsSnapshot()
+            return ShopkeeperAnalyticsSnapshot()
         }
 
-        return AnalyticsSnapshot(
+        return ShopkeeperAnalyticsSnapshot(
             verifiedOrders = getLong("verifiedOrders")?.toInt() ?: 0,
             verifiedSales = getDouble("verifiedSales")
                 ?: getLong("verifiedSales")?.toDouble()
