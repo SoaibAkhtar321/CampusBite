@@ -30,6 +30,7 @@ import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 import javax.inject.Inject
+import com.campusbite.app.data.repository.SlotAvailabilityRepository
 
 data class SlotUiState(
     val slots: List<String> = emptyList(),
@@ -47,6 +48,7 @@ sealed class OrderState {
 @HiltViewModel
 class OrderViewModel @Inject constructor(
     private val orderRepository: OrderRepository,
+    private val slotAvailabilityRepository: SlotAvailabilityRepository,
     private val firestore: FirebaseFirestore,
     @ApplicationContext private val appContext: Context
 ) : ViewModel() {
@@ -219,21 +221,21 @@ class OrderViewModel @Inject constructor(
                     return@launch
                 }
 
-                val orderCount = firestore.collection("orders")
-                    .whereEqualTo("shopId", order.shopId)
-                    .whereEqualTo("pickupDate", order.pickupDate)
-                    .whereEqualTo("pickupSlot", order.pickupSlot)
-                    .get()
-                    .await()
-                    .size()
+                val slotAvailability = slotAvailabilityRepository.getSlotAvailability(
+                    shopId = order.shopId,
+                    date = order.pickupDate,
+                    slot = order.pickupSlot,
+                    maxOrders = shop.maxOrdersPerSlot
+                )
 
-                val isSlotClosedByShop =
-                    shop.closedSlots.contains(order.pickupSlot)
+                val isSlotClosed =
+                    slotAvailability.isClosed ||
+                            shop.closedSlots.contains(order.pickupSlot)
 
-                val hasCapacity =
-                    orderCount < shop.maxOrdersPerSlot
+                val isSlotFull =
+                    slotAvailability.orderCount >= slotAvailability.maxOrders
 
-                if (isSlotClosedByShop || !hasCapacity) {
+                if (isSlotClosed || isSlotFull) {
                     _orderState.value = OrderState.Error(
                         "This pickup slot is no longer available. Please select another slot."
                     )
@@ -534,19 +536,19 @@ class OrderViewModel @Inject constructor(
                 val availableSlots = mutableListOf<String>()
 
                 for (slotText in generatedSlots) {
-                    val orderCount = firestore.collection("orders")
-                        .whereEqualTo("shopId", shopId)
-                        .whereEqualTo("pickupDate", today)
-                        .whereEqualTo("pickupSlot", slotText)
-                        .get()
-                        .await()
-                        .size()
+                    val slotAvailability =
+                        slotAvailabilityRepository.getSlotAvailability(
+                            shopId = shop.shopId,
+                            date = today,
+                            slot = slotText,
+                            maxOrders = shop.maxOrdersPerSlot
+                        )
 
                     val isSlotClosedByShop =
-                        shop.closedSlots.contains(slotText)
+                        shop.closedSlots.contains(slotText) || slotAvailability.isClosed
 
                     val hasCapacity =
-                        orderCount < shop.maxOrdersPerSlot
+                        slotAvailability.orderCount < slotAvailability.maxOrders
 
                     if (!isSlotClosedByShop && hasCapacity) {
                         availableSlots.add(slotText)
@@ -569,14 +571,15 @@ class OrderViewModel @Inject constructor(
                     isLoading = false
                 )
 
-            } catch (e: Exception) {
-                Log.e("OrderVM", "Failed to load pickup slots", e)
+            }  catch (e: Exception) {
+            Log.e("OrderVM", "Slot loading failed", e)
 
-                _slotUiState.value = SlotUiState(
-                    slots = emptyList(),
-                    message = "Failed to load pickup slots. Please try again.",
-                    isLoading = false
-                )
+            _slotUiState.value = SlotUiState(
+                slots = emptyList(),
+                message = "Failed to load pickup slots. ${e.message}",
+                isLoading = false
+            )
+
             }
         }
     }
