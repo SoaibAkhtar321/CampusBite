@@ -16,128 +16,10 @@ class AuthRepository @Inject constructor(
 ) {
     val currentUser get() = auth.currentUser
 
-    suspend fun login(
-        email: String,
-        password: String
-    ): Result<Unit> {
-        return try {
-            auth.signInWithEmailAndPassword(
-                email.trim(),
-                password
-            ).await()
-
-            auth.currentUser?.reload()?.await()
-
-            val firebaseUser = auth.currentUser
-                ?: throw Exception("User not found")
-
-            val userDoc = firestore.collection("users")
-                .document(firebaseUser.uid)
-                .get()
-                .await()
-
-            val role = userDoc.getString("role") ?: "student"
-
-            if (role != "admin" && !firebaseUser.isEmailVerified) {
-                auth.signOut()
-                throw Exception(
-                    "Your account exists but email is not verified. Please check Inbox/Spam or resend verification email."
-                )
-            }
-
-            Result.success(Unit)
-
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    suspend fun register(
-        name: String,
-        email: String,
-        phone: String,
-        password: String,
-        role: String,
-        university: String,
-        universityId: String
-    ): Result<Unit> {
-        return try {
-            validateProfileData(
-                name = name.trim(),
-                email = email.trim(),
-                phone = phone.trim(),
-                role = role.trim().lowercase(),
-                university = university.trim(),
-                universityId = universityId.trim().lowercase()
-            )
-
-            if (password.length < 6) {
-                throw Exception("Password should be at least 6 characters")
-            }
-
-            val result = auth.createUserWithEmailAndPassword(email.trim(), password).await()
-            val firebaseUser = result.user ?: throw Exception("User not found")
-
-            firebaseUser.sendEmailVerification().await()
-            auth.signOut()
-
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    suspend fun completeEmailRegistration(
-        name: String,
-        email: String,
-        phone: String,
-        password: String,
-        role: String,
-        university: String,
-        universityId: String
-    ): Result<Unit> {
-        return try {
-            auth.signInWithEmailAndPassword(email.trim(), password).await()
-            auth.currentUser?.reload()?.await()
-
-            val firebaseUser = auth.currentUser ?: throw Exception("User not found")
-
-            if (!firebaseUser.isEmailVerified) {
-                auth.signOut()
-                throw Exception("Your account exists but email is not verified. Please check Inbox/Spam or resend verification email.")            }
-
-            val cleanRole = role.trim().lowercase()
-
-            val user = User(
-                uid = firebaseUser.uid,
-                name = name.trim(),
-                email = email.trim(),
-                phone = phone.trim(),
-                role = cleanRole,
-                university = university.trim(),
-                universityId = universityId.trim().lowercase(),
-                shopId = "",
-                isApproved = cleanRole != "shopkeeper",
-                isBlocked = false,
-                createdAt = System.currentTimeMillis()
-            )
-
-            firestore.collection("users")
-                .document(firebaseUser.uid)
-                .set(user)
-                .await()
-
-            auth.signOut()
-
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
     suspend fun signInWithGoogle(idToken: String): Result<Boolean> {
         return try {
             val credential = GoogleAuthProvider.getCredential(idToken, null)
+
             val result = auth.signInWithCredential(credential).await()
             val firebaseUser = result.user ?: throw Exception("Google sign-in failed")
 
@@ -153,8 +35,7 @@ class AuthRepository @Inject constructor(
             val isBlocked = userDoc.getBoolean("isBlocked") ?: false
 
             if (isBlocked) {
-                auth.signOut()
-                throw Exception("Your account has been blocked by admin.")
+                return Result.failure(Exception("Your account has been blocked by admin."))
             }
 
             Result.success(true)
@@ -164,6 +45,7 @@ class AuthRepository @Inject constructor(
     }
 
     suspend fun completeGoogleProfile(
+        name: String,
         phone: String,
         role: String,
         university: String,
@@ -173,27 +55,45 @@ class AuthRepository @Inject constructor(
             val firebaseUser = auth.currentUser ?: throw Exception("User not logged in")
 
             val cleanRole = role.trim().lowercase()
+            val cleanName = name.trim()
+            val cleanEmail = firebaseUser.email?.trim().orEmpty()
+            val cleanPhone = phone.trim()
+            val cleanUniversity = university.trim()
+            val cleanUniversityId = universityId.trim().lowercase()
 
-            validateProfileData(
-                name = firebaseUser.displayName?.trim().orEmpty(),
-                email = firebaseUser.email?.trim().orEmpty(),
-                phone = phone.trim(),
+            validateGoogleProfileData(
+                name = cleanName,
+                email = cleanEmail,
+                phone = cleanPhone,
                 role = cleanRole,
-                university = university.trim(),
-                universityId = universityId.trim().lowercase()
+                university = cleanUniversity,
+                universityId = cleanUniversityId
             )
+
+            val existingDoc = firestore.collection("users")
+                .document(firebaseUser.uid)
+                .get()
+                .await()
+
+            if (existingDoc.exists()) {
+                return Result.success(Unit)
+            }
+
+            val finalUniversity = if (cleanRole == "shopkeeper") cleanUniversity else ""
+            val finalUniversityId = if (cleanRole == "shopkeeper") cleanUniversityId else ""
 
             val user = User(
                 uid = firebaseUser.uid,
-                name = firebaseUser.displayName?.trim().orEmpty(),
-                email = firebaseUser.email?.trim().orEmpty(),
-                phone = phone.trim(),
+                name = cleanName,
+                email = cleanEmail,
+                phone = cleanPhone,
                 role = cleanRole,
-                university = university.trim(),
-                universityId = universityId.trim().lowercase(),
+                university = finalUniversity,
+                universityId = finalUniversityId,
                 shopId = "",
-                isApproved = cleanRole != "shopkeeper",
+                isApproved = cleanRole == "student",
                 isBlocked = false,
+                authProvider = "google",
                 createdAt = System.currentTimeMillis()
             )
 
@@ -201,26 +101,6 @@ class AuthRepository @Inject constructor(
                 .document(firebaseUser.uid)
                 .set(user)
                 .await()
-
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    suspend fun resendVerificationEmail(email: String, password: String): Result<Unit> {
-        return try {
-            auth.signInWithEmailAndPassword(email.trim(), password).await()
-
-            val user = auth.currentUser ?: throw Exception("User not found")
-
-            if (user.isEmailVerified) {
-                auth.signOut()
-                throw Exception("Email is already verified. Please login.")
-            }
-
-            user.sendEmailVerification().await()
-            auth.signOut()
 
             Result.success(Unit)
         } catch (e: Exception) {
@@ -280,8 +160,22 @@ class AuthRepository @Inject constructor(
             false
         }
     }
+    suspend fun hasCompletedProfile(): Boolean {
+        return try {
+            val uid = auth.currentUser?.uid ?: return false
 
-    private fun validateProfileData(
+            val snapshot = firestore.collection("users")
+                .document(uid)
+                .get()
+                .await()
+
+            snapshot.exists()
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    private fun validateGoogleProfileData(
         name: String,
         email: String,
         phone: String,
@@ -289,23 +183,28 @@ class AuthRepository @Inject constructor(
         university: String,
         universityId: String
     ) {
-        if (name.isBlank()) throw Exception("Name is required")
-        if (email.isBlank()) throw Exception("Email is required")
-
-        if (!Patterns.EMAIL_ADDRESS.matcher(email).matches()) {
-            throw Exception("Enter a valid email address")
+        if (name.isBlank()) {
+            throw Exception("Name is required")
         }
 
-        if (phone.length != 10) {
+        if (email.isBlank()) {
+            throw Exception("Google email not found")
+        }
+
+        if (!Patterns.EMAIL_ADDRESS.matcher(email).matches()) {
+            throw Exception("Google email is invalid")
+        }
+
+        if (!phone.matches(Regex("^[6-9][0-9]{9}$"))) {
             throw Exception("Enter a valid 10 digit phone number")
         }
 
-        if (role !in listOf("student", "shopkeeper", "admin")) {
+        if (role !in listOf("student", "shopkeeper")) {
             throw Exception("Invalid role")
         }
 
-        if (university.isBlank() || universityId.isBlank()) {
-            throw Exception("Please select your university")
+        if (role == "shopkeeper" && (university.isBlank() || universityId.isBlank())) {
+            throw Exception("Please select your campus/university")
         }
     }
 }

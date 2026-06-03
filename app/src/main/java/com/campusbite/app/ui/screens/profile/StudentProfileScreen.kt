@@ -20,9 +20,11 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Logout
 import androidx.compose.material.icons.outlined.Notifications
@@ -36,6 +38,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
@@ -56,30 +59,23 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.campusbite.app.ui.viewmodel.OrderViewModel
+import com.campusbite.app.ui.viewmodel.ProfileViewModel
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 
 private val BrandOrange = Color(0xFFFF6B00)
 
 private const val SUPPORT_EMAIL = "support.campusbite@gmail.com"
-
-// Format: country code + number, without + sign.
 private const val SUPPORT_WHATSAPP_NUMBER = "918957833269"
 
-private const val WEBSITE_BASE_URL =
-    "https://thecampusbite.vercel.app"
-
-private const val PRIVACY_POLICY_URL =
-    "$WEBSITE_BASE_URL/privacy-policy"
-
-private const val TERMS_URL =
-    "$WEBSITE_BASE_URL/terms-and-conditions"
-
-private const val REFUND_POLICY_URL =
-    "$WEBSITE_BASE_URL/refund-cancellation-policy"
+private const val WEBSITE_BASE_URL = "https://thecampusbite.vercel.app"
+private const val PRIVACY_POLICY_URL = "$WEBSITE_BASE_URL/privacy-policy"
+private const val TERMS_URL = "$WEBSITE_BASE_URL/terms-and-conditions"
+private const val REFUND_POLICY_URL = "$WEBSITE_BASE_URL/refund-cancellation-policy"
 
 @Composable
 fun StudentProfileScreen(
@@ -87,20 +83,55 @@ fun StudentProfileScreen(
     onNavigateToOrderStatus: (String) -> Unit,
     onNavigateToOrderHistory: () -> Unit,
     onLogout: () -> Unit,
-    orderViewModel: OrderViewModel = hiltViewModel()
+    orderViewModel: OrderViewModel = hiltViewModel(),
+    profileViewModel: ProfileViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
     val currentUser = FirebaseAuth.getInstance().currentUser
 
-    var showLogoutDialog by remember { mutableStateOf(false) }
-    var notificationsEnabled by remember { mutableStateOf(true) }
+    var showLogoutDialog by remember {
+        mutableStateOf(false)
+    }
 
-    var firestoreName by remember { mutableStateOf("") }
-    var firestoreEmail by remember { mutableStateOf("") }
-    var firestorePhone by remember { mutableStateOf("") }
+    var showEditProfileDialog by remember {
+        mutableStateOf(false)
+    }
+
+    var notificationsEnabled by remember {
+        mutableStateOf(true)
+    }
+
+    var firestoreName by remember {
+        mutableStateOf("")
+    }
+
+    var firestoreEmail by remember {
+        mutableStateOf("")
+    }
+
+    var firestorePhone by remember {
+        mutableStateOf("")
+    }
+
+    var editName by remember {
+        mutableStateOf("")
+    }
+
+    var editPhone by remember {
+        mutableStateOf("")
+    }
 
     val activeOrder by orderViewModel.activeOrder.collectAsState()
     val userOrders by orderViewModel.userOrders.collectAsState()
+    val profileMessage by profileViewModel.message.collectAsState()
+
+    val latestOrder = userOrders.firstOrNull()
+
+    val latestCancelledOrder = latestOrder?.takeIf {
+        it.status.lowercase() == "cancelled"
+    }
+
+    val trackableOrder = activeOrder ?: latestCancelledOrder
 
     DisposableEffect(currentUser?.uid) {
         val uid = currentUser?.uid
@@ -115,12 +146,10 @@ fun StudentProfileScreen(
                     if (snapshot != null && snapshot.exists()) {
                         firestoreName = snapshot.getString("name").orEmpty()
                         firestoreEmail = snapshot.getString("email").orEmpty()
-
-                        firestorePhone =
-                            snapshot.getString("phone")
-                                ?: snapshot.getString("phoneNumber")
-                                        ?: snapshot.getString("mobile")
-                                        ?: ""
+                        firestorePhone = snapshot.getString("phone")
+                            ?: snapshot.getString("phoneNumber")
+                                    ?: snapshot.getString("mobile")
+                                    ?: ""
                     }
                 }
 
@@ -129,46 +158,6 @@ fun StudentProfileScreen(
             }
         }
     }
-
-    val displayEmail =
-        firestoreEmail.trim()
-            .ifBlank {
-                currentUser?.email?.trim().orEmpty()
-            }
-            .ifBlank {
-                "No Email"
-            }
-
-    val displayName =
-        firestoreName.trim()
-            .ifBlank {
-                currentUser?.displayName?.trim().orEmpty()
-            }
-            .ifBlank {
-                currentUser?.email
-                    ?.substringBefore("@")
-                    ?.trim()
-                    ?.replaceFirstChar { char ->
-                        if (char.isLowerCase()) {
-                            char.titlecase()
-                        } else {
-                            char.toString()
-                        }
-                    }
-                    .orEmpty()
-            }
-            .ifBlank {
-                "Student"
-            }
-
-    val displayPhone =
-        firestorePhone.trim()
-            .ifBlank {
-                currentUser?.phoneNumber?.trim().orEmpty()
-            }
-            .ifBlank {
-                "Phone not added"
-            }
 
     LaunchedEffect(currentUser?.uid) {
         val uid = currentUser?.uid
@@ -179,8 +168,59 @@ fun StudentProfileScreen(
         }
     }
 
-    Scaffold { paddingValues ->
+    LaunchedEffect(profileMessage) {
+        val message = profileMessage.orEmpty()
 
+        if (message.contains("success", ignoreCase = true)) {
+            Toast.makeText(
+                context,
+                message,
+                Toast.LENGTH_SHORT
+            ).show()
+
+            showEditProfileDialog = false
+            profileViewModel.clearMessage()
+        }
+    }
+
+    val displayEmail = firestoreEmail.trim()
+        .ifBlank {
+            currentUser?.email?.trim().orEmpty()
+        }
+        .ifBlank {
+            "No Email"
+        }
+
+    val displayName = firestoreName.trim()
+        .ifBlank {
+            currentUser?.displayName?.trim().orEmpty()
+        }
+        .ifBlank {
+            currentUser?.email
+                ?.substringBefore("@")
+                ?.trim()
+                ?.replaceFirstChar { char ->
+                    if (char.isLowerCase()) {
+                        char.titlecase()
+                    } else {
+                        char.toString()
+                    }
+                }
+                .orEmpty()
+        }
+        .ifBlank {
+            "Student"
+        }
+
+    val displayPhone = firestorePhone.trim()
+        .ifBlank {
+            currentUser?.phoneNumber?.trim().orEmpty()
+        }
+        .ifBlank {
+            "Phone not added"
+        }
+
+    Scaffold { paddingValues ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -189,42 +229,82 @@ fun StudentProfileScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-
             StudentHeaderCard(
                 name = displayName,
                 email = displayEmail,
                 phone = displayPhone
             )
 
-            if (
-                activeOrder != null &&
-                activeOrder?.status?.lowercase() !in listOf(
-                    "completed",
-                    "cancelled",
-                    "picked_up"
+            Button(
+                onClick = {
+                    editName = displayName
+                    editPhone = firestorePhone.trim()
+                    profileViewModel.clearMessage()
+                    showEditProfileDialog = true
+                },
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = BrandOrange
                 )
             ) {
+                Icon(
+                    imageVector = Icons.Outlined.Edit,
+                    contentDescription = null
+                )
+
+                Spacer(modifier = Modifier.width(8.dp))
+
+                Text("Edit Profile")
+            }
+
+            if (trackableOrder != null) {
+                val isCancelled = trackableOrder.status.lowercase() == "cancelled"
+
                 SectionCard(
-                    title = "Track Your Order",
+                    title = if (isCancelled) {
+                        "Order Cancelled"
+                    } else {
+                        "Track Your Order"
+                    },
                     icon = Icons.Outlined.History
                 ) {
                     Text(
-                        text = "Current Status: ${activeOrder!!.status}",
+                        text = if (isCancelled) {
+                            "Your latest order was cancelled because payment was not received."
+                        } else {
+                            "Current Status: ${trackableOrder.status}"
+                        },
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+
+                    if (isCancelled) {
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        Text(
+                            text = "If you already paid, open details and call the shopkeeper.",
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
 
                     Spacer(modifier = Modifier.height(10.dp))
 
                     Button(
                         onClick = {
-                            onNavigateToOrderStatus(activeOrder!!.orderId)
+                            onNavigateToOrderStatus(trackableOrder.orderId)
                         },
                         modifier = Modifier.fillMaxWidth(),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = BrandOrange
                         )
                     ) {
-                        Text("Track Order")
+                        Text(
+                            text = if (isCancelled) {
+                                "View Details"
+                            } else {
+                                "Track Order"
+                            }
+                        )
                     }
                 }
             }
@@ -234,7 +314,7 @@ fun StudentProfileScreen(
                 icon = Icons.Outlined.History
             ) {
                 if (userOrders.isNotEmpty()) {
-                    val latestOrder = userOrders.first()
+                    val latest = userOrders.first()
 
                     Text(
                         text = "Latest Order",
@@ -244,14 +324,14 @@ fun StudentProfileScreen(
                     Spacer(modifier = Modifier.height(4.dp))
 
                     Text(
-                        text = "Status: ${latestOrder.status}",
+                        text = "Status: ${latest.status}",
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
 
                     Spacer(modifier = Modifier.height(4.dp))
 
                     Text(
-                        text = "Amount: ₹${latestOrder.totalPrice.toInt()}",
+                        text = "Amount: ₹${latest.totalPrice.toInt()}",
                         color = BrandOrange,
                         fontWeight = FontWeight.Bold
                     )
@@ -413,6 +493,87 @@ fun StudentProfileScreen(
         }
     }
 
+    if (showEditProfileDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                showEditProfileDialog = false
+                profileViewModel.clearMessage()
+            },
+            title = {
+                Text("Edit Profile")
+            },
+            text = {
+                Column {
+                    OutlinedTextField(
+                        value = editName,
+                        onValueChange = {
+                            editName = it
+                            profileViewModel.clearMessage()
+                        },
+                        label = {
+                            Text("Full Name")
+                        },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    OutlinedTextField(
+                        value = editPhone,
+                        onValueChange = { value ->
+                            editPhone = value
+                                .filter { it.isDigit() }
+                                .take(10)
+
+                            profileViewModel.clearMessage()
+                        },
+                        label = {
+                            Text("Phone Number")
+                        },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = KeyboardType.Phone
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    profileMessage?.let {
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        Text(
+                            text = it,
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        profileViewModel.updateStudentProfile(
+                            newName = editName,
+                            newPhone = editPhone
+                        )
+                    }
+                ) {
+                    Text("Save")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        showEditProfileDialog = false
+                        profileViewModel.clearMessage()
+                    }
+                ) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
     if (showLogoutDialog) {
         AlertDialog(
             onDismissRequest = {
@@ -498,11 +659,10 @@ private fun openEmailSupport(
         putExtra(
             Intent.EXTRA_TEXT,
             """
-            Hi CampusBite Support,
+                Hi CampusBite Support,
+                I need help with:
 
-            I need help with:
-
-            User Email: ${userEmail.ifBlank { "Not available" }}
+                User Email: ${userEmail.ifBlank { "Not available" }}
             """.trimIndent()
         )
     }
@@ -549,10 +709,9 @@ private fun StudentHeaderCard(
     email: String,
     phone: String
 ) {
-    val profileInitial =
-        name.trim().firstOrNull()?.uppercaseChar()?.toString()
-            ?: email.trim().firstOrNull()?.uppercaseChar()?.toString()
-            ?: "U"
+    val profileInitial = name.trim().firstOrNull()?.uppercaseChar()?.toString()
+        ?: email.trim().firstOrNull()?.uppercaseChar()?.toString()
+        ?: "U"
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -584,7 +743,9 @@ private fun StudentHeaderCard(
 
             Column {
                 Text(
-                    text = name.ifBlank { "Student" },
+                    text = name.ifBlank {
+                        "Student"
+                    },
                     color = Color.White,
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold
@@ -593,7 +754,9 @@ private fun StudentHeaderCard(
                 Spacer(modifier = Modifier.height(2.dp))
 
                 Text(
-                    text = email.ifBlank { "No Email" },
+                    text = email.ifBlank {
+                        "No Email"
+                    },
                     color = Color.White.copy(alpha = 0.9f),
                     style = MaterialTheme.typography.bodyMedium
                 )
@@ -601,7 +764,9 @@ private fun StudentHeaderCard(
                 Spacer(modifier = Modifier.height(2.dp))
 
                 Text(
-                    text = phone.ifBlank { "Phone not added" },
+                    text = phone.ifBlank {
+                        "Phone not added"
+                    },
                     color = Color.White.copy(alpha = 0.85f),
                     style = MaterialTheme.typography.bodySmall
                 )

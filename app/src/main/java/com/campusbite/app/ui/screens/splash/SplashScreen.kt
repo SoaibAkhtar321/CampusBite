@@ -29,6 +29,7 @@ fun SplashScreen(
     onNavigateToAdmin: () -> Unit,
     onNavigateToLogin: () -> Unit,
     onNavigateToPending: () -> Unit,
+    onNavigateToCompleteProfile: () -> Unit,
     viewModel: AuthViewModel = hiltViewModel()
 ) {
     LaunchedEffect(Unit) {
@@ -36,6 +37,13 @@ fun SplashScreen(
 
         if (!viewModel.isLoggedIn) {
             onNavigateToLogin()
+            return@LaunchedEffect
+        }
+
+        val hasCompletedProfile = viewModel.hasCompletedProfile()
+
+        if (!hasCompletedProfile) {
+            onNavigateToCompleteProfile()
             return@LaunchedEffect
         }
 

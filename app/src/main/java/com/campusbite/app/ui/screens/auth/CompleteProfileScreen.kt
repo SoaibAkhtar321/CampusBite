@@ -56,12 +56,37 @@ fun CompleteProfileScreen(
         "Other" to "other"
     )
 
-    var phone by remember { mutableStateOf("") }
-    var selectedRole by remember { mutableStateOf("student") }
-    var selectedUniversityName by remember { mutableStateOf("") }
-    var selectedUniversityId by remember { mutableStateOf("") }
-    var universityExpanded by remember { mutableStateOf(false) }
-    var localError by remember { mutableStateOf<String?>(null) }
+    var fullName by remember {
+        mutableStateOf(viewModel.googleName)
+    }
+
+    var phone by remember {
+        mutableStateOf("")
+    }
+
+    var phoneError by remember {
+        mutableStateOf<String?>(null)
+    }
+
+    var selectedRole by remember {
+        mutableStateOf("student")
+    }
+
+    var selectedUniversityName by remember {
+        mutableStateOf("")
+    }
+
+    var selectedUniversityId by remember {
+        mutableStateOf("")
+    }
+
+    var universityExpanded by remember {
+        mutableStateOf(false)
+    }
+
+    var localError by remember {
+        mutableStateOf<String?>(null)
+    }
 
     val authState by viewModel.authState.collectAsState()
 
@@ -115,6 +140,67 @@ fun CompleteProfileScreen(
 
         Spacer(modifier = Modifier.height(24.dp))
 
+        OutlinedTextField(
+            value = fullName,
+            onValueChange = {
+                fullName = it
+                localError = null
+            },
+            label = {
+                Text("Full Name")
+            },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+            colors = textFieldColors
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        OutlinedTextField(
+            value = phone,
+            onValueChange = { value ->
+                phone = value
+                    .filter { it.isDigit() }
+                    .take(10)
+
+                phoneError = validatePhoneWhileTyping(phone)
+                localError = null
+            },
+            label = {
+                Text("Phone Number")
+            },
+            singleLine = true,
+            isError = phoneError != null,
+            supportingText = {
+                phoneError?.let {
+                    Text(text = it)
+                }
+            },
+            keyboardOptions = KeyboardOptions(
+                keyboardType = KeyboardType.Phone
+            ),
+            modifier = Modifier.fillMaxWidth(),
+            colors = textFieldColors
+        )
+
+        Spacer(modifier = Modifier.height(4.dp))
+
+        Text(
+            text = "Use a valid phone number for order updates and support.",
+            fontSize = 12.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Text(
+            text = "I am a",
+            fontSize = 14.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
         Row(
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
@@ -122,6 +208,8 @@ fun CompleteProfileScreen(
                 selected = selectedRole == "student",
                 onClick = {
                     selectedRole = "student"
+                    selectedUniversityName = ""
+                    selectedUniversityId = ""
                     localError = null
                 },
                 label = {
@@ -145,77 +233,58 @@ fun CompleteProfileScreen(
             Spacer(modifier = Modifier.height(6.dp))
 
             Text(
-                text = "Shopkeeper accounts require admin approval.",
+                text = "Shopkeeper accounts require admin approval and are campus specific.",
                 fontSize = 12.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-        }
 
-        Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
-        OutlinedTextField(
-            value = phone,
-            onValueChange = { value ->
-                phone = value.filter { it.isDigit() }.take(10)
-                localError = null
-            },
-            label = {
-                Text("Phone Number")
-            },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(
-                keyboardType = KeyboardType.Phone
-            ),
-            modifier = Modifier.fillMaxWidth(),
-            colors = textFieldColors
-        )
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        Box(
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            OutlinedTextField(
-                value = selectedUniversityName,
-                onValueChange = {},
-                readOnly = true,
-                label = {
-                    Text("Select University")
-                },
-                modifier = Modifier.fillMaxWidth(),
-                colors = textFieldColors,
-                trailingIcon = {
-                    TextButton(
-                        onClick = {
-                            universityExpanded = true
+            Box(
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                OutlinedTextField(
+                    value = selectedUniversityName,
+                    onValueChange = {},
+                    readOnly = true,
+                    label = {
+                        Text("Select Campus / University")
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = textFieldColors,
+                    trailingIcon = {
+                        TextButton(
+                            onClick = {
+                                universityExpanded = true
+                            }
+                        ) {
+                            Text(
+                                text = "Choose",
+                                color = Orange
+                            )
                         }
-                    ) {
-                        Text(
-                            text = "Choose",
-                            color = Orange
+                    }
+                )
+
+                DropdownMenu(
+                    expanded = universityExpanded,
+                    onDismissRequest = {
+                        universityExpanded = false
+                    }
+                ) {
+                    universities.forEach { (name, id) ->
+                        DropdownMenuItem(
+                            text = {
+                                Text(name)
+                            },
+                            onClick = {
+                                selectedUniversityName = name
+                                selectedUniversityId = id
+                                universityExpanded = false
+                                localError = null
+                            }
                         )
                     }
-                }
-            )
-
-            DropdownMenu(
-                expanded = universityExpanded,
-                onDismissRequest = {
-                    universityExpanded = false
-                }
-            ) {
-                universities.forEach { (name, id) ->
-                    DropdownMenuItem(
-                        text = {
-                            Text(name)
-                        },
-                        onClick = {
-                            selectedUniversityName = name
-                            selectedUniversityId = id
-                            universityExpanded = false
-                            localError = null
-                        }
-                    )
                 }
             }
         }
@@ -240,18 +309,38 @@ fun CompleteProfileScreen(
 
         Button(
             onClick = {
+                val phoneValidationError = validatePhoneOnSubmit(phone)
+
+                phoneError = phoneValidationError
+
                 localError = when {
-                    phone.length != 10 -> "Enter a valid 10 digit phone number"
-                    selectedUniversityName.isBlank() -> "Please select your university"
+                    fullName.trim().isBlank() ->
+                        "Name is required"
+
+                    phoneValidationError != null ->
+                        phoneValidationError
+
+                    selectedRole == "shopkeeper" && selectedUniversityName.isBlank() ->
+                        "Please select your campus/university"
+
                     else -> null
                 }
 
                 if (localError == null) {
                     viewModel.completeGoogleProfile(
+                        name = fullName,
                         phone = phone,
                         role = selectedRole,
-                        university = selectedUniversityName,
-                        universityId = selectedUniversityId
+                        university = if (selectedRole == "shopkeeper") {
+                            selectedUniversityName
+                        } else {
+                            ""
+                        },
+                        universityId = if (selectedRole == "shopkeeper") {
+                            selectedUniversityId
+                        } else {
+                            ""
+                        }
                     )
                 }
             },
@@ -268,4 +357,102 @@ fun CompleteProfileScreen(
             }
         }
     }
+}
+
+private fun validatePhoneWhileTyping(
+    phone: String
+): String? {
+    val cleanPhone = phone.trim()
+
+    if (cleanPhone.isBlank()) {
+        return null
+    }
+
+    return when {
+        cleanPhone.first() !in listOf('6', '7', '8', '9') ->
+            "Phone number must start with 6, 7, 8, or 9"
+
+        cleanPhone.length < 10 ->
+            "Phone number must be 10 digits"
+
+        isFakePhoneNumber(cleanPhone) ->
+            "Enter a valid phone number"
+
+        else -> null
+    }
+}
+
+private fun validatePhoneOnSubmit(
+    phone: String
+): String? {
+    val cleanPhone = phone.trim()
+
+    return when {
+        cleanPhone.isBlank() ->
+            "Phone number is required"
+
+        cleanPhone.length != 10 ->
+            "Phone number must be 10 digits"
+
+        cleanPhone.first() !in listOf('6', '7', '8', '9') ->
+            "Phone number must start with 6, 7, 8, or 9"
+
+        isFakePhoneNumber(cleanPhone) ->
+            "Enter a valid phone number"
+
+        else -> null
+    }
+}
+
+private fun isFakePhoneNumber(
+    phone: String
+): Boolean {
+    val fakeNumbers = setOf(
+        "1234567890",
+        "9876543210",
+        "0123456789",
+        "0000000000",
+        "1111111111",
+        "2222222222",
+        "3333333333",
+        "4444444444",
+        "5555555555",
+        "6666666666",
+        "7777777777",
+        "8888888888",
+        "9999999999"
+    )
+
+    return phone in fakeNumbers ||
+            hasTooManySameDigits(phone) ||
+            hasLongRepeatedSequence(phone)
+}
+
+private fun hasTooManySameDigits(
+    phone: String
+): Boolean {
+    return phone
+        .groupingBy { it }
+        .eachCount()
+        .any { it.value >= 8 }
+}
+
+private fun hasLongRepeatedSequence(
+    phone: String
+): Boolean {
+    var repeatCount = 1
+
+    for (i in 1 until phone.length) {
+        if (phone[i] == phone[i - 1]) {
+            repeatCount++
+
+            if (repeatCount >= 6) {
+                return true
+            }
+        } else {
+            repeatCount = 1
+        }
+    }
+
+    return false
 }

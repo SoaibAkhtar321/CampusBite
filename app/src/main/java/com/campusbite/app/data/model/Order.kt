@@ -16,8 +16,12 @@ data class Order(
     val paymentStatus: String = "",
     val upiPayerName: String = "",
     val shopkeeperPhone: String = "",
-    val createdAt: Long = System.currentTimeMillis()
+    val cancelReason: String = "",
+    val cancelledBy: String = "",
+    val createdAt: Long = System.currentTimeMillis(),
+    val updatedAt: Long = 0L
 )
+
 data class OrderItem(
     val itemId: String = "",
     val name: String = "",
@@ -25,7 +29,7 @@ data class OrderItem(
     val quantity: Int = 1,
     val prepTimeMinutes: Int = 0,
     val shopId: String = "",
-    val cookingNote: String = "",   // e.g. "extra spicy", "less sugar"
+    val cookingNote: String = "",
     val studentPhone: String = "",
     val shopkeeperPhone: String = "",
     val paymentMethod: String = "UPI_QR",

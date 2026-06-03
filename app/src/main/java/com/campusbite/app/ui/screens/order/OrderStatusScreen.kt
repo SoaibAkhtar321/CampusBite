@@ -9,12 +9,11 @@ import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.scaleIn
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
+import androidx.compose.animation.scaleIn
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -45,15 +44,16 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.material3.IconButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -75,35 +75,41 @@ import com.campusbite.app.ui.theme.OrangeDark
 import com.campusbite.app.ui.theme.OrangeLight
 import com.campusbite.app.ui.theme.TextSecondary
 import com.campusbite.app.ui.viewmodel.OrderViewModel
-import androidx.compose.material3.ExperimentalMaterial3Api
+
 private enum class OrderStep(
     val label: String,
     val subtitle: String,
     val icon: ImageVector
 ) {
     PENDING(
-        "Order Placed",
-        "Waiting for the shop to accept",
-        Icons.Default.Receipt
+        label = "Order Placed",
+        subtitle = "Waiting for the shop to accept",
+        icon = Icons.Default.Receipt
     ),
 
     ACCEPTED(
-        "Accepted",
-        "Shop confirmed your order",
-        Icons.Default.ThumbUp
+        label = "Accepted",
+        subtitle = "Shop confirmed your order",
+        icon = Icons.Default.ThumbUp
     ),
 
     PREPARING(
-        "Preparing",
-        "Your food is being cooked",
-        Icons.Default.OutdoorGrill
+        label = "Preparing",
+        subtitle = "Your food is being cooked",
+        icon = Icons.Default.OutdoorGrill
     ),
 
     READY(
-        "Ready for Pickup",
-        "Head to the counter now!",
-        Icons.Default.DoneAll
+        label = "Ready for Pickup",
+        subtitle = "Head to the counter now!",
+        icon = Icons.Default.DoneAll
     )
+}
+
+private enum class StepState {
+    DONE,
+    ACTIVE,
+    UPCOMING
 }
 
 private fun statusToStepIndex(status: String?): Int {
@@ -113,10 +119,10 @@ private fun statusToStepIndex(status: String?): Int {
         "preparing" -> 2
         "ready" -> 3
         "picked_up" -> 3
+        "cancelled" -> 0
         else -> 0
     }
 }
-
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -125,9 +131,7 @@ fun OrderStatusScreen(
     onNavigateBack: () -> Unit,
     viewModel: OrderViewModel = hiltViewModel()
 ) {
-
     val context = LocalContext.current
-
     val order by viewModel.currentOrder.collectAsState()
 
     LaunchedEffect(orderId) {
@@ -136,9 +140,10 @@ fun OrderStatusScreen(
 
     val currentStep = statusToStepIndex(order?.status)
 
-    val isReady =
-        order?.status == "ready" ||
-                order?.status == "picked_up"
+    val isReady = order?.status == "ready" ||
+            order?.status == "picked_up"
+
+    val isCancelled = order?.status == "cancelled"
 
     Scaffold(
         topBar = {
@@ -150,25 +155,22 @@ fun OrderStatusScreen(
                         fontSize = 18.sp
                     )
                 },
-
                 navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
+                    IconButton(
+                        onClick = onNavigateBack
+                    ) {
                         Icon(
-                            Icons.Rounded.ArrowBack,
-                            contentDescription = null
+                            imageVector = Icons.Rounded.ArrowBack,
+                            contentDescription = "Back"
                         )
                     }
                 },
-
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor =
-                        MaterialTheme.colorScheme.background
+                    containerColor = MaterialTheme.colorScheme.background
                 )
             )
         },
-
-        containerColor =
-            MaterialTheme.colorScheme.background
+        containerColor = MaterialTheme.colorScheme.background
     ) { paddingValues ->
 
         Column(
@@ -178,11 +180,8 @@ fun OrderStatusScreen(
                 .verticalScroll(rememberScrollState())
                 .navigationBarsPadding()
                 .padding(horizontal = 20.dp, vertical = 8.dp),
-
-            horizontalAlignment =
-                Alignment.CenterHorizontally
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-
             AnimatedVisibility(
                 visible = isReady,
                 enter = fadeIn() + scaleIn(
@@ -192,54 +191,42 @@ fun OrderStatusScreen(
                 ReadyBanner()
             }
 
-            if (isReady) {
+            AnimatedVisibility(
+                visible = isCancelled,
+                enter = fadeIn() + scaleIn(
+                    initialScale = 0.9f
+                )
+            ) {
+                CancelledOrderBanner()
+            }
+
+            if (isReady || isCancelled) {
                 Spacer(modifier = Modifier.height(20.dp))
             }
 
-            if (order != null) {
-
-                Surface(
-                    shape = RoundedCornerShape(50),
-                    color = OrangeLight,
-                    modifier =
-                        Modifier.padding(bottom = 24.dp)
-                ) {
-
-                    Text(
-                        text =
-                            "Order #${order!!.orderId.takeLast(6).uppercase()}",
-
-                        fontSize = 12.sp,
-
-                        fontWeight = FontWeight.SemiBold,
-
-                        color = OrangeDark,
-
-                        modifier = Modifier.padding(
-                            horizontal = 14.dp,
-                            vertical = 6.dp
-                        )
-                    )
-                }
+            order?.let { currentOrder ->
+                OrderIdBadge(
+                    orderId = currentOrder.orderId
+                )
             }
 
-            StatusTimeline(
-                steps = OrderStep.values().toList(),
-                currentStep = currentStep
-            )
+            if (!isCancelled) {
+                StatusTimeline(
+                    steps = OrderStep.values().toList(),
+                    currentStep = currentStep
+                )
 
-            Spacer(modifier = Modifier.height(28.dp))
-
-            order?.let { currentOrder ->
-                OrderSummaryCard(currentOrder)
+                Spacer(modifier = Modifier.height(28.dp))
             }
 
-            Spacer(modifier = Modifier.height(28.dp))
-
             order?.let { currentOrder ->
+                OrderSummaryCard(
+                    order = currentOrder
+                )
+
+                Spacer(modifier = Modifier.height(28.dp))
 
                 if (currentOrder.pickupSlot.isNotBlank()) {
-
                     PickupSlotRow(
                         slot = currentOrder.pickupSlot
                     )
@@ -247,14 +234,18 @@ fun OrderStatusScreen(
                     Spacer(modifier = Modifier.height(16.dp))
                 }
 
-                Button(
-                    onClick = {
+                if (isCancelled) {
+                    PaymentHelpCard()
 
-                        val phone =
-                            currentOrder.shopkeeperPhone.trim()
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
+
+                CallShopkeeperButton(
+                    phone = currentOrder.shopkeeperPhone,
+                    onCallClick = {
+                        val phone = currentOrder.shopkeeperPhone.trim()
 
                         if (phone.isNotBlank()) {
-
                             val intent = Intent(
                                 Intent.ACTION_DIAL,
                                 Uri.parse("tel:$phone")
@@ -262,72 +253,22 @@ fun OrderStatusScreen(
 
                             context.startActivity(intent)
                         }
-                    },
-
-                    enabled =
-                        currentOrder.shopkeeperPhone.isNotBlank(),
-
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(52.dp),
-
-                    shape = RoundedCornerShape(14.dp),
-
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor =
-                            MaterialTheme
-                                .colorScheme
-                                .surfaceVariant
-                    )
-                ) {
-
-                    Icon(
-                        imageVector = Icons.Default.Call,
-                        contentDescription = null,
-                        tint = Orange
-                    )
-
-                    Spacer(
-                        modifier = Modifier.width(8.dp)
-                    )
-
-                    Text(
-                        text =
-                            if (
-                                currentOrder.shopkeeperPhone.isBlank()
-                            ) {
-                                "Shopkeeper Phone Missing"
-                            } else {
-                                "Call Shopkeeper"
-                            },
-
-                        color = Orange,
-
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-
-                Spacer(
-                    modifier = Modifier.height(20.dp)
+                    }
                 )
-            }
 
-            Spacer(modifier = Modifier.weight(1f))
+                Spacer(modifier = Modifier.height(20.dp))
+            }
 
             Button(
                 onClick = onNavigateBack,
-
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(52.dp),
-
                 shape = RoundedCornerShape(14.dp),
-
                 colors = ButtonDefaults.buttonColors(
                     containerColor = Orange
                 )
             ) {
-
                 Text(
                     text = "Back",
                     fontSize = 15.sp,
@@ -341,76 +282,164 @@ fun OrderStatusScreen(
 }
 
 @Composable
-private fun ReadyBanner() {
+private fun OrderIdBadge(
+    orderId: String
+) {
+    Surface(
+        shape = RoundedCornerShape(50),
+        color = OrangeLight,
+        modifier = Modifier.padding(bottom = 24.dp)
+    ) {
+        Text(
+            text = "Order #${orderId.takeLast(6).uppercase()}",
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = OrangeDark,
+            modifier = Modifier.padding(
+                horizontal = 14.dp,
+                vertical = 6.dp
+            )
+        )
+    }
+}
 
-    val infiniteTransition =
-        rememberInfiniteTransition(label = "pulse")
+@Composable
+private fun ReadyBanner() {
+    val infiniteTransition = rememberInfiniteTransition(
+        label = "ready_banner_pulse"
+    )
 
     val scale by infiniteTransition.animateFloat(
         initialValue = 1f,
         targetValue = 1.03f,
-
         animationSpec = infiniteRepeatable(
             animation = tween(
-                800,
+                durationMillis = 800,
                 easing = FastOutSlowInEasing
             ),
-
             repeatMode = RepeatMode.Reverse
         ),
-
-        label = "bannerScale"
+        label = "ready_banner_scale"
     )
 
     Surface(
         modifier = Modifier
             .fillMaxWidth()
             .scale(scale),
-
         shape = RoundedCornerShape(16.dp),
-
-        color =
-            Color(0xFF2E7D32).copy(alpha = 0.12f),
-
+        color = Color(0xFF2E7D32).copy(alpha = 0.12f),
         border = BorderStroke(
-            1.dp,
-            Color(0xFF2E7D32).copy(alpha = 0.4f)
+            width = 1.dp,
+            color = Color(0xFF2E7D32).copy(alpha = 0.4f)
         )
     ) {
-
         Row(
             modifier = Modifier.padding(16.dp),
-            verticalAlignment =
-                Alignment.CenterVertically
+            verticalAlignment = Alignment.CenterVertically
         ) {
-
-            Text("🎉", fontSize = 28.sp)
+            Text(
+                text = "🎉",
+                fontSize = 28.sp
+            )
 
             Spacer(modifier = Modifier.width(12.dp))
 
             Column {
-
                 Text(
                     text = "Ready for Pickup!",
-
                     fontWeight = FontWeight.ExtraBold,
-
                     fontSize = 16.sp,
-
                     color = Color(0xFF2E7D32)
                 )
 
                 Text(
-                    text =
-                        "Head to the counter and show this screen.",
-
+                    text = "Head to the counter and show this screen.",
                     fontSize = 12.sp,
-
-                    color =
-                        Color(0xFF2E7D32)
-                            .copy(alpha = 0.8f)
+                    color = Color(0xFF2E7D32).copy(alpha = 0.8f)
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun CancelledOrderBanner() {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        color = Color(0xFFD32F2F).copy(alpha = 0.10f),
+        border = BorderStroke(
+            width = 1.dp,
+            color = Color(0xFFD32F2F).copy(alpha = 0.35f)
+        )
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.Top
+        ) {
+            Text(
+                text = "⚠️",
+                fontSize = 26.sp
+            )
+
+            Spacer(modifier = Modifier.width(12.dp))
+
+            Column {
+                Text(
+                    text = "Order Cancelled",
+                    fontWeight = FontWeight.ExtraBold,
+                    fontSize = 17.sp,
+                    color = Color(0xFFD32F2F)
+                )
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                Text(
+                    text = "The shopkeeper cancelled this order because payment was not received.",
+                    fontSize = 13.sp,
+                    color = Color(0xFFD32F2F).copy(alpha = 0.88f)
+                )
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                Text(
+                    text = "If you already paid, call the shopkeeper and share your payment proof.",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun PaymentHelpCard() {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp),
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(
+            width = 1.dp,
+            color = Color(0xFFD32F2F).copy(alpha = 0.25f)
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp)
+        ) {
+            Text(
+                text = "Paid already?",
+                fontWeight = FontWeight.Bold,
+                fontSize = 14.sp,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            Text(
+                text = "Please contact the shopkeeper directly. Keep your UPI screenshot or payment proof ready.",
+                fontSize = 12.sp,
+                color = TextSecondary
+            )
         }
     }
 }
@@ -420,22 +449,14 @@ private fun StatusTimeline(
     steps: List<OrderStep>,
     currentStep: Int
 ) {
-
     Column(
         modifier = Modifier.fillMaxWidth()
     ) {
-
         steps.forEachIndexed { index, step ->
-
             val state = when {
-                index < currentStep ->
-                    StepState.DONE
-
-                index == currentStep ->
-                    StepState.ACTIVE
-
-                else ->
-                    StepState.UPCOMING
+                index < currentStep -> StepState.DONE
+                index == currentStep -> StepState.ACTIVE
+                else -> StepState.UPCOMING
             }
 
             TimelineRow(
@@ -447,99 +468,67 @@ private fun StatusTimeline(
     }
 }
 
-private enum class StepState {
-    DONE,
-    ACTIVE,
-    UPCOMING
-}
-
 @Composable
 private fun TimelineRow(
     step: OrderStep,
     state: StepState,
     isLast: Boolean
 ) {
-
     val dotColor by animateColorAsState(
         targetValue = when (state) {
-
-            StepState.DONE ->
-                Orange
-
-            StepState.ACTIVE ->
-                Orange
-
-            StepState.UPCOMING ->
-                MaterialTheme.colorScheme.surfaceVariant
+            StepState.DONE -> Orange
+            StepState.ACTIVE -> Orange
+            StepState.UPCOMING -> MaterialTheme.colorScheme.surfaceVariant
         },
-
         animationSpec = tween(400),
-        label = "dotColor"
+        label = "dot_color"
     )
 
     val labelColor = when (state) {
-
-        StepState.DONE ->
-            MaterialTheme.colorScheme.onBackground
-
-        StepState.ACTIVE ->
-            Orange
-
-        StepState.UPCOMING ->
-            TextSecondary
+        StepState.DONE -> MaterialTheme.colorScheme.onBackground
+        StepState.ACTIVE -> Orange
+        StepState.UPCOMING -> TextSecondary
     }
 
-    val infiniteTransition =
-        rememberInfiniteTransition(label = "dotPulse")
+    val infiniteTransition = rememberInfiniteTransition(
+        label = "dot_pulse"
+    )
 
     val pulseScale by infiniteTransition.animateFloat(
         initialValue = 1f,
-
-        targetValue =
-            if (state == StepState.ACTIVE) {
-                1.25f
-            } else {
-                1f
-            },
-
+        targetValue = if (state == StepState.ACTIVE) {
+            1.25f
+        } else {
+            1f
+        },
         animationSpec = infiniteRepeatable(
             animation = tween(
-                700,
+                durationMillis = 700,
                 easing = FastOutSlowInEasing
             ),
-
             repeatMode = RepeatMode.Reverse
         ),
-
-        label = "pulseScale"
+        label = "pulse_scale"
     )
 
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.Top
     ) {
-
         Column(
-            horizontalAlignment =
-                Alignment.CenterHorizontally,
-
+            horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier.width(40.dp)
         ) {
-
             Box(
                 contentAlignment = Alignment.Center
             ) {
-
                 if (state == StepState.ACTIVE) {
-
                     Box(
                         modifier = Modifier
                             .size(36.dp)
                             .scale(pulseScale)
                             .clip(CircleShape)
-                            .background(
-                                Orange.copy(alpha = 0.18f)
-                            )
+                            .background(Orange.copy(alpha = 0.18f))
                     )
                 }
 
@@ -548,28 +537,19 @@ private fun TimelineRow(
                         .size(28.dp)
                         .clip(CircleShape)
                         .background(dotColor),
-
                     contentAlignment = Alignment.Center
                 ) {
-
                     when (state) {
-
                         StepState.DONE -> {
-
                             Icon(
-                                imageVector =
-                                    Icons.Default.Check,
-
+                                imageVector = Icons.Default.Check,
                                 contentDescription = null,
-
                                 tint = Color.White,
-
                                 modifier = Modifier.size(14.dp)
                             )
                         }
 
                         StepState.ACTIVE -> {
-
                             Icon(
                                 imageVector = step.icon,
                                 contentDescription = null,
@@ -579,17 +559,12 @@ private fun TimelineRow(
                         }
 
                         StepState.UPCOMING -> {
-
                             Icon(
                                 imageVector = step.icon,
                                 contentDescription = null,
-
-                                tint =
-                                    MaterialTheme
-                                        .colorScheme
-                                        .onSurfaceVariant
-                                        .copy(alpha = 0.5f),
-
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(
+                                    alpha = 0.5f
+                                ),
                                 modifier = Modifier.size(14.dp)
                             )
                         }
@@ -598,18 +573,14 @@ private fun TimelineRow(
             }
 
             if (!isLast) {
-
                 val lineColor by animateColorAsState(
-                    targetValue =
-                        if (state == StepState.DONE) {
-                            Orange
-                        } else {
-                            MaterialTheme.colorScheme.surfaceVariant
-                        },
-
+                    targetValue = if (state == StepState.DONE) {
+                        Orange
+                    } else {
+                        MaterialTheme.colorScheme.surfaceVariant
+                    },
                     animationSpec = tween(400),
-
-                    label = "lineColor"
+                    label = "line_color"
                 )
 
                 Box(
@@ -626,27 +597,21 @@ private fun TimelineRow(
         Column(
             modifier = Modifier.padding(
                 top = 4.dp,
-                bottom =
-                    if (isLast) {
-                        0.dp
-                    } else {
-                        16.dp
-                    }
+                bottom = if (isLast) {
+                    0.dp
+                } else {
+                    16.dp
+                }
             )
         ) {
-
             Text(
                 text = step.label,
-
-                fontWeight =
-                    if (state == StepState.ACTIVE) {
-                        FontWeight.ExtraBold
-                    } else {
-                        FontWeight.SemiBold
-                    },
-
+                fontWeight = if (state == StepState.ACTIVE) {
+                    FontWeight.ExtraBold
+                } else {
+                    FontWeight.SemiBold
+                },
                 fontSize = 15.sp,
-
                 color = labelColor
             )
 
@@ -654,96 +619,69 @@ private fun TimelineRow(
 
             Text(
                 text = step.subtitle,
-
                 fontSize = 12.sp,
-
-                color =
-                    TextSecondary.copy(
-                        alpha =
-                            if (state == StepState.UPCOMING) {
-                                0.5f
-                            } else {
-                                1f
-                            }
-                    )
+                color = TextSecondary.copy(
+                    alpha = if (state == StepState.UPCOMING) {
+                        0.5f
+                    } else {
+                        1f
+                    }
+                )
             )
         }
     }
 }
 
 @Composable
-private fun OrderSummaryCard(order: Order) {
-
+private fun OrderSummaryCard(
+    order: Order
+) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-
         shape = RoundedCornerShape(16.dp),
-
         colors = CardDefaults.cardColors(
-            containerColor =
-                MaterialTheme.colorScheme.surface
+            containerColor = MaterialTheme.colorScheme.surface
         ),
-
         elevation = CardDefaults.cardElevation(
             defaultElevation = 0.dp
         ),
-
         border = BorderStroke(
-            1.dp,
-            MaterialTheme.colorScheme.outline.copy(alpha = 0.15f)
+            width = 1.dp,
+            color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f)
         )
     ) {
-
         Column(
             modifier = Modifier.padding(16.dp)
         ) {
-
             Text(
                 text = "Your Order",
-
                 fontWeight = FontWeight.Bold,
-
                 fontSize = 14.sp,
-
-                color =
-                    MaterialTheme.colorScheme.onSurface
+                color = MaterialTheme.colorScheme.onSurface
             )
 
             Spacer(modifier = Modifier.height(12.dp))
 
             order.items.forEach { item ->
-
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(vertical = 4.dp),
-
-                    horizontalArrangement =
-                        Arrangement.SpaceBetween,
-
-                    verticalAlignment =
-                        Alignment.CenterVertically
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-
                     Row(
-                        verticalAlignment =
-                            Alignment.CenterVertically
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-
                         Surface(
                             shape = RoundedCornerShape(6.dp),
                             color = OrangeLight
                         ) {
-
                             Text(
                                 text = "×${item.quantity}",
-
                                 fontSize = 11.sp,
-
                                 fontWeight = FontWeight.Bold,
-
                                 color = OrangeDark,
-
                                 modifier = Modifier.padding(
                                     horizontal = 6.dp,
                                     vertical = 2.dp
@@ -751,46 +689,29 @@ private fun OrderSummaryCard(order: Order) {
                             )
                         }
 
-                        Spacer(
-                            modifier = Modifier.width(8.dp)
-                        )
+                        Spacer(modifier = Modifier.width(8.dp))
 
                         Text(
                             text = item.name,
-
                             fontSize = 13.sp,
-
-                            color =
-                                MaterialTheme
-                                    .colorScheme
-                                    .onSurface,
-
-                            modifier =
-                                Modifier.widthIn(max = 180.dp)
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.widthIn(max = 180.dp)
                         )
                     }
 
                     Text(
-                        text =
-                            "₹${(item.price * item.quantity).toInt()}",
-
+                        text = "₹${(item.price * item.quantity).toInt()}",
                         fontSize = 13.sp,
-
                         fontWeight = FontWeight.SemiBold,
-
                         color = Orange
                     )
                 }
 
                 if (item.cookingNote.isNotBlank()) {
-
                     Text(
                         text = "📝 ${item.cookingNote}",
-
                         fontSize = 11.sp,
-
                         color = TextSecondary,
-
                         modifier = Modifier.padding(
                             start = 40.dp,
                             bottom = 4.dp
@@ -800,43 +721,25 @@ private fun OrderSummaryCard(order: Order) {
             }
 
             HorizontalDivider(
-                modifier =
-                    Modifier.padding(vertical = 10.dp),
-
-                color =
-                    MaterialTheme
-                        .colorScheme
-                        .outline
-                        .copy(alpha = 0.12f)
+                modifier = Modifier.padding(vertical = 10.dp),
+                color = MaterialTheme.colorScheme.outline.copy(alpha = 0.12f)
             )
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
-
-                horizontalArrangement =
-                    Arrangement.SpaceBetween
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
-
                 Text(
                     text = "Total",
-
                     fontWeight = FontWeight.ExtraBold,
-
                     fontSize = 14.sp,
-
-                    color =
-                        MaterialTheme
-                            .colorScheme
-                            .onSurface
+                    color = MaterialTheme.colorScheme.onSurface
                 )
 
                 Text(
                     text = "₹${order.totalPrice.toInt()}",
-
                     fontWeight = FontWeight.ExtraBold,
-
                     fontSize = 15.sp,
-
                     color = Orange
                 )
             }
@@ -845,32 +748,25 @@ private fun OrderSummaryCard(order: Order) {
 }
 
 @Composable
-private fun PickupSlotRow(slot: String) {
-
+private fun PickupSlotRow(
+    slot: String
+) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
-
         shape = RoundedCornerShape(14.dp),
-
-        color =
-            MaterialTheme.colorScheme.surface,
-
+        color = MaterialTheme.colorScheme.surface,
         border = BorderStroke(
-            1.dp,
-            MaterialTheme.colorScheme.outline.copy(alpha = 0.15f)
+            width = 1.dp,
+            color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f)
         )
     ) {
-
         Row(
             modifier = Modifier.padding(
                 horizontal = 16.dp,
                 vertical = 14.dp
             ),
-
-            verticalAlignment =
-                Alignment.CenterVertically
+            verticalAlignment = Alignment.CenterVertically
         ) {
-
             Icon(
                 imageVector = Icons.Default.Schedule,
                 contentDescription = null,
@@ -882,23 +778,56 @@ private fun PickupSlotRow(slot: String) {
 
             Text(
                 text = "Pickup Slot",
-
                 fontSize = 13.sp,
-
                 color = TextSecondary,
-
                 modifier = Modifier.weight(1f)
             )
 
             Text(
                 text = slot,
-
                 fontWeight = FontWeight.Bold,
-
                 fontSize = 13.sp,
-
                 color = Orange
             )
         }
+    }
+}
+
+@Composable
+private fun CallShopkeeperButton(
+    phone: String,
+    onCallClick: () -> Unit
+) {
+    Button(
+        onClick = onCallClick,
+        enabled = phone.isNotBlank(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(52.dp),
+        shape = RoundedCornerShape(14.dp),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+            disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(
+                alpha = 0.5f
+            )
+        )
+    ) {
+        Icon(
+            imageVector = Icons.Default.Call,
+            contentDescription = null,
+            tint = Orange
+        )
+
+        Spacer(modifier = Modifier.width(8.dp))
+
+        Text(
+            text = if (phone.isBlank()) {
+                "Shopkeeper Phone Missing"
+            } else {
+                "Call Shopkeeper"
+            },
+            color = Orange,
+            fontWeight = FontWeight.Bold
+        )
     }
 }

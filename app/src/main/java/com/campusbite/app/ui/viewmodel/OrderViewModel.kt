@@ -15,6 +15,7 @@ import com.campusbite.app.R
 import com.campusbite.app.data.model.Order
 import com.campusbite.app.data.model.Shop
 import com.campusbite.app.data.repository.OrderRepository
+import com.campusbite.app.data.repository.SlotAvailabilityRepository
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
@@ -30,7 +31,6 @@ import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 import javax.inject.Inject
-import com.campusbite.app.data.repository.SlotAvailabilityRepository
 
 data class SlotUiState(
     val slots: List<String> = emptyList(),
@@ -75,6 +75,9 @@ class OrderViewModel @Inject constructor(
     private var currentOrderListener: ListenerRegistration? = null
     private var shopAvailabilityListener: ListenerRegistration? = null
 
+    private val lastKnownOrderStatuses = mutableMapOf<String, String>()
+    private val lastNotifiedOrderStatuses = mutableMapOf<String, String>()
+
     private data class ShopTimeWindow(
         val openingDateTime: LocalDateTime,
         val closingDateTime: LocalDateTime
@@ -110,10 +113,8 @@ class OrderViewModel @Inject constructor(
                 shopAvailabilityListener = firestore.collection("shops")
                     .document(actualDoc.id)
                     .addSnapshotListener { snapshot, error ->
-
                         if (error != null) {
                             Log.e("OrderVM", "Shop availability listener failed", error)
-
                             _selectedShop.value = null
                             _slotUiState.value = SlotUiState(
                                 slots = emptyList(),
@@ -134,11 +135,7 @@ class OrderViewModel @Inject constructor(
                         }
 
                         val shop = buildShopFromSnapshot(snapshot)
-
-                        val isAcceptingOrders =
-                            shop.isOpen &&
-                                    !shop.isBlocked &&
-                                    !shop.isDeleted
+                        val isAcceptingOrders = shop.isOpen && !shop.isBlocked && !shop.isDeleted
 
                         _selectedShop.value = shop
 
@@ -159,10 +156,8 @@ class OrderViewModel @Inject constructor(
                             )
                         }
                     }
-
             } catch (e: Exception) {
                 Log.e("OrderVM", "Failed to start shop availability listener", e)
-
                 _selectedShop.value = null
                 _slotUiState.value = SlotUiState(
                     slots = emptyList(),
@@ -201,11 +196,7 @@ class OrderViewModel @Inject constructor(
                 }
 
                 val shop = buildShopFromSnapshot(shopDoc)
-
-                val isAcceptingOrders =
-                    shop.isOpen &&
-                            !shop.isBlocked &&
-                            !shop.isDeleted
+                val isAcceptingOrders = shop.isOpen && !shop.isBlocked && !shop.isDeleted
 
                 if (!isAcceptingOrders) {
                     _orderState.value = OrderState.Error(
@@ -228,12 +219,10 @@ class OrderViewModel @Inject constructor(
                     maxOrders = shop.maxOrdersPerSlot
                 )
 
-                val isSlotClosed =
-                    slotAvailability.isClosed ||
-                            shop.closedSlots.contains(order.pickupSlot)
+                val isSlotClosed = slotAvailability.isClosed ||
+                        shop.closedSlots.contains(order.pickupSlot)
 
-                val isSlotFull =
-                    slotAvailability.orderCount >= slotAvailability.maxOrders
+                val isSlotFull = slotAvailability.orderCount >= slotAvailability.maxOrders
 
                 if (isSlotClosed || isSlotFull) {
                     _orderState.value = OrderState.Error(
@@ -248,6 +237,7 @@ class OrderViewModel @Inject constructor(
                     val orderId = result.getOrNull().orEmpty()
 
                     _orderState.value = OrderState.Success(orderId)
+
                     listenToOrderById(orderId)
                     listenToActiveOrder()
                 } else {
@@ -255,7 +245,6 @@ class OrderViewModel @Inject constructor(
                         result.exceptionOrNull()?.message ?: "Failed to place order"
                     )
                 }
-
             } catch (e: Exception) {
                 Log.e("OrderVM", "Exception while placing order", e)
 
@@ -272,34 +261,23 @@ class OrderViewModel @Inject constructor(
         currentOrderListener?.remove()
 
         currentOrderListener = orderRepository.listenToOrder(orderId) { order ->
-            val previousStatus = _currentOrder.value?.status
-            val newStatus = order?.status
+            val previousStatus = _currentOrder.value?.status?.lowercase()
+            val newStatus = order?.status?.lowercase()
 
             _currentOrder.value = order
 
-            if (previousStatus == null || newStatus == null) {
+            if (order == null || previousStatus == null || newStatus == null) {
                 return@listenToOrder
             }
 
             if (previousStatus != newStatus) {
-                when (newStatus) {
-                    "preparing" -> {
-                        showOrderStatusNotification(
-                            orderId = orderId,
-                            title = "Order Accepted 🍳",
-                            message = "Your order has been accepted and is being prepared."
-                        )
-                    }
-
-                    "ready" -> {
-                        showOrderStatusNotification(
-                            orderId = orderId,
-                            title = "Order Ready 🎉",
-                            message = "Your food is ready for pickup."
-                        )
-                    }
-                }
+                notifyForOrderStatusChange(
+                    order = order,
+                    previousStatus = previousStatus
+                )
             }
+
+            lastKnownOrderStatuses[order.orderId] = newStatus
         }
     }
 
@@ -316,7 +294,6 @@ class OrderViewModel @Inject constructor(
         activeOrderListener = firestore.collection("orders")
             .whereEqualTo("studentId", userId)
             .addSnapshotListener { snapshot, error ->
-
                 if (error != null) {
                     Log.e("OrderVM", "Active order listener error", error)
                     _activeOrder.value = null
@@ -334,6 +311,24 @@ class OrderViewModel @Inject constructor(
                     }
                     ?.sortedByDescending { it.createdAt }
                     ?: emptyList()
+
+                allOrders.forEach { order ->
+                    val orderId = order.orderId
+
+                    if (orderId.isNotBlank()) {
+                        val previousStatus = lastKnownOrderStatuses[orderId]
+                        val newStatus = order.status.lowercase()
+
+                        if (previousStatus != null && previousStatus != newStatus) {
+                            notifyForOrderStatusChange(
+                                order = order,
+                                previousStatus = previousStatus
+                            )
+                        }
+
+                        lastKnownOrderStatuses[orderId] = newStatus
+                    }
+                }
 
                 _userOrders.value = allOrders
 
@@ -377,7 +372,6 @@ class OrderViewModel @Inject constructor(
                         }
                     }
                     .sortedByDescending { it.createdAt }
-
             } catch (e: Exception) {
                 Log.e("OrderVM", "Failed to load user orders", e)
                 _userOrders.value = emptyList()
@@ -399,13 +393,11 @@ class OrderViewModel @Inject constructor(
 
                 val shopDoc = getShopDocumentByIdOrField(shopId)
 
-                _selectedShop.value =
-                    if (shopDoc != null && shopDoc.exists()) {
-                        buildShopFromSnapshot(shopDoc)
-                    } else {
-                        null
-                    }
-
+                _selectedShop.value = if (shopDoc != null && shopDoc.exists()) {
+                    buildShopFromSnapshot(shopDoc)
+                } else {
+                    null
+                }
             } catch (e: Exception) {
                 Log.e("OrderVM", "Failed to load shop", e)
                 _selectedShop.value = null
@@ -452,12 +444,10 @@ class OrderViewModel @Inject constructor(
                 }
 
                 val shop = buildShopFromSnapshot(shopDoc)
+
                 _selectedShop.value = shop
 
-                val isAcceptingOrders =
-                    shop.isOpen &&
-                            !shop.isBlocked &&
-                            !shop.isDeleted
+                val isAcceptingOrders = shop.isOpen && !shop.isBlocked && !shop.isDeleted
 
                 if (!isAcceptingOrders) {
                     _slotUiState.value = SlotUiState(
@@ -469,6 +459,7 @@ class OrderViewModel @Inject constructor(
                 }
 
                 val now = LocalDateTime.now()
+
                 val timeWindow = getShopTimeWindow(
                     shop = shop,
                     now = now
@@ -477,9 +468,8 @@ class OrderViewModel @Inject constructor(
                 val openingDateTime = timeWindow.openingDateTime
                 val closingDateTime = timeWindow.closingDateTime
 
-                val isWithinWorkingHours =
-                    !now.isBefore(openingDateTime) &&
-                            now.isBefore(closingDateTime)
+                val isWithinWorkingHours = !now.isBefore(openingDateTime) &&
+                        now.isBefore(closingDateTime)
 
                 if (!isWithinWorkingHours) {
                     _slotUiState.value = SlotUiState(
@@ -493,9 +483,7 @@ class OrderViewModel @Inject constructor(
                 val displayFormatter = DateTimeFormatter.ofPattern("hh:mm a")
                 val today = LocalDate.now().toString()
 
-                val earliestTime = now.plusMinutes(
-                    cartPrepTimeMinutes.toLong()
-                )
+                val earliestTime = now.plusMinutes(cartPrepTimeMinutes.toLong())
 
                 var slot = roundToNextSlotDateTime(
                     time = if (earliestTime.isAfter(openingDateTime)) {
@@ -536,19 +524,17 @@ class OrderViewModel @Inject constructor(
                 val availableSlots = mutableListOf<String>()
 
                 for (slotText in generatedSlots) {
-                    val slotAvailability =
-                        slotAvailabilityRepository.getSlotAvailability(
-                            shopId = shop.shopId,
-                            date = today,
-                            slot = slotText,
-                            maxOrders = shop.maxOrdersPerSlot
-                        )
+                    val slotAvailability = slotAvailabilityRepository.getSlotAvailability(
+                        shopId = shop.shopId,
+                        date = today,
+                        slot = slotText,
+                        maxOrders = shop.maxOrdersPerSlot
+                    )
 
-                    val isSlotClosedByShop =
-                        shop.closedSlots.contains(slotText) || slotAvailability.isClosed
+                    val isSlotClosedByShop = shop.closedSlots.contains(slotText) ||
+                            slotAvailability.isClosed
 
-                    val hasCapacity =
-                        slotAvailability.orderCount < slotAvailability.maxOrders
+                    val hasCapacity = slotAvailability.orderCount < slotAvailability.maxOrders
 
                     if (!isSlotClosedByShop && hasCapacity) {
                         availableSlots.add(slotText)
@@ -562,24 +548,20 @@ class OrderViewModel @Inject constructor(
                             "All pickup slots are full or temporarily unavailable."
 
                         closingDateTime.isBefore(maxWindowEnd) ->
-                            "Slots are shown only until shop closing time: ${
-                                formatShopTime(shop.closingTime)
-                            }."
+                            "Slots are shown only until shop closing time: ${formatShopTime(shop.closingTime)}."
 
                         else -> ""
                     },
                     isLoading = false
                 )
+            } catch (e: Exception) {
+                Log.e("OrderVM", "Slot loading failed", e)
 
-            }  catch (e: Exception) {
-            Log.e("OrderVM", "Slot loading failed", e)
-
-            _slotUiState.value = SlotUiState(
-                slots = emptyList(),
-                message = "Failed to load pickup slots. ${e.message}",
-                isLoading = false
-            )
-
+                _slotUiState.value = SlotUiState(
+                    slots = emptyList(),
+                    message = "Failed to load pickup slots. ${e.message}",
+                    isLoading = false
+                )
             }
         }
     }
@@ -613,35 +595,78 @@ class OrderViewModel @Inject constructor(
             name = snapshot.getString("name") ?: "",
             description = snapshot.getString("description") ?: "",
             imageUrl = snapshot.getString("imageUrl") ?: "",
-
             isOpen = snapshot.getBoolean("isOpen") ?: false,
             isApproved = snapshot.getBoolean("isApproved") ?: false,
             isBlocked = snapshot.getBoolean("isBlocked") ?: false,
             isDeleted = snapshot.getBoolean("isDeleted") ?: false,
-
             openingTime = snapshot.getString("openingTime") ?: "08:00",
             closingTime = snapshot.getString("closingTime") ?: "21:00",
-
-            maxOrdersPerSlot =
-                snapshot.getLong("maxOrdersPerSlot")?.toInt() ?: 5,
-
-            closedSlots =
-                (snapshot.get("closedSlots") as? List<*>)
-                    ?.filterIsInstance<String>()
-                    ?: emptyList(),
-
+            maxOrdersPerSlot = snapshot.getLong("maxOrdersPerSlot")?.toInt() ?: 5,
+            closedSlots = (snapshot.get("closedSlots") as? List<*>)
+                ?.filterIsInstance<String>()
+                ?: emptyList(),
             upiId = snapshot.getString("upiId") ?: "",
-
             phone = snapshot.getString("phone")
                 ?: snapshot.getString("ownerPhone")
                 ?: "",
-
             ownerUid = snapshot.getString("ownerUid") ?: "",
             ownerEmail = snapshot.getString("ownerEmail") ?: "",
             ownerPhone = snapshot.getString("ownerPhone") ?: "",
-
             createdAt = snapshot.getLong("createdAt") ?: 0L
         )
+    }
+
+    private fun notifyForOrderStatusChange(
+        order: Order,
+        previousStatus: String?
+    ) {
+        val orderId = order.orderId
+
+        if (orderId.isBlank()) {
+            return
+        }
+
+        val newStatus = order.status.lowercase()
+
+        if (previousStatus == null || previousStatus == newStatus) {
+            return
+        }
+
+        if (lastNotifiedOrderStatuses[orderId] == newStatus) {
+            return
+        }
+
+        when (newStatus) {
+            "preparing" -> {
+                showOrderStatusNotification(
+                    orderId = orderId,
+                    title = "Order Accepted",
+                    message = "Your order has been accepted and is being prepared."
+                )
+
+                lastNotifiedOrderStatuses[orderId] = newStatus
+            }
+
+            "ready" -> {
+                showOrderStatusNotification(
+                    orderId = orderId,
+                    title = "Order Ready",
+                    message = "Your food is ready for pickup."
+                )
+
+                lastNotifiedOrderStatuses[orderId] = newStatus
+            }
+
+            "cancelled" -> {
+                showOrderStatusNotification(
+                    orderId = orderId,
+                    title = "Order Cancelled",
+                    message = "Your order was cancelled because payment was not received. If you paid, call the shopkeeper."
+                )
+
+                lastNotifiedOrderStatuses[orderId] = newStatus
+            }
+        }
     }
 
     private fun getShopTimeWindow(
@@ -668,8 +693,7 @@ class OrderViewModel @Inject constructor(
             closingTime
         )
 
-        val isOvernightTiming =
-            !closingTime.isAfter(openingTime)
+        val isOvernightTiming = !closingTime.isAfter(openingTime)
 
         if (isOvernightTiming) {
             if (now.toLocalTime().isBefore(closingTime)) {
@@ -721,12 +745,11 @@ class OrderViewModel @Inject constructor(
     ): LocalDateTime {
         val remainder = time.minute % intervalMinutes
 
-        val minutesToAdd =
-            if (remainder == 0) {
-                0
-            } else {
-                intervalMinutes - remainder
-            }
+        val minutesToAdd = if (remainder == 0) {
+            0
+        } else {
+            intervalMinutes - remainder
+        }
 
         return time
             .plusMinutes(minutesToAdd.toLong())
@@ -752,11 +775,7 @@ class OrderViewModel @Inject constructor(
     }
 
     private fun getClosedMessage(shop: Shop): String {
-        return "This shop is currently closed. Orders are accepted between ${
-            formatShopTime(shop.openingTime)
-        } - ${
-            formatShopTime(shop.closingTime)
-        }."
+        return "This shop is currently closed. Orders are accepted between ${formatShopTime(shop.openingTime)} - ${formatShopTime(shop.closingTime)}."
     }
 
     private fun showOrderStatusNotification(

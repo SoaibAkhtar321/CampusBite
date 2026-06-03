@@ -20,10 +20,12 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.outlined.ArrowBack
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Logout
 import androidx.compose.material.icons.outlined.Payments
 import androidx.compose.material.icons.outlined.Settings
@@ -58,6 +60,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.campusbite.app.ui.viewmodel.ProfileViewModel
@@ -69,17 +72,13 @@ private const val SUPPORT_EMAIL = "support.campusbite@gmail.com"
 // Format: country code + number, without + sign.
 private const val SUPPORT_WHATSAPP_NUMBER = "918957833269"
 
-private const val WEBSITE_BASE_URL =
-    "https://thecampusbite.vercel.app"
+private const val WEBSITE_BASE_URL = "https://thecampusbite.vercel.app"
 
-private const val PRIVACY_POLICY_URL =
-    "$WEBSITE_BASE_URL/privacy-policy"
+private const val PRIVACY_POLICY_URL = "$WEBSITE_BASE_URL/privacy-policy"
 
-private const val TERMS_URL =
-    "$WEBSITE_BASE_URL/terms-and-conditions"
+private const val TERMS_URL = "$WEBSITE_BASE_URL/terms-and-conditions"
 
-private const val REFUND_POLICY_URL =
-    "$WEBSITE_BASE_URL/refund-cancellation-policy"
+private const val REFUND_POLICY_URL = "$WEBSITE_BASE_URL/refund-cancellation-policy"
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -97,13 +96,45 @@ fun ShopkeeperProfileScreen(
 
     val context = LocalContext.current
 
-    var showLogoutDialog by remember { mutableStateOf(false) }
-    var isEditingShopSettings by remember { mutableStateOf(false) }
+    var showLogoutDialog by remember {
+        mutableStateOf(false)
+    }
 
-    var upiInput by remember { mutableStateOf("") }
-    var openingInput by remember { mutableStateOf("") }
-    var closingInput by remember { mutableStateOf("") }
-    var maxOrdersInput by remember { mutableStateOf("") }
+    var isEditingShopSettings by remember {
+        mutableStateOf(false)
+    }
+
+    var isEditingProfile by remember {
+        mutableStateOf(false)
+    }
+
+    var upiInput by remember {
+        mutableStateOf("")
+    }
+
+    var openingInput by remember {
+        mutableStateOf("")
+    }
+
+    var closingInput by remember {
+        mutableStateOf("")
+    }
+
+    var maxOrdersInput by remember {
+        mutableStateOf("")
+    }
+
+    var nameInput by remember {
+        mutableStateOf("")
+    }
+
+    var phoneInput by remember {
+        mutableStateOf("")
+    }
+
+    var shopNameInput by remember {
+        mutableStateOf("")
+    }
 
     val displayName = userProfile?.name?.trim().orEmpty()
     val displayEmail = userProfile?.email?.trim().orEmpty()
@@ -123,6 +154,26 @@ fun ShopkeeperProfileScreen(
         openingInput = openingTime
         closingInput = closingTime
         maxOrdersInput = maxOrdersPerSlot.toString()
+    }
+
+    LaunchedEffect(userProfile) {
+        nameInput = userProfile?.name.orEmpty()
+        phoneInput = userProfile?.phone.orEmpty()
+    }
+
+    LaunchedEffect(message) {
+        val currentMessage = message.orEmpty()
+
+        if (isEditingProfile && currentMessage.contains("success", ignoreCase = true)) {
+            Toast.makeText(
+                context,
+                currentMessage,
+                Toast.LENGTH_SHORT
+            ).show()
+
+            isEditingProfile = false
+            viewModel.clearMessage()
+        }
     }
 
     Scaffold(
@@ -187,14 +238,18 @@ fun ShopkeeperProfileScreen(
 
                     Column {
                         Text(
-                            text = displayName.ifBlank { "Shopkeeper" },
+                            text = displayName.ifBlank {
+                                "Shopkeeper"
+                            },
                             color = Color.White,
                             style = MaterialTheme.typography.titleLarge,
                             fontWeight = FontWeight.Bold
                         )
 
                         Text(
-                            text = displayEmail.ifBlank { "CampusBite Partner" },
+                            text = displayEmail.ifBlank {
+                                "CampusBite Partner"
+                            },
                             color = Color.White.copy(alpha = 0.85f),
                             style = MaterialTheme.typography.bodyMedium
                         )
@@ -224,6 +279,31 @@ fun ShopkeeperProfileScreen(
                         ?.ifBlank { "Not available" }
                         ?: "Loading..."
                 )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Button(
+                    onClick = {
+                        isEditingProfile = true
+                        nameInput = userProfile?.name.orEmpty()
+                        phoneInput = userProfile?.phone.orEmpty()
+                        shopNameInput = ""
+                        viewModel.clearMessage()
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = BrandOrange
+                    )
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Edit,
+                        contentDescription = null
+                    )
+
+                    Spacer(modifier = Modifier.width(8.dp))
+
+                    Text("Edit Profile")
+                }
             }
 
             SectionCard(
@@ -251,7 +331,9 @@ fun ShopkeeperProfileScreen(
                 if (!isEditingShopSettings) {
                     InfoText(
                         label = "UPI ID",
-                        value = currentUpiId.ifBlank { "Not added" }
+                        value = currentUpiId.ifBlank {
+                            "Not added"
+                        }
                     )
 
                     InfoText(
@@ -327,8 +409,8 @@ fun ShopkeeperProfileScreen(
 
                     OutlinedTextField(
                         value = maxOrdersInput,
-                        onValueChange = {
-                            maxOrdersInput = it
+                        onValueChange = { value ->
+                            maxOrdersInput = value.filter { it.isDigit() }
                             viewModel.clearMessage()
                         },
                         label = {
@@ -338,6 +420,9 @@ fun ShopkeeperProfileScreen(
                             Text("5")
                         },
                         singleLine = true,
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = KeyboardType.Number
+                        ),
                         modifier = Modifier.fillMaxWidth()
                     )
 
@@ -363,7 +448,7 @@ fun ShopkeeperProfileScreen(
                     }
                 }
 
-                if (message != null) {
+                if (message != null && !isEditingProfile) {
                     Spacer(modifier = Modifier.height(8.dp))
 
                     Text(
@@ -490,6 +575,115 @@ fun ShopkeeperProfileScreen(
                 }
             }
         }
+    }
+
+    if (isEditingProfile) {
+        AlertDialog(
+            onDismissRequest = {
+                isEditingProfile = false
+                viewModel.clearMessage()
+            },
+            title = {
+                Text("Edit Profile")
+            },
+            text = {
+                Column {
+                    OutlinedTextField(
+                        value = nameInput,
+                        onValueChange = {
+                            nameInput = it
+                            viewModel.clearMessage()
+                        },
+                        label = {
+                            Text("Your Name")
+                        },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    OutlinedTextField(
+                        value = phoneInput,
+                        onValueChange = { value ->
+                            phoneInput = value
+                                .filter { it.isDigit() }
+                                .take(10)
+
+                            viewModel.clearMessage()
+                        },
+                        label = {
+                            Text("Phone Number")
+                        },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = KeyboardType.Phone
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    OutlinedTextField(
+                        value = shopNameInput,
+                        onValueChange = {
+                            shopNameInput = it
+                            viewModel.clearMessage()
+                        },
+                        label = {
+                            Text("Shop Name")
+                        },
+                        placeholder = {
+                            Text("Name shown to students")
+                        },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    message?.let {
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        Text(
+                            text = it,
+                            color = if (
+                                it.contains(
+                                    other = "success",
+                                    ignoreCase = true
+                                )
+                            ) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.error
+                            },
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.updateShopkeeperProfile(
+                            newName = nameInput,
+                            newPhone = phoneInput,
+                            newShopName = shopNameInput
+                        )
+                    }
+                ) {
+                    Text("Save")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        isEditingProfile = false
+                        viewModel.clearMessage()
+                    }
+                ) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 
     if (showLogoutDialog) {

@@ -11,6 +11,6 @@ data class User(
     val shopId: String = "",
     val isApproved: Boolean = true,
     val isBlocked: Boolean = false,
-    val createdAt: Long = 0L,
-
+    val authProvider: String = "google",
+    val createdAt: Long = 0L
 )
