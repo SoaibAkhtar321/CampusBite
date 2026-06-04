@@ -50,45 +50,28 @@ fun NavGraph(
         composable(Routes.SPLASH) {
             SplashScreen(
                 onNavigateToStudent = {
-                    navController.navigate(Routes.STUDENT_HOME) {
-                        popUpTo(Routes.SPLASH) {
-                            inclusive = true
-                        }
+                    navController.navigate("student_home") {
+                        popUpTo(0) { inclusive = true }
                     }
                 },
                 onNavigateToShopkeeper = {
-                    navController.navigate(Routes.SHOPKEEPER_DASHBOARD) {
-                        popUpTo(Routes.SPLASH) {
-                            inclusive = true
-                        }
+                    navController.navigate("shopkeeper_home") {
+                        popUpTo(0) { inclusive = true }
                     }
                 },
                 onNavigateToAdmin = {
-                    navController.navigate(Routes.ADMIN_DASHBOARD) {
-                        popUpTo(Routes.SPLASH) {
-                            inclusive = true
-                        }
-                    }
-                },
-                onNavigateToPending = {
-                    navController.navigate(Routes.SHOPKEEPER_PENDING) {
-                        popUpTo(Routes.SPLASH) {
-                            inclusive = true
-                        }
+                    navController.navigate("admin_home") {
+                        popUpTo(0) { inclusive = true }
                     }
                 },
                 onNavigateToLogin = {
-                    navController.navigate(Routes.LOGIN) {
-                        popUpTo(Routes.SPLASH) {
-                            inclusive = true
-                        }
+                    navController.navigate("login") {
+                        popUpTo(0) { inclusive = true }
                     }
                 },
-                onNavigateToCompleteProfile = {
-                    navController.navigate(Routes.COMPLETE_PROFILE) {
-                        popUpTo(Routes.SPLASH) {
-                            inclusive = true
-                        }
+                onNavigateToPending = {
+                    navController.navigate("shopkeeper_pending") {
+                        popUpTo(0) { inclusive = true }
                     }
                 }
             )
@@ -137,17 +120,18 @@ fun NavGraph(
         composable(Routes.COMPLETE_PROFILE) {
             CompleteProfileScreen(
                 onNavigateToStudent = {
-                    navController.navigate(Routes.STUDENT_HOME) {
-                        popUpTo(Routes.COMPLETE_PROFILE) {
-                            inclusive = true
-                        }
+                    navController.navigate("student_home") {
+                        popUpTo(0) { inclusive = true }
                     }
                 },
                 onNavigateToPending = {
-                    navController.navigate(Routes.SHOPKEEPER_PENDING) {
-                        popUpTo(Routes.COMPLETE_PROFILE) {
-                            inclusive = true
-                        }
+                    navController.navigate("shopkeeper_pending") {
+                        popUpTo(0) { inclusive = true }
+                    }
+                },
+                onNavigateToLogin = {
+                    navController.navigate("login") {
+                        popUpTo(0) { inclusive = true }
                     }
                 }
             )

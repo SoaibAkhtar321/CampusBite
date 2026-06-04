@@ -18,9 +18,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.campusbite.app.ui.viewmodel.AuthViewModel
-import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.supervisorScope
 
 @Composable
 fun SplashScreen(
@@ -29,7 +27,6 @@ fun SplashScreen(
     onNavigateToAdmin: () -> Unit,
     onNavigateToLogin: () -> Unit,
     onNavigateToPending: () -> Unit,
-    onNavigateToCompleteProfile: () -> Unit,
     viewModel: AuthViewModel = hiltViewModel()
 ) {
     LaunchedEffect(Unit) {
@@ -40,42 +37,32 @@ fun SplashScreen(
             return@LaunchedEffect
         }
 
-        val hasCompletedProfile = viewModel.hasCompletedProfile()
+        val isValidCompletedSession = viewModel.validateSessionForAppStart()
 
-        if (!hasCompletedProfile) {
-            onNavigateToCompleteProfile()
+        if (!isValidCompletedSession) {
+            onNavigateToLogin()
             return@LaunchedEffect
         }
 
-        supervisorScope {
-            val roleDeferred = async {
-                viewModel.getUserRole()
+        val role = viewModel.getUserRole()
+
+        when (role) {
+            "admin" -> {
+                onNavigateToAdmin()
             }
 
-            val approvedDeferred = async {
-                viewModel.isShopkeeperApproved()
+            "shopkeeper" -> {
+                val isApproved = viewModel.isShopkeeperApproved()
+
+                if (isApproved) {
+                    onNavigateToShopkeeper()
+                } else {
+                    onNavigateToPending()
+                }
             }
 
-            val role = roleDeferred.await()
-
-            when (role) {
-                "admin" -> {
-                    onNavigateToAdmin()
-                }
-
-                "shopkeeper" -> {
-                    val isApproved = approvedDeferred.await()
-
-                    if (isApproved) {
-                        onNavigateToShopkeeper()
-                    } else {
-                        onNavigateToPending()
-                    }
-                }
-
-                else -> {
-                    onNavigateToStudent()
-                }
+            else -> {
+                onNavigateToStudent()
             }
         }
     }

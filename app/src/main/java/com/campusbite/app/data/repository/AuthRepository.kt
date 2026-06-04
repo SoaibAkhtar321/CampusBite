@@ -174,6 +174,16 @@ class AuthRepository @Inject constructor(
             false
         }
     }
+    suspend fun reloadCurrentUser(): Boolean {
+        val user = currentUser ?: return false
+
+        return try {
+            user.reload().await()
+            currentUser != null
+        } catch (e: Exception) {
+            false
+        }
+    }
 
     private fun validateGoogleProfileData(
         name: String,

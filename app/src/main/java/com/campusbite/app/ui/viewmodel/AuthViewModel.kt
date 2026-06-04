@@ -82,6 +82,28 @@ class AuthViewModel @Inject constructor(
         }
     }
 
+    suspend fun validateSessionForAppStart(): Boolean {
+        if (authRepository.currentUser == null) {
+            return false
+        }
+
+        val isFirebaseUserValid = authRepository.reloadCurrentUser()
+
+        if (!isFirebaseUserValid) {
+            logout()
+            return false
+        }
+
+        val hasCompletedProfile = authRepository.hasCompletedProfile()
+
+        if (!hasCompletedProfile) {
+            logout()
+            return false
+        }
+
+        return true
+    }
+
     private suspend fun navigateByUserRole() {
         val isBlocked = authRepository.isUserBlocked()
 
@@ -133,6 +155,7 @@ class AuthViewModel @Inject constructor(
             _userRole.value = authRepository.getUserRole()
         }
     }
+
     suspend fun hasCompletedProfile(): Boolean {
         return authRepository.hasCompletedProfile()
     }

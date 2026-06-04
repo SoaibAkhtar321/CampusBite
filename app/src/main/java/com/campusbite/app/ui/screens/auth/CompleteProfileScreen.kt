@@ -42,11 +42,14 @@ import com.campusbite.app.ui.theme.TextPrimary
 import com.campusbite.app.ui.theme.TextSecondary
 import com.campusbite.app.ui.viewmodel.AuthState
 import com.campusbite.app.ui.viewmodel.AuthViewModel
+import com.google.firebase.auth.FirebaseAuth
+import kotlinx.coroutines.tasks.await
 
 @Composable
 fun CompleteProfileScreen(
     onNavigateToStudent: () -> Unit,
     onNavigateToPending: () -> Unit,
+    onNavigateToLogin: () -> Unit,
     viewModel: AuthViewModel = hiltViewModel()
 ) {
     val universities = listOf(
@@ -89,6 +92,25 @@ fun CompleteProfileScreen(
     }
 
     val authState by viewModel.authState.collectAsState()
+
+    LaunchedEffect(Unit) {
+        val firebaseAuth = FirebaseAuth.getInstance()
+        val currentUser = firebaseAuth.currentUser
+
+        if (currentUser == null) {
+            viewModel.resetState()
+            onNavigateToLogin()
+            return@LaunchedEffect
+        }
+
+        try {
+            currentUser.reload().await()
+        } catch (e: Exception) {
+            firebaseAuth.signOut()
+            viewModel.resetState()
+            onNavigateToLogin()
+        }
+    }
 
     LaunchedEffect(authState) {
         when (authState) {
