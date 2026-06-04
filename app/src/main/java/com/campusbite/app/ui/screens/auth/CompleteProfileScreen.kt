@@ -109,11 +109,18 @@ fun CompleteProfileScreen(
     val textFieldColors = OutlinedTextFieldDefaults.colors(
         focusedTextColor = TextPrimary,
         unfocusedTextColor = TextPrimary,
+        errorTextColor = TextPrimary,
+
         focusedBorderColor = Orange,
         unfocusedBorderColor = TextSecondary,
+        errorBorderColor = MaterialTheme.colorScheme.error,
+
         focusedLabelColor = Orange,
         unfocusedLabelColor = TextSecondary,
-        cursorColor = Orange
+        errorLabelColor = MaterialTheme.colorScheme.error,
+
+        cursorColor = Orange,
+        errorCursorColor = Orange
     )
 
     Column(
@@ -177,7 +184,7 @@ fun CompleteProfileScreen(
                 }
             },
             keyboardOptions = KeyboardOptions(
-                keyboardType = KeyboardType.Phone
+                keyboardType = KeyboardType.Number
             ),
             modifier = Modifier.fillMaxWidth(),
             colors = textFieldColors
