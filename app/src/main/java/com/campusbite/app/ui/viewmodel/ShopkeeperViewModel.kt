@@ -455,11 +455,20 @@ class ShopkeeperViewModel @Inject constructor(
 
         viewModelScope.launch {
             try {
-                val cleanPaymentType = paymentReceivedType.trim().lowercase()
+                val cleanPaymentType = paymentReceivedType
+                    .trim()
+                    .lowercase()
+
                 val cleanReason = cancelReason.trim()
 
-                if (cleanPaymentType !in listOf(PaymentReceivedType.NONE, PaymentReceivedType.PARTIAL, PaymentReceivedType.FULL)) {
-                    throw IllegalStateException("Invalid payment received type.")
+                val validPaymentTypes = listOf(
+                    PaymentReceivedType.NONE,
+                    PaymentReceivedType.PARTIAL,
+                    PaymentReceivedType.FULL
+                )
+
+                if (cleanPaymentType !in validPaymentTypes) {
+                    throw IllegalStateException("Please select payment status.")
                 }
 
                 val paymentReceivedByShopkeeper = cleanPaymentType in listOf(
@@ -471,26 +480,46 @@ class ShopkeeperViewModel @Inject constructor(
                     throw IllegalStateException("Please select a cancellation reason.")
                 }
 
-                val orderRef = firestore.collection("orders").document(orderId)
+                val orderRef = firestore.collection("orders")
+                    .document(orderId)
 
                 firestore.runTransaction { transaction ->
                     val orderDoc = transaction.get(orderRef)
 
-                    if (!orderDoc.exists()) throw IllegalStateException("Order not found.")
+                    if (!orderDoc.exists()) {
+                        throw IllegalStateException("Order not found.")
+                    }
 
                     val orderShopId = orderDoc.getString("shopId").orEmpty()
-                    if (orderShopId != shopId) throw IllegalStateException("You cannot cancel this order.")
 
-                    val oldStatus = orderDoc.getString("status")?.lowercase().orEmpty()
+                    if (orderShopId != shopId) {
+                        throw IllegalStateException("You cannot cancel this order.")
+                    }
 
-                    if (oldStatus == OrderStatusValue.CANCELLED || oldStatus == OrderStatusValue.PICKED_UP) {
-                        throw IllegalStateException("This order cannot be cancelled.")
+                    val currentStatus = orderDoc.getString("status")
+                        ?.lowercase()
+                        .orEmpty()
+
+                    if (currentStatus == OrderStatusValue.CANCELLED) {
+                        throw IllegalStateException("This order is already cancelled.")
+                    }
+
+                    if (currentStatus == OrderStatusValue.PICKED_UP) {
+                        throw IllegalStateException("Picked up order cannot be cancelled.")
                     }
 
                     val paymentStatus = when (cleanPaymentType) {
-                        PaymentReceivedType.PARTIAL -> PaymentStatusValue.PARTIAL_PAYMENT_RECEIVED
-                        PaymentReceivedType.FULL -> PaymentStatusValue.PAID
-                        else -> PaymentStatusValue.PAYMENT_NOT_RECEIVED
+                        PaymentReceivedType.FULL -> {
+                            PaymentStatusValue.PAID
+                        }
+
+                        PaymentReceivedType.PARTIAL -> {
+                            PaymentStatusValue.PARTIAL_PAYMENT_RECEIVED
+                        }
+
+                        else -> {
+                            PaymentStatusValue.PAYMENT_NOT_RECEIVED
+                        }
                     }
 
                     val refundStatus = if (paymentReceivedByShopkeeper) {
@@ -499,10 +528,28 @@ class ShopkeeperViewModel @Inject constructor(
                         RefundStatusValue.NONE
                     }
 
-                    val finalCancelReason = when {
-                        cleanReason.isNotBlank() -> cleanReason
-                        cleanPaymentType == PaymentReceivedType.NONE -> "Payment not received"
-                        else -> "Order cancelled after payment received"
+                    val finalCancelReason = if (paymentReceivedByShopkeeper) {
+                        cleanReason
+                    } else {
+                        "Payment not received"
+                    }
+
+                    val totalPrice = orderDoc.getDouble("totalPrice")
+                        ?: orderDoc.getLong("totalPrice")?.toDouble()
+                        ?: 0.0
+
+                    val refundAmount = when (cleanPaymentType) {
+                        PaymentReceivedType.FULL -> {
+                            totalPrice
+                        }
+
+                        PaymentReceivedType.PARTIAL -> {
+                            0.0
+                        }
+
+                        else -> {
+                            0.0
+                        }
                     }
 
                     val now = System.currentTimeMillis()
@@ -511,16 +558,21 @@ class ShopkeeperViewModel @Inject constructor(
                         orderRef,
                         mapOf(
                             "status" to OrderStatusValue.CANCELLED,
+
                             "paymentStatus" to paymentStatus,
+                            "paymentReceivedByShopkeeper" to paymentReceivedByShopkeeper,
+                            "paymentReceivedType" to cleanPaymentType,
+
                             "cancelReason" to finalCancelReason,
                             "cancelledBy" to "shopkeeper",
                             "cancelledAt" to now,
-                            "paymentReceivedByShopkeeper" to paymentReceivedByShopkeeper,
-                            "paymentReceivedType" to cleanPaymentType,
+
                             "refundStatus" to refundStatus,
+                            "refundAmount" to refundAmount,
                             "refundReferenceId" to "",
                             "refundSettledAt" to 0L,
                             "refundNote" to "",
+
                             "updatedAt" to now
                         )
                     )
@@ -531,7 +583,12 @@ class ShopkeeperViewModel @Inject constructor(
 
                     val month = pickupDate.take(7)
 
-                    incrementCancelledAnalytics(transaction, shopId, pickupDate, month)
+                    incrementCancelledAnalytics(
+                        transaction = transaction,
+                        shopId = shopId,
+                        pickupDate = pickupDate,
+                        month = month
+                    )
 
                     null
                 }.await()
@@ -547,7 +604,6 @@ class ShopkeeperViewModel @Inject constructor(
             }
         }
     }
-
     fun markRefundSettled(orderId: String, refundReferenceId: String, refundNote: String) {
         if (orderId.isBlank()) return
 

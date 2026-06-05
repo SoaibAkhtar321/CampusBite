@@ -33,6 +33,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -60,7 +61,11 @@ fun CompleteProfileScreen(
     )
 
     var fullName by remember {
-        mutableStateOf(viewModel.googleName)
+        mutableStateOf(sanitizeNameInput(viewModel.googleName))
+    }
+
+    var nameError by remember {
+        mutableStateOf<String?>(null)
     }
 
     var phone by remember {
@@ -71,6 +76,11 @@ fun CompleteProfileScreen(
         mutableStateOf<String?>(null)
     }
 
+    /*
+     * UI label = User
+     * Backend role value = "student"
+     * Do not change backend role to "user" right now.
+     */
     var selectedRole by remember {
         mutableStateOf("student")
     }
@@ -171,14 +181,26 @@ fun CompleteProfileScreen(
 
         OutlinedTextField(
             value = fullName,
-            onValueChange = {
-                fullName = it
+            onValueChange = { value ->
+                fullName = sanitizeNameInput(value)
+                nameError = validateNameWhileTyping(fullName)
                 localError = null
             },
             label = {
                 Text("Full Name")
             },
             singleLine = true,
+            isError = nameError != null,
+            supportingText = {
+                Text(
+                    text = nameError
+                        ?: "Use your real name. Emojis, numbers, and random symbols are not allowed."
+                )
+            },
+            keyboardOptions = KeyboardOptions(
+                keyboardType = KeyboardType.Text,
+                capitalization = KeyboardCapitalization.Words
+            ),
             modifier = Modifier.fillMaxWidth(),
             colors = textFieldColors
         )
@@ -215,7 +237,7 @@ fun CompleteProfileScreen(
         Spacer(modifier = Modifier.height(4.dp))
 
         Text(
-            text = "Use a valid phone number for order updates and support.",
+            text = "Use a valid phone number for order updates, cancellation, and refund support.",
             fontSize = 12.sp,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -223,7 +245,7 @@ fun CompleteProfileScreen(
         Spacer(modifier = Modifier.height(16.dp))
 
         Text(
-            text = "I am a",
+            text = "Continue as",
             fontSize = 14.sp,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -242,7 +264,7 @@ fun CompleteProfileScreen(
                     localError = null
                 },
                 label = {
-                    Text("Student")
+                    Text("User")
                 }
             )
 
@@ -253,8 +275,18 @@ fun CompleteProfileScreen(
                     localError = null
                 },
                 label = {
-                    Text("Shopkeeper")
+                    Text("Vendor / Shopkeeper")
                 }
+            )
+        }
+
+        if (selectedRole == "student") {
+            Spacer(modifier = Modifier.height(6.dp))
+
+            Text(
+                text = "For students, faculty, staff, employees, hostel residents, and other campus users.",
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
 
@@ -262,7 +294,7 @@ fun CompleteProfileScreen(
             Spacer(modifier = Modifier.height(6.dp))
 
             Text(
-                text = "Shopkeeper accounts require admin approval and are campus specific.",
+                text = "Vendor / shopkeeper accounts require admin approval and are campus specific.",
                 fontSize = 12.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -338,13 +370,16 @@ fun CompleteProfileScreen(
 
         Button(
             onClick = {
+                val finalName = normalizeName(fullName)
+                val nameValidationError = validateNameOnSubmit(finalName)
                 val phoneValidationError = validatePhoneOnSubmit(phone)
 
+                nameError = nameValidationError
                 phoneError = phoneValidationError
 
                 localError = when {
-                    fullName.trim().isBlank() ->
-                        "Name is required"
+                    nameValidationError != null ->
+                        nameValidationError
 
                     phoneValidationError != null ->
                         phoneValidationError
@@ -357,7 +392,7 @@ fun CompleteProfileScreen(
 
                 if (localError == null) {
                     viewModel.completeGoogleProfile(
-                        name = fullName,
+                        name = finalName,
                         phone = phone,
                         role = selectedRole,
                         university = if (selectedRole == "shopkeeper") {
@@ -386,6 +421,198 @@ fun CompleteProfileScreen(
             }
         }
     }
+}
+
+private fun sanitizeNameInput(
+    value: String
+): String {
+    return value
+        .filter { char ->
+            char.isLetter() ||
+                    char == ' ' ||
+                    char == '.' ||
+                    char == '\'' ||
+                    char == '-'
+        }
+        .replace(Regex("\\s+"), " ")
+        .take(50)
+}
+
+private fun normalizeName(
+    name: String
+): String {
+    return name
+        .trim()
+        .replace(Regex("\\s+"), " ")
+}
+
+private fun validateNameWhileTyping(
+    name: String
+): String? {
+    val cleanName = normalizeName(name)
+
+    if (cleanName.isBlank()) {
+        return null
+    }
+
+    return validateNameCommon(
+        name = cleanName,
+        allowBlank = true
+    )
+}
+
+private fun validateNameOnSubmit(
+    name: String
+): String? {
+    val cleanName = normalizeName(name)
+
+    return validateNameCommon(
+        name = cleanName,
+        allowBlank = false
+    )
+}
+
+private fun validateNameCommon(
+    name: String,
+    allowBlank: Boolean
+): String? {
+    val cleanName = normalizeName(name)
+
+    if (cleanName.isBlank()) {
+        return if (allowBlank) {
+            null
+        } else {
+            "Name is required"
+        }
+    }
+
+    val letterCount = cleanName.count { it.isLetter() }
+
+    return when {
+        cleanName.length < 2 ->
+            "Name must be at least 2 characters"
+
+        cleanName.length > 50 ->
+            "Name must be less than 50 characters"
+
+        letterCount < 2 ->
+            "Name must contain at least 2 letters"
+
+        startsOrEndsWithNameSeparator(cleanName) ->
+            "Name cannot start or end with special characters"
+
+        hasConsecutiveNameSeparators(cleanName) ->
+            "Name contains invalid repeated special characters"
+
+        hasTooManyRepeatedNameCharacters(cleanName) ->
+            "Enter a valid name"
+
+        isPlaceholderName(cleanName) ->
+            "Please enter your real name"
+
+        else -> null
+    }
+}
+
+private fun startsOrEndsWithNameSeparator(
+    name: String
+): Boolean {
+    val separators = setOf('.', '\'', '-')
+
+    return name.firstOrNull() in separators ||
+            name.lastOrNull() in separators
+}
+
+private fun hasConsecutiveNameSeparators(
+    name: String
+): Boolean {
+    val invalidPatterns = listOf(
+        "..",
+        "--",
+        "''",
+        ".-",
+        "-.",
+        ".'",
+        "'.",
+        "-'",
+        "'-"
+    )
+
+    return invalidPatterns.any { pattern ->
+        name.contains(pattern)
+    }
+}
+
+private fun hasTooManyRepeatedNameCharacters(
+    name: String
+): Boolean {
+    val lettersOnly = name
+        .filter { it.isLetter() }
+        .lowercase()
+
+    if (lettersOnly.length < 4) {
+        return false
+    }
+
+    val hasSingleCharacterTooManyTimes = lettersOnly
+        .groupingBy { it }
+        .eachCount()
+        .any { it.value >= 6 }
+
+    if (hasSingleCharacterTooManyTimes) {
+        return true
+    }
+
+    var repeatCount = 1
+
+    for (i in 1 until lettersOnly.length) {
+        if (lettersOnly[i] == lettersOnly[i - 1]) {
+            repeatCount++
+
+            if (repeatCount >= 4) {
+                return true
+            }
+        } else {
+            repeatCount = 1
+        }
+    }
+
+    return false
+}
+
+private fun isPlaceholderName(
+    name: String
+): Boolean {
+    val compactName = name
+        .lowercase()
+        .replace(" ", "")
+        .replace(".", "")
+        .replace("-", "")
+        .replace("'", "")
+
+    val blockedNames = setOf(
+        "test",
+        "testing",
+        "user",
+        "username",
+        "admin",
+        "administrator",
+        "unknown",
+        "noname",
+        "name",
+        "student",
+        "shopkeeper",
+        "vendor",
+        "customer",
+        "campusbite",
+        "asdf",
+        "qwerty",
+        "abcd",
+        "abcde",
+        "xyz"
+    )
+
+    return compactName in blockedNames
 }
 
 private fun validatePhoneWhileTyping(

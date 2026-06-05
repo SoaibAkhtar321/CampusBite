@@ -1309,7 +1309,7 @@ private fun CancelOrderDialog(
     onConfirm: (paymentReceivedType: String, cancelReason: String) -> Unit
 ) {
     var selectedPaymentType by remember {
-        mutableStateOf(PaymentReceivedType.NONE)
+        mutableStateOf("")
     }
 
     var selectedReason by remember {
@@ -1321,9 +1321,9 @@ private fun CancelOrderDialog(
     }
 
     val paymentOptions = listOf(
-        PaymentReceivedType.NONE to "No payment received",
-        PaymentReceivedType.PARTIAL to "Partial payment received",
-        PaymentReceivedType.FULL to "Full payment received"
+        PaymentReceivedType.NONE to "Payment not received",
+        PaymentReceivedType.FULL to "Full payment received",
+        PaymentReceivedType.PARTIAL to "Partial payment received"
     )
 
     val cancellationReasons = listOf(
@@ -1347,7 +1347,7 @@ private fun CancelOrderDialog(
         text = {
             Column {
                 Text(
-                    text = "Was payment received from the user?",
+                    text = "Select payment status before cancelling",
                     fontWeight = FontWeight.SemiBold
                 )
 
@@ -1376,6 +1376,16 @@ private fun CancelOrderDialog(
 
                         Text(label)
                     }
+                }
+
+                if (selectedPaymentType == PaymentReceivedType.NONE) {
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Text(
+                        text = "This will cancel the order as payment not received. No refund will be marked.",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
 
                 if (paymentReceived) {
@@ -1408,17 +1418,9 @@ private fun CancelOrderDialog(
                     Spacer(modifier = Modifier.height(6.dp))
 
                     Text(
-                        text = "Because payment was received, this order will appear in Refund Pending until you settle the refund.",
+                        text = "Because payment was received, this order will be marked as Refund Pending.",
                         fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.error
-                    )
-                } else {
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    Text(
-                        text = "This will cancel the order as payment not received.",
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
 
@@ -1436,9 +1438,16 @@ private fun CancelOrderDialog(
         confirmButton = {
             TextButton(
                 onClick = {
-                    if (paymentReceived && selectedReason.isBlank()) {
-                        localError = "Please select a cancellation reason"
-                        return@TextButton
+                    when {
+                        selectedPaymentType.isBlank() -> {
+                            localError = "Please select payment status"
+                            return@TextButton
+                        }
+
+                        paymentReceived && selectedReason.isBlank() -> {
+                            localError = "Please select cancellation reason"
+                            return@TextButton
+                        }
                     }
 
                     onConfirm(
