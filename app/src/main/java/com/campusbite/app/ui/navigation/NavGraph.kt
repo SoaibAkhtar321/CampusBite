@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -32,7 +33,6 @@ import com.campusbite.app.ui.screens.splash.SplashScreen
 import com.campusbite.app.ui.viewmodel.AuthViewModel
 import com.campusbite.app.ui.viewmodel.CartViewModel
 import com.campusbite.app.ui.viewmodel.HomeViewModel
-import androidx.compose.runtime.LaunchedEffect
 import com.campusbite.app.ui.viewmodel.OrderViewModel
 
 @Composable
@@ -50,28 +50,45 @@ fun NavGraph(
         composable(Routes.SPLASH) {
             SplashScreen(
                 onNavigateToStudent = {
-                    navController.navigate("student_home") {
-                        popUpTo(0) { inclusive = true }
+                    navController.navigate(Routes.STUDENT_HOME) {
+                        popUpTo(Routes.SPLASH) {
+                            inclusive = true
+                        }
                     }
                 },
                 onNavigateToShopkeeper = {
-                    navController.navigate("shopkeeper_home") {
-                        popUpTo(0) { inclusive = true }
+                    navController.navigate(Routes.SHOPKEEPER_DASHBOARD) {
+                        popUpTo(Routes.SPLASH) {
+                            inclusive = true
+                        }
                     }
                 },
                 onNavigateToAdmin = {
-                    navController.navigate("admin_home") {
-                        popUpTo(0) { inclusive = true }
+                    navController.navigate(Routes.ADMIN_DASHBOARD) {
+                        popUpTo(Routes.SPLASH) {
+                            inclusive = true
+                        }
                     }
                 },
                 onNavigateToLogin = {
-                    navController.navigate("login") {
-                        popUpTo(0) { inclusive = true }
+                    navController.navigate(Routes.LOGIN) {
+                        popUpTo(Routes.SPLASH) {
+                            inclusive = true
+                        }
                     }
                 },
                 onNavigateToPending = {
-                    navController.navigate("shopkeeper_pending") {
-                        popUpTo(0) { inclusive = true }
+                    navController.navigate(Routes.SHOPKEEPER_PENDING) {
+                        popUpTo(Routes.SPLASH) {
+                            inclusive = true
+                        }
+                    }
+                },
+                onNavigateToCompleteProfile = {
+                    navController.navigate(Routes.COMPLETE_PROFILE) {
+                        popUpTo(Routes.SPLASH) {
+                            inclusive = true
+                        }
                     }
                 }
             )
@@ -120,18 +137,24 @@ fun NavGraph(
         composable(Routes.COMPLETE_PROFILE) {
             CompleteProfileScreen(
                 onNavigateToStudent = {
-                    navController.navigate("student_home") {
-                        popUpTo(0) { inclusive = true }
+                    navController.navigate(Routes.STUDENT_HOME) {
+                        popUpTo(0) {
+                            inclusive = true
+                        }
                     }
                 },
                 onNavigateToPending = {
-                    navController.navigate("shopkeeper_pending") {
-                        popUpTo(0) { inclusive = true }
+                    navController.navigate(Routes.SHOPKEEPER_PENDING) {
+                        popUpTo(0) {
+                            inclusive = true
+                        }
                     }
                 },
                 onNavigateToLogin = {
-                    navController.navigate("login") {
-                        popUpTo(0) { inclusive = true }
+                    navController.navigate(Routes.LOGIN) {
+                        popUpTo(0) {
+                            inclusive = true
+                        }
                     }
                 }
             )
@@ -141,6 +164,7 @@ fun NavGraph(
             ShopkeeperPendingScreen(
                 onLogout = {
                     authViewModel.logout()
+
                     navController.navigate(Routes.LOGIN) {
                         popUpTo(0) {
                             inclusive = true
@@ -172,8 +196,15 @@ fun NavGraph(
             )
         }
 
-        composable(Routes.SHOP_DETAIL) { backStackEntry ->
-            val shopId = backStackEntry.arguments?.getString("shopId") ?: ""
+        composable(
+            route = Routes.SHOP_DETAIL,
+            arguments = listOf(
+                navArgument("shopId") {
+                    type = NavType.StringType
+                }
+            )
+        ) { backStackEntry ->
+            val shopId = backStackEntry.arguments?.getString("shopId").orEmpty()
 
             val parentEntry = remember(backStackEntry) {
                 navController.getBackStackEntry(Routes.STUDENT_HOME)
@@ -217,8 +248,15 @@ fun NavGraph(
             )
         }
 
-        composable(Routes.ORDER_STATUS) { backStackEntry ->
-            val orderId = backStackEntry.arguments?.getString("orderId") ?: ""
+        composable(
+            route = Routes.ORDER_STATUS,
+            arguments = listOf(
+                navArgument("orderId") {
+                    type = NavType.StringType
+                }
+            )
+        ) { backStackEntry ->
+            val orderId = backStackEntry.arguments?.getString("orderId").orEmpty()
 
             OrderStatusScreen(
                 orderId = orderId,
@@ -229,10 +267,14 @@ fun NavGraph(
         }
 
         composable(Routes.ORDER_HISTORY) {
-            OrderHistoryScreen()
+            OrderHistoryScreen(
+                onNavigateToOrderStatus = { orderId ->
+                    navController.navigate(Routes.orderStatus(orderId))
+                }
+            )
         }
 
-        composable("menu_management") {
+        composable(Routes.MENU_MANAGEMENT) {
             MenuManagementScreen(
                 onNavigateBack = {
                     navController.popBackStack()
@@ -246,7 +288,7 @@ fun NavGraph(
                     navController.navigate(Routes.SHOPKEEPER_PROFILE)
                 },
                 onNavigateToMenu = {
-                    navController.navigate("menu_management")
+                    navController.navigate(Routes.MENU_MANAGEMENT)
                 }
             )
         }
@@ -270,7 +312,7 @@ fun NavGraph(
                 }
             )
         ) { backStackEntry ->
-            val shopId = backStackEntry.arguments?.getString("shopId") ?: ""
+            val shopId = backStackEntry.arguments?.getString("shopId").orEmpty()
 
             AdminShopReportScreen(
                 shopId = shopId,
@@ -293,6 +335,7 @@ fun NavGraph(
                 },
                 onLogout = {
                     authViewModel.logout()
+
                     navController.navigate(Routes.LOGIN) {
                         popUpTo(0) {
                             inclusive = true
@@ -309,6 +352,7 @@ fun NavGraph(
                 },
                 onLogout = {
                     authViewModel.logout()
+
                     navController.navigate(Routes.LOGIN) {
                         popUpTo(0) {
                             inclusive = true
@@ -325,6 +369,7 @@ fun NavGraph(
                 },
                 onLogout = {
                     authViewModel.logout()
+
                     navController.navigate(Routes.LOGIN) {
                         popUpTo(0) {
                             inclusive = true
@@ -334,7 +379,7 @@ fun NavGraph(
             )
         }
 
-        composable("edit_shop") {
+        composable(Routes.EDIT_SHOP) {
             Box(
                 modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center

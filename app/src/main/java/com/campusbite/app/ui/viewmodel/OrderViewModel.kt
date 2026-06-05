@@ -16,6 +16,8 @@ import com.campusbite.app.data.model.Order
 import com.campusbite.app.data.model.Shop
 import com.campusbite.app.data.repository.OrderRepository
 import com.campusbite.app.data.repository.SlotAvailabilityRepository
+import com.campusbite.app.util.OrderStatusValue
+import com.campusbite.app.util.RefundStatusValue
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
@@ -75,8 +77,15 @@ class OrderViewModel @Inject constructor(
     private var currentOrderListener: ListenerRegistration? = null
     private var shopAvailabilityListener: ListenerRegistration? = null
 
-    private val lastKnownOrderStatuses = mutableMapOf<String, String>()
-    private val lastNotifiedOrderStatuses = mutableMapOf<String, String>()
+    private val lastKnownOrderStates = mutableMapOf<String, String>()
+    private val lastNotifiedOrderStates = mutableMapOf<String, String>()
+
+    private val activeStatuses = listOf(
+        OrderStatusValue.PENDING,
+        OrderStatusValue.ACCEPTED,
+        OrderStatusValue.PREPARING,
+        OrderStatusValue.READY
+    )
 
     private data class ShopTimeWindow(
         val openingDateTime: LocalDateTime,
@@ -255,29 +264,82 @@ class OrderViewModel @Inject constructor(
         }
     }
 
+    fun cancelOrderByShopkeeper(
+        orderId: String,
+        paymentReceivedType: String,
+        cancelReason: String
+    ) {
+        viewModelScope.launch {
+            _orderState.value = OrderState.Loading
+
+            val result = orderRepository.cancelOrderByShopkeeper(
+                orderId = orderId,
+                paymentReceivedType = paymentReceivedType,
+                cancelReason = cancelReason
+            )
+
+            _orderState.value = if (result.isSuccess) {
+                OrderState.Success(orderId)
+            } else {
+                OrderState.Error(
+                    result.exceptionOrNull()?.message ?: "Failed to cancel order"
+                )
+            }
+        }
+    }
+
+    fun markRefundSettled(
+        orderId: String,
+        refundReferenceId: String,
+        refundNote: String
+    ) {
+        viewModelScope.launch {
+            _orderState.value = OrderState.Loading
+
+            val result = orderRepository.markRefundSettled(
+                orderId = orderId,
+                refundReferenceId = refundReferenceId,
+                refundNote = refundNote
+            )
+
+            _orderState.value = if (result.isSuccess) {
+                OrderState.Success(orderId)
+            } else {
+                OrderState.Error(
+                    result.exceptionOrNull()?.message ?: "Failed to mark refund settled"
+                )
+            }
+        }
+    }
+
     fun listenToOrderById(orderId: String) {
         if (orderId.isBlank()) return
 
         currentOrderListener?.remove()
 
         currentOrderListener = orderRepository.listenToOrder(orderId) { order ->
-            val previousStatus = _currentOrder.value?.status?.lowercase()
-            val newStatus = order?.status?.lowercase()
-
-            _currentOrder.value = order
-
-            if (order == null || previousStatus == null || newStatus == null) {
+            if (order == null) {
+                _currentOrder.value = null
                 return@listenToOrder
             }
 
-            if (previousStatus != newStatus) {
-                notifyForOrderStatusChange(
+            val previousStateKey = lastKnownOrderStates[order.orderId]
+                ?: _currentOrder.value
+                    ?.takeIf { it.orderId == order.orderId }
+                    ?.let { getOrderStateKey(it) }
+
+            val newStateKey = getOrderStateKey(order)
+
+            _currentOrder.value = order
+
+            if (previousStateKey != null && previousStateKey != newStateKey) {
+                notifyForOrderStateChange(
                     order = order,
-                    previousStatus = previousStatus
+                    previousStateKey = previousStateKey
                 )
             }
 
-            lastKnownOrderStatuses[order.orderId] = newStatus
+            lastKnownOrderStates[order.orderId] = newStateKey
         }
     }
 
@@ -316,28 +378,21 @@ class OrderViewModel @Inject constructor(
                     val orderId = order.orderId
 
                     if (orderId.isNotBlank()) {
-                        val previousStatus = lastKnownOrderStatuses[orderId]
-                        val newStatus = order.status.lowercase()
+                        val previousStateKey = lastKnownOrderStates[orderId]
+                        val newStateKey = getOrderStateKey(order)
 
-                        if (previousStatus != null && previousStatus != newStatus) {
-                            notifyForOrderStatusChange(
+                        if (previousStateKey != null && previousStateKey != newStateKey) {
+                            notifyForOrderStateChange(
                                 order = order,
-                                previousStatus = previousStatus
+                                previousStateKey = previousStateKey
                             )
                         }
 
-                        lastKnownOrderStatuses[orderId] = newStatus
+                        lastKnownOrderStates[orderId] = newStateKey
                     }
                 }
 
                 _userOrders.value = allOrders
-
-                val activeStatuses = listOf(
-                    "pending",
-                    "accepted",
-                    "preparing",
-                    "ready"
-                )
 
                 _activeOrder.value = allOrders.firstOrNull { order ->
                     order.status.lowercase() in activeStatuses
@@ -616,9 +671,13 @@ class OrderViewModel @Inject constructor(
         )
     }
 
-    private fun notifyForOrderStatusChange(
+    private fun getOrderStateKey(order: Order): String {
+        return "${order.status.lowercase()}|${order.refundStatus.lowercase()}"
+    }
+
+    private fun notifyForOrderStateChange(
         order: Order,
-        previousStatus: String?
+        previousStateKey: String?
     ) {
         val orderId = order.orderId
 
@@ -626,45 +685,70 @@ class OrderViewModel @Inject constructor(
             return
         }
 
-        val newStatus = order.status.lowercase()
+        val newStateKey = getOrderStateKey(order)
 
-        if (previousStatus == null || previousStatus == newStatus) {
+        if (previousStateKey == null || previousStateKey == newStateKey) {
             return
         }
 
-        if (lastNotifiedOrderStatuses[orderId] == newStatus) {
+        if (lastNotifiedOrderStates[orderId] == newStateKey) {
             return
         }
 
-        when (newStatus) {
-            "preparing" -> {
+        val status = order.status.lowercase()
+        val refundStatus = order.refundStatus.lowercase()
+
+        when {
+            status == OrderStatusValue.PREPARING -> {
                 showOrderStatusNotification(
                     orderId = orderId,
                     title = "Order Accepted",
                     message = "Your order has been accepted and is being prepared."
                 )
 
-                lastNotifiedOrderStatuses[orderId] = newStatus
+                lastNotifiedOrderStates[orderId] = newStateKey
             }
 
-            "ready" -> {
+            status == OrderStatusValue.READY -> {
                 showOrderStatusNotification(
                     orderId = orderId,
                     title = "Order Ready",
                     message = "Your food is ready for pickup."
                 )
 
-                lastNotifiedOrderStatuses[orderId] = newStatus
+                lastNotifiedOrderStates[orderId] = newStateKey
             }
 
-            "cancelled" -> {
+            status == OrderStatusValue.CANCELLED &&
+                    refundStatus == RefundStatusValue.REFUND_PENDING -> {
+                showOrderStatusNotification(
+                    orderId = orderId,
+                    title = "Order Cancelled - Refund Pending",
+                    message = "Your payment was received by the shopkeeper. Refund will be settled manually."
+                )
+
+                lastNotifiedOrderStates[orderId] = newStateKey
+            }
+
+            status == OrderStatusValue.CANCELLED &&
+                    refundStatus == RefundStatusValue.REFUNDED -> {
+                showOrderStatusNotification(
+                    orderId = orderId,
+                    title = "Refund Settled",
+                    message = "The shopkeeper has marked your refund as settled."
+                )
+
+                lastNotifiedOrderStates[orderId] = newStateKey
+            }
+
+            status == OrderStatusValue.CANCELLED -> {
                 showOrderStatusNotification(
                     orderId = orderId,
                     title = "Order Cancelled",
-                    message = "Your order was cancelled because payment was not received. If you paid, call the shopkeeper."
+                    message = "Your order was cancelled because payment was not received."
                 )
 
-                lastNotifiedOrderStatuses[orderId] = newStatus
+                lastNotifiedOrderStates[orderId] = newStateKey
             }
         }
     }

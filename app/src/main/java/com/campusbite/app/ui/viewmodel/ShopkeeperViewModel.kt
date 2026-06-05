@@ -13,6 +13,10 @@ import androidx.lifecycle.viewModelScope
 import com.campusbite.app.R
 import com.campusbite.app.data.model.MenuItem
 import com.campusbite.app.data.model.Order
+import com.campusbite.app.util.OrderStatusValue
+import com.campusbite.app.util.PaymentReceivedType
+import com.campusbite.app.util.PaymentStatusValue
+import com.campusbite.app.util.RefundStatusValue
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.DocumentReference
 import com.google.firebase.firestore.DocumentSnapshot
@@ -79,6 +83,7 @@ class ShopkeeperViewModel @Inject constructor(
 
     private var menuItemsListener: ListenerRegistration? = null
     private var activeOrdersListener: ListenerRegistration? = null
+    private var refundPendingOrdersListener: ListenerRegistration? = null
     private var shopControlsListener: ListenerRegistration? = null
 
     private var todayAnalyticsListener: ListenerRegistration? = null
@@ -88,6 +93,9 @@ class ShopkeeperViewModel @Inject constructor(
     private var todayAnalytics = ShopkeeperAnalyticsSnapshot()
     private var monthAnalytics = ShopkeeperAnalyticsSnapshot()
     private var lifetimeAnalytics = ShopkeeperAnalyticsSnapshot()
+
+    private var activeOrdersCache: List<Order> = emptyList()
+    private var refundPendingOrdersCache: List<Order> = emptyList()
 
     private val knownOrderIds = mutableSetOf<String>()
     private var hasLoadedInitialOrders = false
@@ -112,11 +120,10 @@ class ShopkeeperViewModel @Inject constructor(
 
                 if (shopId.isNotBlank()) {
                     loadShopControls()
-                    listenToActiveOrders()
+                    listenToOrders()
                     listenToAnalytics()
                     loadMenuItems(shopId)
                 }
-
             } catch (e: Exception) {
                 e.printStackTrace()
                 _message.value = e.message ?: "Failed to load shopkeeper data."
@@ -140,7 +147,9 @@ class ShopkeeperViewModel @Inject constructor(
                     return@addSnapshotListener
                 }
 
-                if (doc == null || !doc.exists()) return@addSnapshotListener
+                if (doc == null || !doc.exists()) {
+                    return@addSnapshotListener
+                }
 
                 _shopOpen.value = doc.getBoolean("isOpen") ?: true
 
@@ -149,26 +158,30 @@ class ShopkeeperViewModel @Inject constructor(
             }
     }
 
-    /*
-     * Optimized:
-     * Earlier we listened to every order of the shop.
-     * Now we listen only to active orders:
-     * pending / preparing / ready
-     *
-     * picked_up, cancelled, old history are not read on every dashboard open.
-     */
+    private fun listenToOrders() {
+        listenToActiveOrders()
+        listenToRefundPendingOrders()
+    }
+
     private fun listenToActiveOrders() {
         if (shopId.isBlank()) return
 
         activeOrdersListener?.remove()
 
+        val activeStatuses = listOf(
+            OrderStatusValue.PENDING,
+            OrderStatusValue.PREPARING,
+            OrderStatusValue.READY
+        )
+
         activeOrdersListener = firestore.collection("orders")
             .whereEqualTo("shopId", shopId)
-            .whereIn("status", listOf("pending", "preparing", "ready"))
+            .whereIn("status", activeStatuses)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
                     error.printStackTrace()
-                    _orders.value = emptyList()
+                    activeOrdersCache = emptyList()
+                    mergeOrders()
                     _message.value = error.message ?: "Failed to load active orders."
                     updateSalesSummary()
                     return@addSnapshotListener
@@ -192,7 +205,7 @@ class ShopkeeperViewModel @Inject constructor(
                     hasLoadedInitialOrders = true
                 } else {
                     val newPendingOrders = activeOrders.filter { order ->
-                        order.status == "pending" &&
+                        order.status.lowercase() == OrderStatusValue.PENDING &&
                                 order.orderId !in knownOrderIds
                     }
 
@@ -204,21 +217,59 @@ class ShopkeeperViewModel @Inject constructor(
                     knownOrderIds.addAll(activeOrders.map { it.orderId })
                 }
 
-                _orders.value = activeOrders
+                activeOrdersCache = activeOrders
+                mergeOrders()
                 updateSalesSummary()
             }
     }
 
-    /*
-     * Optimized:
-     * Sales summary is read from small analytics documents instead of reading
-     * thousands of old order documents.
-     *
-     * Firestore path:
-     * shopAnalytics/{shopId}/daily/{yyyy-MM-dd}
-     * shopAnalytics/{shopId}/monthly/{yyyy-MM}
-     * shopAnalytics/{shopId}/lifetime/summary
-     */
+    private fun listenToRefundPendingOrders() {
+        if (shopId.isBlank()) return
+
+        refundPendingOrdersListener?.remove()
+
+        refundPendingOrdersListener = firestore.collection("orders")
+            .whereEqualTo("shopId", shopId)
+            .whereEqualTo("status", OrderStatusValue.CANCELLED)
+            .whereEqualTo("refundStatus", RefundStatusValue.REFUND_PENDING)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    error.printStackTrace()
+                    refundPendingOrdersCache = emptyList()
+                    mergeOrders()
+                    _message.value = error.message ?: "Failed to load refund pending orders."
+                    updateSalesSummary()
+                    return@addSnapshotListener
+                }
+
+                refundPendingOrdersCache = snapshot?.documents
+                    ?.mapNotNull { doc ->
+                        try {
+                            doc.toObject(Order::class.java)
+                        } catch (e: Exception) {
+                            e.printStackTrace()
+                            null
+                        }
+                    }
+                    ?.sortedByDescending { it.cancelledAt }
+                    ?: emptyList()
+
+                mergeOrders()
+                updateSalesSummary()
+            }
+    }
+
+    private fun mergeOrders() {
+        _orders.value = (refundPendingOrdersCache + activeOrdersCache)
+            .distinctBy { it.orderId }
+            .sortedWith(
+                compareByDescending<Order> {
+                    it.status.lowercase() == OrderStatusValue.CANCELLED &&
+                            it.refundStatus.lowercase() == RefundStatusValue.REFUND_PENDING
+                }.thenBy { it.createdAt }
+            )
+    }
+
     private fun listenToAnalytics() {
         if (shopId.isBlank()) return
 
@@ -267,32 +318,29 @@ class ShopkeeperViewModel @Inject constructor(
         val today = LocalDate.now().toString()
         val currentMonth = YearMonth.now().toString()
 
-        val activeOrders = _orders.value
+        val activeOrders = activeOrdersCache
 
         val pendingTodayOrders = activeOrders.count { order ->
             order.pickupDate == today &&
-                    order.paymentStatus.lowercase() == "pending_verification"
+                    order.paymentStatus.lowercase() == PaymentStatusValue.PENDING_VERIFICATION
         }
 
         val pendingMonthOrders = activeOrders.count { order ->
             order.pickupDate.startsWith(currentMonth) &&
-                    order.paymentStatus.lowercase() == "pending_verification"
+                    order.paymentStatus.lowercase() == PaymentStatusValue.PENDING_VERIFICATION
         }
 
         val pendingPaymentOrders = activeOrders.count { order ->
-            order.paymentStatus.lowercase() == "pending_verification"
+            order.paymentStatus.lowercase() == PaymentStatusValue.PENDING_VERIFICATION
         }
 
         _salesSummary.value = ShopkeeperSalesSummary(
             todayOrders = todayAnalytics.verifiedOrders + pendingTodayOrders,
             todaySales = todayAnalytics.verifiedSales,
-
             monthOrders = monthAnalytics.verifiedOrders + pendingMonthOrders,
             monthSales = monthAnalytics.verifiedSales,
-
             lifetimeOrders = lifetimeAnalytics.verifiedOrders,
             lifetimeSales = lifetimeAnalytics.verifiedSales,
-
             pendingPaymentOrders = pendingPaymentOrders,
             cancelledOrders = lifetimeAnalytics.cancelledOrders
         )
@@ -307,7 +355,6 @@ class ShopkeeperViewModel @Inject constructor(
                     .document(shopId)
                     .update("isOpen", isOpen)
                     .await()
-
             } catch (e: Exception) {
                 e.printStackTrace()
                 _message.value = e.message ?: "Failed to update shop status."
@@ -334,7 +381,6 @@ class ShopkeeperViewModel @Inject constructor(
                         FieldValue.arrayUnion(slot)
                     ).await()
                 }
-
             } catch (e: Exception) {
                 e.printStackTrace()
                 _message.value = e.message ?: "Failed to update slot."
@@ -342,49 +388,25 @@ class ShopkeeperViewModel @Inject constructor(
         }
     }
 
-    /*
-     * Optimized + safer:
-     * When payment is verified, update:
-     * 1. orders/{orderId}
-     * 2. shopAnalytics/{shopId}/daily/{date}
-     * 3. shopAnalytics/{shopId}/monthly/{month}
-     * 4. shopAnalytics/{shopId}/lifetime/summary
-     *
-     * This avoids reading all old orders for sales summary.
-     */
-    fun updateOrderStatus(
-        orderId: String,
-        newStatus: String
-    ) {
+    fun updateOrderStatus(orderId: String, newStatus: String) {
         if (orderId.isBlank()) return
 
         viewModelScope.launch {
             try {
-                val orderRef = firestore.collection("orders")
-                    .document(orderId)
+                val orderRef = firestore.collection("orders").document(orderId)
 
                 firestore.runTransaction { transaction ->
                     val orderDoc = transaction.get(orderRef)
 
-                    if (!orderDoc.exists()) {
-                        throw IllegalStateException("Order not found.")
-                    }
+                    if (!orderDoc.exists()) throw IllegalStateException("Order not found.")
 
                     val orderShopId = orderDoc.getString("shopId").orEmpty()
+                    if (orderShopId != shopId) throw IllegalStateException("You cannot update this order.")
 
-                    if (orderShopId != shopId) {
-                        throw IllegalStateException("You cannot update this order.")
-                    }
+                    val oldPaymentStatus = orderDoc.getString("paymentStatus")?.lowercase().orEmpty()
+                    val oldStatus = orderDoc.getString("status")?.lowercase().orEmpty()
 
-                    val oldPaymentStatus = orderDoc.getString("paymentStatus")
-                        ?.lowercase()
-                        .orEmpty()
-
-                    val oldStatus = orderDoc.getString("status")
-                        ?.lowercase()
-                        .orEmpty()
-
-                    if (oldStatus == "cancelled") {
+                    if (oldStatus == OrderStatusValue.CANCELLED) {
                         throw IllegalStateException("Cancelled order cannot be updated.")
                     }
 
@@ -394,12 +416,10 @@ class ShopkeeperViewModel @Inject constructor(
                     )
 
                     val shouldVerifyPayment =
-                        newStatus == "preparing" &&
-                                oldPaymentStatus != "verified"
+                        newStatus == OrderStatusValue.PREPARING &&
+                                oldPaymentStatus !in listOf("verified", PaymentStatusValue.PAID)
 
-                    if (shouldVerifyPayment) {
-                        updates["paymentStatus"] = "verified"
-                    }
+                    if (shouldVerifyPayment) updates["paymentStatus"] = PaymentStatusValue.PAID
 
                     transaction.update(orderRef, updates)
 
@@ -414,18 +434,11 @@ class ShopkeeperViewModel @Inject constructor(
                             ?: orderDoc.getLong("totalPrice")?.toDouble()
                             ?: 0.0
 
-                        incrementVerifiedAnalytics(
-                            transaction = transaction,
-                            shopId = shopId,
-                            pickupDate = pickupDate,
-                            month = month,
-                            amount = totalPrice
-                        )
+                        incrementVerifiedAnalytics(transaction, shopId, pickupDate, month, totalPrice)
                     }
 
                     null
                 }.await()
-
             } catch (e: Exception) {
                 e.printStackTrace()
                 _message.value = e.message ?: "Failed to update order."
@@ -433,53 +446,82 @@ class ShopkeeperViewModel @Inject constructor(
         }
     }
 
-    fun cancelOrderForPaymentNotReceived(orderId: String) {
+    fun cancelOrderByShopkeeper(
+        orderId: String,
+        paymentReceivedType: String,
+        cancelReason: String
+    ) {
         if (orderId.isBlank()) return
 
         viewModelScope.launch {
             try {
-                val orderRef = firestore.collection("orders")
-                    .document(orderId)
+                val cleanPaymentType = paymentReceivedType.trim().lowercase()
+                val cleanReason = cancelReason.trim()
+
+                if (cleanPaymentType !in listOf(PaymentReceivedType.NONE, PaymentReceivedType.PARTIAL, PaymentReceivedType.FULL)) {
+                    throw IllegalStateException("Invalid payment received type.")
+                }
+
+                val paymentReceivedByShopkeeper = cleanPaymentType in listOf(
+                    PaymentReceivedType.PARTIAL,
+                    PaymentReceivedType.FULL
+                )
+
+                if (paymentReceivedByShopkeeper && cleanReason.isBlank()) {
+                    throw IllegalStateException("Please select a cancellation reason.")
+                }
+
+                val orderRef = firestore.collection("orders").document(orderId)
 
                 firestore.runTransaction { transaction ->
                     val orderDoc = transaction.get(orderRef)
 
-                    if (!orderDoc.exists()) {
-                        throw IllegalStateException("Order not found.")
-                    }
+                    if (!orderDoc.exists()) throw IllegalStateException("Order not found.")
 
                     val orderShopId = orderDoc.getString("shopId").orEmpty()
+                    if (orderShopId != shopId) throw IllegalStateException("You cannot cancel this order.")
 
-                    if (orderShopId != shopId) {
-                        throw IllegalStateException("You cannot cancel this order.")
+                    val oldStatus = orderDoc.getString("status")?.lowercase().orEmpty()
+
+                    if (oldStatus == OrderStatusValue.CANCELLED || oldStatus == OrderStatusValue.PICKED_UP) {
+                        throw IllegalStateException("This order cannot be cancelled.")
                     }
 
-                    val status = orderDoc.getString("status")
-                        ?.lowercase()
-                        .orEmpty()
-
-                    val paymentStatus = orderDoc.getString("paymentStatus")
-                        ?.lowercase()
-                        .orEmpty()
-
-                    val canCancel =
-                        status == "pending" &&
-                                paymentStatus == "pending_verification"
-
-                    if (!canCancel) {
-                        throw IllegalStateException(
-                            "Only pending payment orders can be cancelled."
-                        )
+                    val paymentStatus = when (cleanPaymentType) {
+                        PaymentReceivedType.PARTIAL -> PaymentStatusValue.PARTIAL_PAYMENT_RECEIVED
+                        PaymentReceivedType.FULL -> PaymentStatusValue.PAID
+                        else -> PaymentStatusValue.PAYMENT_NOT_RECEIVED
                     }
+
+                    val refundStatus = if (paymentReceivedByShopkeeper) {
+                        RefundStatusValue.REFUND_PENDING
+                    } else {
+                        RefundStatusValue.NONE
+                    }
+
+                    val finalCancelReason = when {
+                        cleanReason.isNotBlank() -> cleanReason
+                        cleanPaymentType == PaymentReceivedType.NONE -> "Payment not received"
+                        else -> "Order cancelled after payment received"
+                    }
+
+                    val now = System.currentTimeMillis()
 
                     transaction.update(
                         orderRef,
                         mapOf(
-                            "status" to "cancelled",
-                            "paymentStatus" to "payment_not_received",
-                            "cancelReason" to "Payment not received by shopkeeper",
+                            "status" to OrderStatusValue.CANCELLED,
+                            "paymentStatus" to paymentStatus,
+                            "cancelReason" to finalCancelReason,
                             "cancelledBy" to "shopkeeper",
-                            "updatedAt" to System.currentTimeMillis()
+                            "cancelledAt" to now,
+                            "paymentReceivedByShopkeeper" to paymentReceivedByShopkeeper,
+                            "paymentReceivedType" to cleanPaymentType,
+                            "refundStatus" to refundStatus,
+                            "refundReferenceId" to "",
+                            "refundSettledAt" to 0L,
+                            "refundNote" to "",
+                            "updatedAt" to now
                         )
                     )
 
@@ -489,23 +531,81 @@ class ShopkeeperViewModel @Inject constructor(
 
                     val month = pickupDate.take(7)
 
-                    incrementCancelledAnalytics(
-                        transaction = transaction,
-                        shopId = shopId,
-                        pickupDate = pickupDate,
-                        month = month
-                    )
+                    incrementCancelledAnalytics(transaction, shopId, pickupDate, month)
 
                     null
                 }.await()
 
-                _message.value = "Order cancelled because payment was not received."
-
+                _message.value = if (paymentReceivedByShopkeeper) {
+                    "Order cancelled. Refund is now pending."
+                } else {
+                    "Order cancelled because payment was not received."
+                }
             } catch (e: Exception) {
                 e.printStackTrace()
                 _message.value = e.message ?: "Failed to cancel order."
             }
         }
+    }
+
+    fun markRefundSettled(orderId: String, refundReferenceId: String, refundNote: String) {
+        if (orderId.isBlank()) return
+
+        viewModelScope.launch {
+            try {
+                val cleanRefundReferenceId = refundReferenceId.trim()
+                val cleanRefundNote = refundNote.trim()
+
+                if (cleanRefundReferenceId.isBlank()) {
+                    throw IllegalStateException("Refund reference ID is required.")
+                }
+
+                val orderRef = firestore.collection("orders").document(orderId)
+
+                firestore.runTransaction { transaction ->
+                    val orderDoc = transaction.get(orderRef)
+
+                    if (!orderDoc.exists()) throw IllegalStateException("Order not found.")
+
+                    val orderShopId = orderDoc.getString("shopId").orEmpty()
+                    if (orderShopId != shopId) throw IllegalStateException("You cannot update this refund.")
+
+                    val refundStatus = orderDoc.getString("refundStatus")?.lowercase().orEmpty()
+                    if (refundStatus != RefundStatusValue.REFUND_PENDING) {
+                        throw IllegalStateException("This order is not pending refund.")
+                    }
+
+                    val now = System.currentTimeMillis()
+
+                    transaction.update(
+                        orderRef,
+                        mapOf(
+                            "paymentStatus" to PaymentStatusValue.REFUNDED,
+                            "refundStatus" to RefundStatusValue.REFUNDED,
+                            "refundReferenceId" to cleanRefundReferenceId,
+                            "refundNote" to cleanRefundNote,
+                            "refundSettledAt" to now,
+                            "updatedAt" to now
+                        )
+                    )
+
+                    null
+                }.await()
+
+                _message.value = "Refund marked as settled."
+            } catch (e: Exception) {
+                e.printStackTrace()
+                _message.value = e.message ?: "Failed to mark refund settled."
+            }
+        }
+    }
+
+    fun cancelOrderForPaymentNotReceived(orderId: String) {
+        cancelOrderByShopkeeper(
+            orderId = orderId,
+            paymentReceivedType = PaymentReceivedType.NONE,
+            cancelReason = "Payment not received"
+        )
     }
 
     private fun incrementVerifiedAnalytics(
@@ -550,29 +650,21 @@ class ShopkeeperViewModel @Inject constructor(
         transaction.set(lifetimeRef, update, SetOptions.merge())
     }
 
-    private fun dailyAnalyticsRef(
-        shopId: String,
-        date: String
-    ): DocumentReference {
+    private fun dailyAnalyticsRef(shopId: String, date: String): DocumentReference {
         return firestore.collection("shopAnalytics")
             .document(shopId)
             .collection("daily")
             .document(date)
     }
 
-    private fun monthlyAnalyticsRef(
-        shopId: String,
-        month: String
-    ): DocumentReference {
+    private fun monthlyAnalyticsRef(shopId: String, month: String): DocumentReference {
         return firestore.collection("shopAnalytics")
             .document(shopId)
             .collection("monthly")
             .document(month)
     }
 
-    private fun lifetimeAnalyticsRef(
-        shopId: String
-    ): DocumentReference {
+    private fun lifetimeAnalyticsRef(shopId: String): DocumentReference {
         return firestore.collection("shopAnalytics")
             .document(shopId)
             .collection("lifetime")
@@ -580,9 +672,7 @@ class ShopkeeperViewModel @Inject constructor(
     }
 
     private fun DocumentSnapshot?.toShopkeeperAnalyticsSnapshot(): ShopkeeperAnalyticsSnapshot {
-        if (this == null || !exists()) {
-            return ShopkeeperAnalyticsSnapshot()
-        }
+        if (this == null || !exists()) return ShopkeeperAnalyticsSnapshot()
 
         return ShopkeeperAnalyticsSnapshot(
             verifiedOrders = getLong("verifiedOrders")?.toInt() ?: 0,
@@ -627,17 +717,10 @@ class ShopkeeperViewModel @Inject constructor(
             "${it.name} x${it.quantity}"
         }
 
-        val notification = NotificationCompat.Builder(
-            appContext,
-            channelId
-        )
+        val notification = NotificationCompat.Builder(appContext, channelId)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setContentTitle("New Order Received 🔔")
-            .setContentText(
-                itemSummary.ifBlank {
-                    "You have a new order"
-                }
-            )
+            .setContentText(itemSummary.ifBlank { "You have a new order" })
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setAutoCancel(true)
             .build()
@@ -645,7 +728,6 @@ class ShopkeeperViewModel @Inject constructor(
         try {
             NotificationManagerCompat.from(appContext)
                 .notify(order.orderId.hashCode(), notification)
-
         } catch (e: SecurityException) {
             e.printStackTrace()
         }
@@ -686,9 +768,7 @@ class ShopkeeperViewModel @Inject constructor(
     fun addMenuItem(menuItem: MenuItem) {
         viewModelScope.launch {
             try {
-                val itemId = firestore.collection("menuItems")
-                    .document()
-                    .id
+                val itemId = firestore.collection("menuItems").document().id
 
                 val newItem = menuItem.copy(
                     itemId = itemId,
@@ -699,7 +779,6 @@ class ShopkeeperViewModel @Inject constructor(
                     .document(itemId)
                     .set(newItem)
                     .await()
-
             } catch (e: Exception) {
                 e.printStackTrace()
                 _message.value = e.message ?: "Failed to add menu item."
@@ -716,7 +795,6 @@ class ShopkeeperViewModel @Inject constructor(
                     .document(menuItem.itemId)
                     .set(menuItem)
                     .await()
-
             } catch (e: Exception) {
                 e.printStackTrace()
                 _message.value = e.message ?: "Failed to update menu item."
@@ -733,7 +811,6 @@ class ShopkeeperViewModel @Inject constructor(
                     .document(itemId)
                     .delete()
                     .await()
-
             } catch (e: Exception) {
                 e.printStackTrace()
                 _message.value = e.message ?: "Failed to delete menu item."
@@ -741,22 +818,15 @@ class ShopkeeperViewModel @Inject constructor(
         }
     }
 
-    fun toggleMenuItemAvailability(
-        itemId: String,
-        currentItem: MenuItem
-    ) {
+    fun toggleMenuItemAvailability(itemId: String, currentItem: MenuItem) {
         if (itemId.isBlank()) return
 
         viewModelScope.launch {
             try {
                 firestore.collection("menuItems")
                     .document(itemId)
-                    .update(
-                        "isAvailable",
-                        !currentItem.isAvailable
-                    )
+                    .update("isAvailable", !currentItem.isAvailable)
                     .await()
-
             } catch (e: Exception) {
                 e.printStackTrace()
                 _message.value = e.message ?: "Failed to update item availability."
@@ -766,7 +836,9 @@ class ShopkeeperViewModel @Inject constructor(
 
     override fun onCleared() {
         super.onCleared()
+
         activeOrdersListener?.remove()
+        refundPendingOrdersListener?.remove()
         shopControlsListener?.remove()
         menuItemsListener?.remove()
 

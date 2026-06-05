@@ -1,27 +1,70 @@
 package com.campusbite.app.ui.screens.shopkeeper
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import android.content.Intent
-import android.net.Uri
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.filled.AccessTime
+import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.RestaurantMenu
+import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -31,37 +74,69 @@ import com.campusbite.app.data.model.Order
 import com.campusbite.app.ui.theme.Orange
 import com.campusbite.app.ui.viewmodel.ShopkeeperSalesSummary
 import com.campusbite.app.ui.viewmodel.ShopkeeperViewModel
+import com.campusbite.app.util.OrderStatusValue
+import com.campusbite.app.util.PaymentReceivedType
+import com.campusbite.app.util.PaymentStatusValue
+import com.campusbite.app.util.RefundStatusValue
 import java.text.SimpleDateFormat
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
-import java.util.*
+import java.util.Date
+import java.util.Locale
 
-// ── Semantic status colours ───────────────────────────────────────────────────
 private val StatusPending = Color(0xFFE65100)
 private val StatusPreparing = Color(0xFF1565C0)
 private val StatusReady = Color(0xFF2E7D32)
-
-private fun statusColor(status: String) = when (status) {
-    "pending" -> StatusPending
-    "preparing" -> StatusPreparing
-    "ready" -> StatusReady
-    else -> Color.Gray
-}
-
-private fun statusLabel(status: String) = when (status) {
-    "pending" -> "⏳ Pending"
-    "preparing" -> "👨‍🍳 Preparing"
-    "ready" -> "✅ Ready"
-    else -> status.replaceFirstChar { it.uppercase() }
-}
+private val StatusCancelled = Color(0xFFD32F2F)
 
 private val Orange_10 = Orange.copy(alpha = 0.12f)
+
+private fun statusColor(status: String): Color {
+    return when (status.lowercase()) {
+        OrderStatusValue.PENDING -> StatusPending
+        OrderStatusValue.PREPARING -> StatusPreparing
+        OrderStatusValue.READY -> StatusReady
+        OrderStatusValue.CANCELLED -> StatusCancelled
+        else -> Color.Gray
+    }
+}
+
+private fun statusLabel(status: String): String {
+    return when (status.lowercase()) {
+        OrderStatusValue.PENDING -> "⏳ Pending"
+        OrderStatusValue.PREPARING -> "👨‍🍳 Preparing"
+        OrderStatusValue.READY -> "✅ Ready"
+        OrderStatusValue.PICKED_UP -> "📦 Picked Up"
+        OrderStatusValue.CANCELLED -> "❌ Cancelled"
+        else -> status.replaceFirstChar { it.uppercase() }
+    }
+}
+
+private fun paymentStatusLabel(paymentStatus: String): String {
+    return when (paymentStatus.lowercase()) {
+        "verified", PaymentStatusValue.PAID -> "PAID"
+        PaymentStatusValue.PARTIAL_PAYMENT_RECEIVED -> "PARTIAL PAID"
+        PaymentStatusValue.REFUNDED -> "REFUNDED"
+        PaymentStatusValue.PAYMENT_NOT_RECEIVED -> "NOT RECEIVED"
+        else -> "VERIFY PAYMENT"
+    }
+}
+
+private fun paymentStatusColor(paymentStatus: String): Color {
+    return when (paymentStatus.lowercase()) {
+        "verified", PaymentStatusValue.PAID -> Color(0xFF2E7D32)
+        PaymentStatusValue.PARTIAL_PAYMENT_RECEIVED -> Color(0xFF1565C0)
+        PaymentStatusValue.REFUNDED -> Color(0xFF6A1B9A)
+        PaymentStatusValue.PAYMENT_NOT_RECEIVED -> Color(0xFFD32F2F)
+        else -> Color(0xFFE65100)
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ShopkeeperDashboardScreen(
     onNavigateToProfile: () -> Unit,
-    onNavigateToMenu: () -> Unit = {},  // ← ADD THIS
+    onNavigateToMenu: () -> Unit = {},
     viewModel: ShopkeeperViewModel = hiltViewModel()
 ) {
     val orders by viewModel.orders.collectAsState()
@@ -70,40 +145,95 @@ fun ShopkeeperDashboardScreen(
     val shopOpen by viewModel.shopOpen.collectAsState()
     val closedSlots by viewModel.closedSlots.collectAsState()
 
-    val pendingCount = orders.count { it.status == "pending" }
-    val preparingCount = orders.count { it.status == "preparing" }
-    val readyCount = orders.count { it.status == "ready" }
+    var showRefundPending by remember {
+        mutableStateOf(false)
+    }
+
+    val activeOrders = orders.filter { order ->
+        order.status.lowercase() in listOf(
+            OrderStatusValue.PENDING,
+            OrderStatusValue.PREPARING,
+            OrderStatusValue.READY
+        )
+    }
+
+    val refundPendingOrders = orders.filter { order ->
+        order.status.lowercase() == OrderStatusValue.CANCELLED &&
+                order.refundStatus.lowercase() == RefundStatusValue.REFUND_PENDING
+    }
+
+    val pendingCount = activeOrders.count {
+        it.status.lowercase() == OrderStatusValue.PENDING
+    }
+
+    val preparingCount = activeOrders.count {
+        it.status.lowercase() == OrderStatusValue.PREPARING
+    }
+
+    val readyCount = activeOrders.count {
+        it.status.lowercase() == OrderStatusValue.READY
+    }
 
     Scaffold(
         topBar = {
             TopAppBar(
                 title = {
                     Column {
-                        Text("Shopkeeper Panel", fontWeight = FontWeight.ExtraBold, fontSize = 18.sp)
                         Text(
-                            text = if (shopOpen) "Accepting orders" else "Shop closed",
+                            text = "Shopkeeper Panel",
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 18.sp
+                        )
+
+                        Text(
+                            text = if (shopOpen) {
+                                "Accepting orders"
+                            } else {
+                                "Shop closed"
+                            },
                             fontSize = 11.sp,
-                            color = if (shopOpen) StatusReady else MaterialTheme.colorScheme.error
+                            color = if (shopOpen) {
+                                StatusReady
+                            } else {
+                                MaterialTheme.colorScheme.error
+                            }
                         )
                     }
                 },
                 actions = {
                     Switch(
                         checked = shopOpen,
-                        onCheckedChange = { viewModel.toggleShopOpen(it) },
+                        onCheckedChange = { isOpen ->
+                            viewModel.toggleShopOpen(isOpen)
+                        },
                         colors = SwitchDefaults.colors(
                             checkedThumbColor = Color.White,
                             checkedTrackColor = StatusReady,
-                            uncheckedTrackColor = MaterialTheme.colorScheme.error.copy(alpha = 0.5f)
+                            uncheckedTrackColor = MaterialTheme.colorScheme.error.copy(
+                                alpha = 0.5f
+                            )
                         ),
                         modifier = Modifier.padding(end = 4.dp)
                     )
-                    // ✅ ADD THIS BUTTON
-                    IconButton(onClick = onNavigateToMenu) {
-                        Icon(Icons.Default.RestaurantMenu, contentDescription = "Menu", tint = Orange)
+
+                    IconButton(
+                        onClick = onNavigateToMenu
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.RestaurantMenu,
+                            contentDescription = "Menu",
+                            tint = Orange
+                        )
                     }
-                    IconButton(onClick = onNavigateToProfile) {
-                        Icon(Icons.Default.Person, contentDescription = "Profile", tint = Orange)
+
+                    IconButton(
+                        onClick = onNavigateToProfile
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Person,
+                            contentDescription = "Profile",
+                            tint = Orange
+                        )
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -114,9 +244,13 @@ fun ShopkeeperDashboardScreen(
     ) { padding ->
 
         if (isLoading) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
                 CircularProgressIndicator(color = Orange)
             }
+
             return@Scaffold
         }
 
@@ -132,92 +266,442 @@ fun ShopkeeperDashboardScreen(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    SummaryChip("Pending", pendingCount, StatusPending, Modifier.weight(1f))
-                    SummaryChip("Preparing", preparingCount, StatusPreparing, Modifier.weight(1f))
-                    SummaryChip("Ready", readyCount, StatusReady, Modifier.weight(1f))
+                    SummaryChip(
+                        label = "Pending",
+                        count = pendingCount,
+                        color = StatusPending,
+                        modifier = Modifier.weight(1f)
+                    )
+
+                    SummaryChip(
+                        label = "Preparing",
+                        count = preparingCount,
+                        color = StatusPreparing,
+                        modifier = Modifier.weight(1f)
+                    )
+
+                    SummaryChip(
+                        label = "Ready",
+                        count = readyCount,
+                        color = StatusReady,
+                        modifier = Modifier.weight(1f)
+                    )
                 }
             }
 
             item {
-                SalesSummaryCard(
-                    summary = salesSummary
+                CompactSalesSummaryCard(
+                    summary = salesSummary,
+                    refundPendingCount = refundPendingOrders.size
                 )
             }
 
             item {
                 SlotControlCard(
                     closedSlots = closedSlots,
-                    onToggleSlot = { viewModel.toggleSlot(it) }
+                    onToggleSlot = { slot ->
+                        viewModel.toggleSlot(slot)
+                    }
                 )
             }
 
             item {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.padding(top = 4.dp)
-                ) {
-                    Text("Active Orders", fontWeight = FontWeight.ExtraBold, fontSize = 18.sp)
-                    Spacer(Modifier.width(8.dp))
-                    if (orders.isNotEmpty()) {
-                        Surface(shape = CircleShape, color = Orange_10) {
-                            Text(
-                                text = "${orders.size}",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Orange,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
-                            )
-                        }
-                    }
-                }
+                SectionTitleWithCount(
+                    title = "Active Orders",
+                    count = activeOrders.size,
+                    color = Orange
+                )
             }
 
-            if (orders.isEmpty()) {
+            if (activeOrders.isEmpty()) {
                 item {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 48.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text("🎉", fontSize = 40.sp)
-                            Spacer(Modifier.height(8.dp))
-                            Text(
-                                "All caught up!",
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Text(
-                                "No active orders right now",
-                                fontSize = 13.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
+                    EmptyOrdersCard()
                 }
             }
 
-            items(orders, key = { it.orderId }) { order ->
+            items(
+                items = activeOrders,
+                key = { order -> order.orderId }
+            ) { order ->
                 OrderCard(
                     order = order,
                     onUpdateStatus = { newStatus ->
-                        viewModel.updateOrderStatus(order.orderId, newStatus)
+                        viewModel.updateOrderStatus(
+                            orderId = order.orderId,
+                            newStatus = newStatus
+                        )
                     },
-                    onCancelPaymentNotReceived = {
-                        viewModel.cancelOrderForPaymentNotReceived(order.orderId)
+                    onCancelOrder = { paymentReceivedType, cancelReason ->
+                        viewModel.cancelOrderByShopkeeper(
+                            orderId = order.orderId,
+                            paymentReceivedType = paymentReceivedType,
+                            cancelReason = cancelReason
+                        )
                     }
                 )
+            }
+
+            if (refundPendingOrders.isNotEmpty()) {
+                item {
+                    RefundPendingCollapsedHeader(
+                        count = refundPendingOrders.size,
+                        isExpanded = showRefundPending,
+                        onClick = {
+                            showRefundPending = !showRefundPending
+                        }
+                    )
+                }
+
+                if (showRefundPending) {
+                    items(
+                        items = refundPendingOrders,
+                        key = { order -> "refund_${order.orderId}" }
+                    ) { order ->
+                        CompactRefundPendingOrderCard(
+                            order = order,
+                            onMarkRefundSettled = { refundReferenceId, refundNote ->
+                                viewModel.markRefundSettled(
+                                    orderId = order.orderId,
+                                    refundReferenceId = refundReferenceId,
+                                    refundNote = refundNote
+                                )
+                            }
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+@Composable
+private fun CompactSalesSummaryCard(
+    summary: ShopkeeperSalesSummary,
+    refundPendingCount: Int
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface
+        ),
+        elevation = CardDefaults.cardElevation(
+            defaultElevation = 1.dp
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp)
+        ) {
+            Text(
+                text = "Sales Summary",
+                fontWeight = FontWeight.ExtraBold,
+                fontSize = 16.sp
+            )
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                CompactSalesBox(
+                    title = "Today",
+                    value = "₹${summary.todaySales.toInt()}",
+                    subValue = "${summary.todayOrders} orders",
+                    modifier = Modifier.weight(1f)
+                )
+
+                CompactSalesBox(
+                    title = "Month",
+                    value = "₹${summary.monthSales.toInt()}",
+                    subValue = "${summary.monthOrders} orders",
+                    modifier = Modifier.weight(1f)
+                )
+
+                CompactSalesBox(
+                    title = "Pending",
+                    value = "${summary.pendingPaymentOrders}",
+                    subValue = "verify",
+                    modifier = Modifier.weight(1f)
+                )
+            }
+
+            if (refundPendingCount > 0) {
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = MaterialTheme.colorScheme.error.copy(alpha = 0.10f)
+                ) {
+                    Text(
+                        text = "Refund pending: $refundPendingCount",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(
+                            horizontal = 12.dp,
+                            vertical = 7.dp
+                        )
+                    )
+                }
             }
         }
     }
 }
 
+@Composable
+private fun CompactSalesBox(
+    title: String,
+    value: String,
+    subValue: String,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(12.dp),
+        color = Orange_10,
+        border = BorderStroke(
+            width = 1.dp,
+            color = Orange.copy(alpha = 0.25f)
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(10.dp)
+        ) {
+            Text(
+                text = title,
+                fontSize = 10.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontWeight = FontWeight.SemiBold
+            )
+
+            Text(
+                text = value,
+                fontSize = 16.sp,
+                color = Orange,
+                fontWeight = FontWeight.ExtraBold
+            )
+
+            Text(
+                text = subValue,
+                fontSize = 10.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
 
 @Composable
+private fun RefundPendingCollapsedHeader(
+    count: Int,
+    isExpanded: Boolean,
+    onClick: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable {
+                onClick()
+            },
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.error.copy(alpha = 0.08f)
+        ),
+        border = BorderStroke(
+            width = 1.dp,
+            color = MaterialTheme.colorScheme.error.copy(alpha = 0.25f)
+        )
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column(
+                modifier = Modifier.weight(1f)
+            ) {
+                Text(
+                    text = "Refund Pending Orders",
+                    fontWeight = FontWeight.ExtraBold,
+                    fontSize = 16.sp,
+                    color = MaterialTheme.colorScheme.error
+                )
+
+                Spacer(modifier = Modifier.height(2.dp))
+
+                Text(
+                    text = "$count order${if (count == 1) "" else "s"} need manual refund",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            Spacer(modifier = Modifier.width(12.dp))
+
+            Surface(
+                shape = RoundedCornerShape(50),
+                color = MaterialTheme.colorScheme.error.copy(alpha = 0.12f)
+            ) {
+                Text(
+                    text = if (isExpanded) {
+                        "Hide"
+                    } else {
+                        "View"
+                    },
+                    color = MaterialTheme.colorScheme.error,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 13.sp,
+                    modifier = Modifier.padding(
+                        horizontal = 14.dp,
+                        vertical = 6.dp
+                    )
+                )
+            }
+        }
+    }
+}
+@Composable
+private fun CompactRefundPendingOrderCard(
+    order: Order,
+    onMarkRefundSettled: (refundReferenceId: String, refundNote: String) -> Unit
+) {
+    val context = LocalContext.current
+
+    var showRefundDialog by remember {
+        mutableStateOf(false)
+    }
+
+    Card(
+        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface
+        ),
+        border = BorderStroke(
+            width = 1.dp,
+            color = StatusCancelled.copy(alpha = 0.25f)
+        ),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Top
+            ) {
+                Column(
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(
+                        text = "Order #${order.orderId.takeLast(5).uppercase()}",
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 14.sp
+                    )
+
+                    Text(
+                        text = order.cancelReason.ifBlank {
+                            "Refund pending"
+                        },
+                        fontSize = 12.sp,
+                        color = StatusCancelled,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+
+                Text(
+                    text = "₹${order.totalPrice.toInt()}",
+                    fontWeight = FontWeight.ExtraBold,
+                    color = StatusCancelled,
+                    fontSize = 15.sp
+                )
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Text(
+                text = "${order.studentName.ifBlank { "Student" }} • ${order.studentPhone.ifBlank { "No phone" }}",
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontWeight = FontWeight.SemiBold
+            )
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedButton(
+                    onClick = {
+                        if (order.studentPhone.isNotBlank()) {
+                            val intent = Intent(
+                                Intent.ACTION_DIAL,
+                                Uri.parse("tel:${order.studentPhone}")
+                            )
+
+                            context.startActivity(intent)
+                        }
+                    },
+                    enabled = order.studentPhone.isNotBlank(),
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Call,
+                        contentDescription = null,
+                        modifier = Modifier.size(15.dp)
+                    )
+
+                    Spacer(modifier = Modifier.width(6.dp))
+
+                    Text(
+                        text = "Call",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                Button(
+                    onClick = {
+                        showRefundDialog = true
+                    },
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = StatusReady
+                    )
+                ) {
+                    Text(
+                        text = "Mark Refunded",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
+    }
+
+    if (showRefundDialog) {
+        MarkRefundSettledDialog(
+            onDismiss = {
+                showRefundDialog = false
+            },
+            onConfirm = { refundReferenceId, refundNote ->
+                showRefundDialog = false
+
+                onMarkRefundSettled(
+                    refundReferenceId,
+                    refundNote
+                )
+            }
+        )
+    }
+}
+@Composable
 private fun SalesSummaryCard(
-    summary: ShopkeeperSalesSummary
+    summary: ShopkeeperSalesSummary,
+    refundPendingCount: Int
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -225,7 +709,9 @@ private fun SalesSummaryCard(
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surface
         ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+        elevation = CardDefaults.cardElevation(
+            defaultElevation = 1.dp
+        )
     ) {
         Column(
             modifier = Modifier.padding(16.dp)
@@ -286,23 +772,37 @@ private fun SalesSummaryCard(
                 )
             }
 
-            if (summary.cancelledOrders > 0) {
+            if (summary.cancelledOrders > 0 || refundPendingCount > 0) {
                 Spacer(modifier = Modifier.height(10.dp))
 
                 Surface(
                     shape = RoundedCornerShape(10.dp),
                     color = MaterialTheme.colorScheme.error.copy(alpha = 0.10f)
                 ) {
-                    Text(
-                        text = "Cancelled/payment not received: ${summary.cancelledOrders}",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.error,
+                    Column(
                         modifier = Modifier.padding(
                             horizontal = 12.dp,
                             vertical = 8.dp
                         )
-                    )
+                    ) {
+                        if (summary.cancelledOrders > 0) {
+                            Text(
+                                text = "Cancelled/payment not received: ${summary.cancelledOrders}",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                        }
+
+                        if (refundPendingCount > 0) {
+                            Text(
+                                text = "Refund pending: $refundPendingCount",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -320,7 +820,7 @@ private fun SalesMetricCard(
         modifier = modifier,
         shape = RoundedCornerShape(14.dp),
         color = Orange_10,
-        border = androidx.compose.foundation.BorderStroke(
+        border = BorderStroke(
             width = 1.dp,
             color = Orange.copy(alpha = 0.25f)
         )
@@ -353,35 +853,115 @@ private fun SalesMetricCard(
     }
 }
 
+@Composable
+private fun SectionTitleWithCount(
+    title: String,
+    count: Int,
+    color: Color
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.padding(top = 4.dp)
+    ) {
+        Text(
+            text = title,
+            fontWeight = FontWeight.ExtraBold,
+            fontSize = 18.sp
+        )
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Order Card
-// ─────────────────────────────────────────────────────────────────────────────
+        Spacer(modifier = Modifier.width(8.dp))
+
+        if (count > 0) {
+            Surface(
+                shape = CircleShape,
+                color = color.copy(alpha = 0.12f)
+            ) {
+                Text(
+                    text = "$count",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = color,
+                    modifier = Modifier.padding(
+                        horizontal = 8.dp,
+                        vertical = 2.dp
+                    )
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun EmptyOrdersCard() {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 48.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                text = "🎉",
+                fontSize = 40.sp
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Text(
+                text = "All caught up!",
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            Text(
+                text = "No active orders right now",
+                fontSize = 13.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
 @Composable
 private fun OrderCard(
     order: Order,
     onUpdateStatus: (String) -> Unit,
-    onCancelPaymentNotReceived: () -> Unit
+    onCancelOrder: (paymentReceivedType: String, cancelReason: String) -> Unit
 ) {
     val statusCol = statusColor(order.status)
-    val timeStr = remember(order.createdAt) {
-        if (order.createdAt > 0)
-            SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date(order.createdAt))
-        else ""
-    }
     val context = LocalContext.current
 
-    var showCancelDialog by remember { mutableStateOf(false) }
+    var showCancelDialog by remember {
+        mutableStateOf(false)
+    }
 
-    val canCancelForPaymentNotReceived =
-        order.status.lowercase() == "pending" &&
-                order.paymentStatus.lowercase() == "pending_verification"
+    val timeStr = remember(order.createdAt) {
+        if (order.createdAt > 0) {
+            SimpleDateFormat(
+                "hh:mm a",
+                Locale.getDefault()
+            ).format(Date(order.createdAt))
+        } else {
+            ""
+        }
+    }
 
+    val canCancelOrder = order.status.lowercase() in listOf(
+        OrderStatusValue.PENDING,
+        OrderStatusValue.PREPARING
+    )
 
     Card(
         shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface
+        ),
+        elevation = CardDefaults.cardElevation(
+            defaultElevation = 2.dp
+        ),
         modifier = Modifier.fillMaxWidth()
     ) {
         Column {
@@ -392,7 +972,9 @@ private fun OrderCard(
                     .background(statusCol)
             )
 
-            Column(modifier = Modifier.padding(14.dp)) {
+            Column(
+                modifier = Modifier.padding(14.dp)
+            ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -400,10 +982,11 @@ private fun OrderCard(
                 ) {
                     Column {
                         Text(
-                            "Order #${order.orderId.takeLast(5).uppercase()}",
+                            text = "Order #${order.orderId.takeLast(5).uppercase()}",
                             fontWeight = FontWeight.ExtraBold,
                             fontSize = 15.sp
                         )
+
                         if (timeStr.isNotBlank()) {
                             Text(
                                 text = "Placed at $timeStr",
@@ -412,10 +995,13 @@ private fun OrderCard(
                             )
                         }
                     }
-                    StatusBadge(status = order.status)
+
+                    StatusBadge(
+                        status = order.status
+                    )
                 }
 
-                Spacer(Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(12.dp))
 
                 order.items.forEach { item ->
                     Row(
@@ -433,28 +1019,42 @@ private fun OrderCard(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(6.dp))
                                     .background(Orange_10)
-                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                                    .padding(
+                                        horizontal = 6.dp,
+                                        vertical = 2.dp
+                                    )
                             ) {
                                 Text(
-                                    "×${item.quantity}",
+                                    text = "×${item.quantity}",
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = Orange
                                 )
                             }
-                            Spacer(Modifier.width(8.dp))
+
+                            Spacer(modifier = Modifier.width(8.dp))
+
                             Column {
                                 Text(
-                                    item.name,
+                                    text = item.name,
                                     fontSize = 13.sp,
                                     fontWeight = FontWeight.SemiBold,
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
+
                                 if (item.cookingNote.isNotBlank()) {
-                                    Spacer(Modifier.height(2.dp))
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Text("📝", fontSize = 10.sp)
-                                        Spacer(Modifier.width(3.dp))
+                                    Spacer(modifier = Modifier.height(2.dp))
+
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = "📝",
+                                            fontSize = 10.sp
+                                        )
+
+                                        Spacer(modifier = Modifier.width(3.dp))
+
                                         Text(
                                             text = item.cookingNote,
                                             fontSize = 11.sp,
@@ -467,116 +1067,31 @@ private fun OrderCard(
                                 }
                             }
                         }
+
                         Text(
-                            "₹${(item.price * item.quantity).toInt()}",
+                            text = "₹${(item.price * item.quantity).toInt()}",
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onSurface
                         )
                     }
                 }
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(14.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = Orange_10
-                    )
-                ) {
-                    Column(
-                        modifier = Modifier.padding(12.dp)
-                    ) {
 
-                        Text(
-                            text = "Payment Verification",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 14.sp,
-                            color = Orange
-                        )
+                Spacer(modifier = Modifier.height(12.dp))
 
-                        Spacer(modifier = Modifier.height(10.dp))
+                PaymentVerificationCard(
+                    order = order,
+                    onCallStudent = {
+                        if (order.studentPhone.isNotBlank()) {
+                            val intent = Intent(
+                                Intent.ACTION_DIAL,
+                                Uri.parse("tel:${order.studentPhone}")
+                            )
 
-                        InfoRow(
-                            label = "UPI Payer",
-                            value = order.upiPayerName.ifBlank {
-                                "Not provided"
-                            }
-                        )
-
-                        Spacer(modifier = Modifier.height(6.dp))
-
-                        InfoRow(
-                            label = "Student",
-                            value = order.studentName
-                        )
-
-                        Spacer(modifier = Modifier.height(6.dp))
-
-                        InfoRow(
-                            label = "Phone",
-                            value = order.studentPhone
-                        )
-
-                        Spacer(modifier = Modifier.height(10.dp))
-
-                        Row(
-                            horizontalArrangement =
-                                Arrangement.spacedBy(10.dp)
-                        ) {
-
-                            OutlinedButton(
-                                onClick = {
-                                    if (order.studentPhone.isNotBlank()) {
-                                        val intent = Intent(
-                                            Intent.ACTION_DIAL,
-                                            Uri.parse("tel:${order.studentPhone}")
-                                        )
-                                        context.startActivity(intent)
-                                    }
-                                },
-                                modifier = Modifier.weight(1f),
-                                enabled = order.studentPhone.isNotBlank()
-                            ) {
-                                Icon(
-                                    Icons.Default.Call,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(16.dp)
-                                )
-
-                                Spacer(modifier = Modifier.width(6.dp))
-
-                                Text("Call")
-                            }
-
-                            Surface(
-                                shape = RoundedCornerShape(10.dp),
-                                color = when (order.paymentStatus) {
-                                    "verified" ->
-                                        Color(0xFF2E7D32)
-
-                                    else ->
-                                        Color(0xFFE65100)
-                                }
-                            ) {
-                                Text(
-                                    text = when (order.paymentStatus) {
-                                        "verified" ->
-                                            "PAID"
-
-                                        else ->
-                                            "VERIFY PAYMENT"
-                                    },
-                                    color = Color.White,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 11.sp,
-                                    modifier = Modifier.padding(
-                                        horizontal = 10.dp,
-                                        vertical = 6.dp
-                                    )
-                                )
-                            }
+                            context.startActivity(intent)
                         }
                     }
-                }
+                )
 
                 HorizontalDivider(
                     modifier = Modifier.padding(vertical = 10.dp),
@@ -589,143 +1104,466 @@ private fun OrderCard(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         Icon(
-                            Icons.Default.AccessTime,
+                            imageVector = Icons.Default.AccessTime,
                             contentDescription = null,
                             tint = Orange,
                             modifier = Modifier.size(14.dp)
                         )
-                        Spacer(Modifier.width(4.dp))
+
+                        Spacer(modifier = Modifier.width(4.dp))
+
                         Text(
-                            "Pickup: ",
+                            text = "Pickup: ",
                             fontSize = 12.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+
                         Text(
-                            order.pickupSlot,
+                            text = order.pickupSlot,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
                             color = Orange
                         )
                     }
+
                     Text(
-                        "₹${order.totalPrice.toInt()}",
+                        text = "₹${order.totalPrice.toInt()}",
                         fontSize = 15.sp,
                         fontWeight = FontWeight.ExtraBold,
                         color = MaterialTheme.colorScheme.onSurface
                     )
                 }
 
-                Spacer(Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(12.dp))
 
-                when (order.status) {
-                    "pending" -> {
-
-                        if (order.paymentStatus != "verified") {
-
-                            ActionButton(
-                                label = "Payment Received & Accept",
-                                color = StatusPending,
-                                onClick = {
-                                    onUpdateStatus("preparing")
-                                }
-                            )
-
-                        } else {
-
-                            ActionButton(
-                                label = "Start Preparing",
-                                color = StatusPending,
-                                onClick = {
-                                    onUpdateStatus("preparing")
-                                }
-                            )
-                        }
-
-                        if (canCancelForPaymentNotReceived) {
-                            Spacer(modifier = Modifier.height(8.dp))
-
-                            OutlinedButton(
-                                onClick = {
-                                    showCancelDialog = true
-                                },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(44.dp),
-                                shape = RoundedCornerShape(12.dp),
-                                border = androidx.compose.foundation.BorderStroke(
-                                    1.dp,
-                                    MaterialTheme.colorScheme.error
-                                )
-                            ) {
-                                Text(
-                                    text = "Cancel - Payment Not Received",
-                                    color = MaterialTheme.colorScheme.error,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 13.sp
-                                )
+                when (order.status.lowercase()) {
+                    OrderStatusValue.PENDING -> {
+                        ActionButton(
+                            label = "Payment Received & Accept",
+                            color = StatusPending,
+                            onClick = {
+                                onUpdateStatus(OrderStatusValue.PREPARING)
                             }
-                        }
+                        )
                     }
-                    "preparing" -> ActionButton(
-                        label = "Mark as Ready for Pickup",
-                        color = StatusPreparing,
-                        onClick = { onUpdateStatus("ready") }
-                    )
-                    "ready" -> ActionButton(
-                        label = "Mark as Picked Up ✓",
-                        color = StatusReady,
-                        onClick = { onUpdateStatus("picked_up") }
-                    )
+
+                    OrderStatusValue.PREPARING -> {
+                        ActionButton(
+                            label = "Mark as Ready for Pickup",
+                            color = StatusPreparing,
+                            onClick = {
+                                onUpdateStatus(OrderStatusValue.READY)
+                            }
+                        )
+                    }
+
+                    OrderStatusValue.READY -> {
+                        ActionButton(
+                            label = "Mark as Picked Up ✓",
+                            color = StatusReady,
+                            onClick = {
+                                onUpdateStatus(OrderStatusValue.PICKED_UP)
+                            }
+                        )
+                    }
+                }
+
+                if (canCancelOrder) {
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    OutlinedButton(
+                        onClick = {
+                            showCancelDialog = true
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(44.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(
+                            width = 1.dp,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    ) {
+                        Text(
+                            text = "Cancel Order",
+                            color = MaterialTheme.colorScheme.error,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp
+                        )
+                    }
                 }
             }
         }
     }
 
-
     if (showCancelDialog) {
-        AlertDialog(
-            onDismissRequest = {
+        CancelOrderDialog(
+            onDismiss = {
                 showCancelDialog = false
             },
-            title = {
-                Text("Cancel Order?")
-            },
-            text = {
-                Text(
-                    text = "Cancel this order only if payment was not received. This will mark the order as cancelled."
+            onConfirm = { paymentReceivedType, cancelReason ->
+                showCancelDialog = false
+
+                onCancelOrder(
+                    paymentReceivedType,
+                    cancelReason
                 )
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        showCancelDialog = false
-                        onCancelPaymentNotReceived()
-                    }
-                ) {
-                    Text(
-                        text = "Cancel Order",
-                        color = MaterialTheme.colorScheme.error
-                    )
-                }
-            },
-            dismissButton = {
-                TextButton(
-                    onClick = {
-                        showCancelDialog = false
-                    }
-                ) {
-                    Text("Go Back")
-                }
             }
         )
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Slot Control Card
-// ─────────────────────────────────────────────────────────────────────────────
+@Composable
+private fun PaymentVerificationCard(
+    order: Order,
+    onCallStudent: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = Orange_10
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp)
+        ) {
+            Text(
+                text = "Payment Verification",
+                fontWeight = FontWeight.Bold,
+                fontSize = 14.sp,
+                color = Orange
+            )
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            InfoRow(
+                label = "UPI Payer",
+                value = order.upiPayerName.ifBlank {
+                    "Not provided"
+                }
+            )
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            InfoRow(
+                label = "Student",
+                value = order.studentName
+            )
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            InfoRow(
+                label = "Phone",
+                value = order.studentPhone
+            )
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                OutlinedButton(
+                    onClick = onCallStudent,
+                    modifier = Modifier.weight(1f),
+                    enabled = order.studentPhone.isNotBlank()
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Call,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
+                    )
+
+                    Spacer(modifier = Modifier.width(6.dp))
+
+                    Text("Call")
+                }
+
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = paymentStatusColor(order.paymentStatus)
+                ) {
+                    Text(
+                        text = paymentStatusLabel(order.paymentStatus),
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 11.sp,
+                        modifier = Modifier.padding(
+                            horizontal = 10.dp,
+                            vertical = 6.dp
+                        )
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CancelOrderDialog(
+    onDismiss: () -> Unit,
+    onConfirm: (paymentReceivedType: String, cancelReason: String) -> Unit
+) {
+    var selectedPaymentType by remember {
+        mutableStateOf(PaymentReceivedType.NONE)
+    }
+
+    var selectedReason by remember {
+        mutableStateOf("")
+    }
+
+    var localError by remember {
+        mutableStateOf<String?>(null)
+    }
+
+    val paymentOptions = listOf(
+        PaymentReceivedType.NONE to "No payment received",
+        PaymentReceivedType.PARTIAL to "Partial payment received",
+        PaymentReceivedType.FULL to "Full payment received"
+    )
+
+    val cancellationReasons = listOf(
+        "Item/menu unavailable",
+        "Shop emergency",
+        "Gas/electricity issue",
+        "Shop closing unexpectedly",
+        "Other operational issue"
+    )
+
+    val paymentReceived = selectedPaymentType in listOf(
+        PaymentReceivedType.PARTIAL,
+        PaymentReceivedType.FULL
+    )
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text("Cancel Order")
+        },
+        text = {
+            Column {
+                Text(
+                    text = "Was payment received from the user?",
+                    fontWeight = FontWeight.SemiBold
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                paymentOptions.forEach { (type, label) ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                selectedPaymentType = type
+                                selectedReason = ""
+                                localError = null
+                            }
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(
+                            selected = selectedPaymentType == type,
+                            onClick = {
+                                selectedPaymentType = type
+                                selectedReason = ""
+                                localError = null
+                            }
+                        )
+
+                        Text(label)
+                    }
+                }
+
+                if (paymentReceived) {
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Text(
+                        text = "Select cancellation reason",
+                        fontWeight = FontWeight.SemiBold
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    cancellationReasons.forEach { reason ->
+                        FilterChip(
+                            selected = selectedReason == reason,
+                            onClick = {
+                                selectedReason = reason
+                                localError = null
+                            },
+                            label = {
+                                Text(reason)
+                            },
+                            modifier = Modifier.padding(
+                                end = 6.dp,
+                                bottom = 6.dp
+                            )
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    Text(
+                        text = "Because payment was received, this order will appear in Refund Pending until you settle the refund.",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                } else {
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Text(
+                        text = "This will cancel the order as payment not received.",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                localError?.let {
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Text(
+                        text = it,
+                        color = MaterialTheme.colorScheme.error,
+                        fontSize = 12.sp
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    if (paymentReceived && selectedReason.isBlank()) {
+                        localError = "Please select a cancellation reason"
+                        return@TextButton
+                    }
+
+                    onConfirm(
+                        selectedPaymentType,
+                        if (paymentReceived) {
+                            selectedReason
+                        } else {
+                            "Payment not received"
+                        }
+                    )
+                }
+            ) {
+                Text(
+                    text = "Cancel Order",
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
+        },
+        dismissButton = {
+            TextButton(
+                onClick = onDismiss
+            ) {
+                Text("Go Back")
+            }
+        }
+    )
+}
+
+
+@Composable
+private fun MarkRefundSettledDialog(
+    onDismiss: () -> Unit,
+    onConfirm: (refundReferenceId: String, refundNote: String) -> Unit
+) {
+    var refundReferenceId by remember {
+        mutableStateOf("")
+    }
+
+    var refundNote by remember {
+        mutableStateOf("")
+    }
+
+    var localError by remember {
+        mutableStateOf<String?>(null)
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text("Mark Refund Settled")
+        },
+        text = {
+            Column {
+                Text(
+                    text = "Enter the refund transaction/reference ID after sending money back to the user.",
+                    fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                OutlinedTextField(
+                    value = refundReferenceId,
+                    onValueChange = {
+                        refundReferenceId = it
+                        localError = null
+                    },
+                    label = {
+                        Text("Refund Reference ID")
+                    },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                OutlinedTextField(
+                    value = refundNote,
+                    onValueChange = {
+                        refundNote = it
+                    },
+                    label = {
+                        Text("Refund Note Optional")
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                localError?.let {
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Text(
+                        text = it,
+                        color = MaterialTheme.colorScheme.error,
+                        fontSize = 12.sp
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    if (refundReferenceId.trim().isBlank()) {
+                        localError = "Refund reference ID is required"
+                        return@TextButton
+                    }
+
+                    onConfirm(
+                        refundReferenceId.trim(),
+                        refundNote.trim()
+                    )
+                }
+            ) {
+                Text("Mark Settled")
+            }
+        },
+        dismissButton = {
+            TextButton(
+                onClick = onDismiss
+            ) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
 @Composable
 private fun SlotControlCard(
     closedSlots: List<String>,
@@ -734,70 +1572,132 @@ private fun SlotControlCard(
     val dynamicSlots = remember {
         val now = LocalTime.now()
         val minutesToAdd = 15 - (now.minute % 15)
-        val startTime = now.plusMinutes(minutesToAdd.toLong()).withSecond(0).withNano(0)
+        val startTime = now
+            .plusMinutes(minutesToAdd.toLong())
+            .withSecond(0)
+            .withNano(0)
+
         val formatter = DateTimeFormatter.ofPattern("hh:mm a")
-        List(6) { i -> startTime.plusMinutes(i * 15L).format(formatter).uppercase() }
+
+        List(6) { i ->
+            startTime
+                .plusMinutes(i * 15L)
+                .format(formatter)
+                .uppercase()
+        }
     }
 
     Card(
         shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface
+        ),
+        elevation = CardDefaults.cardElevation(
+            defaultElevation = 1.dp
+        )
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(
+            modifier = Modifier.padding(16.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 Icon(
-                    Icons.Default.Schedule,
+                    imageVector = Icons.Default.Schedule,
                     contentDescription = null,
                     tint = Orange,
                     modifier = Modifier.size(18.dp)
                 )
-                Spacer(Modifier.width(8.dp))
+
+                Spacer(modifier = Modifier.width(8.dp))
+
                 Column {
-                    Text("Slot Controls", fontWeight = FontWeight.Bold, fontSize = 15.sp)
                     Text(
-                        "Close slots you can't fulfil",
+                        text = "Slot Controls",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 15.sp
+                    )
+
+                    Text(
+                        text = "Close slots you can't fulfil",
                         fontSize = 11.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
 
-            Spacer(Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
                 items(dynamicSlots) { slot ->
                     val isClosed = closedSlots.contains(slot)
+
                     val bgColor by animateColorAsState(
-                        targetValue = if (isClosed) MaterialTheme.colorScheme.error.copy(alpha = 0.12f) else Orange_10,
-                        animationSpec = tween(200), label = "slot_bg"
+                        targetValue = if (isClosed) {
+                            MaterialTheme.colorScheme.error.copy(alpha = 0.12f)
+                        } else {
+                            Orange_10
+                        },
+                        animationSpec = tween(200),
+                        label = "slot_bg"
                     )
+
                     val textColor by animateColorAsState(
-                        targetValue = if (isClosed) MaterialTheme.colorScheme.error else Orange,
-                        animationSpec = tween(200), label = "slot_text"
+                        targetValue = if (isClosed) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            Orange
+                        },
+                        animationSpec = tween(200),
+                        label = "slot_text"
                     )
+
                     val borderColor by animateColorAsState(
-                        targetValue = if (isClosed) MaterialTheme.colorScheme.error.copy(alpha = 0.5f) else Orange.copy(alpha = 0.4f),
-                        animationSpec = tween(200), label = "slot_border"
+                        targetValue = if (isClosed) {
+                            MaterialTheme.colorScheme.error.copy(alpha = 0.5f)
+                        } else {
+                            Orange.copy(alpha = 0.4f)
+                        },
+                        animationSpec = tween(200),
+                        label = "slot_border"
                     )
+
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(10.dp))
                             .background(bgColor)
-                            .border(1.dp, borderColor, RoundedCornerShape(10.dp))
-                            .clickable { onToggleSlot(slot) }
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                            .border(
+                                width = 1.dp,
+                                color = borderColor,
+                                shape = RoundedCornerShape(10.dp)
+                            )
+                            .clickable {
+                                onToggleSlot(slot)
+                            }
+                            .padding(
+                                horizontal = 12.dp,
+                                vertical = 8.dp
+                            ),
                         contentAlignment = Alignment.Center
                     ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
                             Text(
-                                slot,
+                                text = slot,
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = textColor
                             )
+
                             Text(
-                                if (isClosed) "CLOSED" else "OPEN",
+                                text = if (isClosed) {
+                                    "CLOSED"
+                                } else {
+                                    "OPEN"
+                                },
                                 fontSize = 9.sp,
                                 fontWeight = FontWeight.ExtraBold,
                                 color = textColor.copy(alpha = 0.7f),
@@ -811,29 +1711,35 @@ private fun SlotControlCard(
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Reusable composables
-// ─────────────────────────────────────────────────────────────────────────────
 @Composable
-private fun SummaryChip(label: String, count: Int, color: Color, modifier: Modifier = Modifier) {
+private fun SummaryChip(
+    label: String,
+    count: Int,
+    color: Color,
+    modifier: Modifier = Modifier
+) {
     Surface(
         modifier = modifier,
         shape = RoundedCornerShape(12.dp),
         color = color.copy(alpha = 0.10f),
-        border = androidx.compose.foundation.BorderStroke(1.dp, color.copy(alpha = 0.3f))
+        border = BorderStroke(
+            width = 1.dp,
+            color = color.copy(alpha = 0.3f)
+        )
     ) {
         Column(
             modifier = Modifier.padding(vertical = 10.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text(
-                "$count",
+                text = "$count",
                 fontSize = 22.sp,
                 fontWeight = FontWeight.ExtraBold,
                 color = color
             )
+
             Text(
-                label,
+                text = label,
                 fontSize = 11.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = color.copy(alpha = 0.8f)
@@ -843,22 +1749,32 @@ private fun SummaryChip(label: String, count: Int, color: Color, modifier: Modif
 }
 
 @Composable
-private fun StatusBadge(status: String) {
+private fun StatusBadge(
+    status: String
+) {
     val color = statusColor(status)
+
     Surface(
         shape = RoundedCornerShape(6.dp),
         color = color.copy(alpha = 0.12f),
-        border = androidx.compose.foundation.BorderStroke(1.dp, color.copy(alpha = 0.3f))
+        border = BorderStroke(
+            width = 1.dp,
+            color = color.copy(alpha = 0.3f)
+        )
     ) {
         Text(
             text = statusLabel(status),
             fontSize = 11.sp,
             fontWeight = FontWeight.ExtraBold,
             color = color,
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+            modifier = Modifier.padding(
+                horizontal = 8.dp,
+                vertical = 4.dp
+            )
         )
     }
 }
+
 @Composable
 private fun InfoRow(
     label: String,
@@ -866,36 +1782,46 @@ private fun InfoRow(
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement =
-            Arrangement.SpaceBetween
+        horizontalArrangement = Arrangement.SpaceBetween
     ) {
-
         Text(
             text = label,
             fontSize = 12.sp,
-            color = MaterialTheme.colorScheme
-                .onSurfaceVariant
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
 
         Text(
             text = value,
             fontSize = 12.sp,
             fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme
-                .onSurface
+            color = MaterialTheme.colorScheme.onSurface
         )
     }
 }
 
 @Composable
-private fun ActionButton(label: String, color: Color, onClick: () -> Unit) {
+private fun ActionButton(
+    label: String,
+    color: Color,
+    onClick: () -> Unit
+) {
     Button(
         onClick = onClick,
-        modifier = Modifier.fillMaxWidth().height(44.dp),
-        colors = ButtonDefaults.buttonColors(containerColor = color),
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(44.dp),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = color
+        ),
         shape = RoundedCornerShape(12.dp),
-        elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp)
+        elevation = ButtonDefaults.buttonElevation(
+            defaultElevation = 0.dp
+        )
     ) {
-        Text(label, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+        Text(
+            text = label,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Bold
+        )
     }
 }

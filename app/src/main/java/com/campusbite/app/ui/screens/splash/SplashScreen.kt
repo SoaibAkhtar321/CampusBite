@@ -27,43 +27,49 @@ fun SplashScreen(
     onNavigateToAdmin: () -> Unit,
     onNavigateToLogin: () -> Unit,
     onNavigateToPending: () -> Unit,
+    onNavigateToCompleteProfile: () -> Unit,
     viewModel: AuthViewModel = hiltViewModel()
 ) {
     LaunchedEffect(Unit) {
         delay(700)
 
-        if (!viewModel.isLoggedIn) {
-            onNavigateToLogin()
-            return@LaunchedEffect
-        }
-
-        val isValidCompletedSession = viewModel.validateSessionForAppStart()
-
-        if (!isValidCompletedSession) {
-            onNavigateToLogin()
-            return@LaunchedEffect
-        }
-
-        val role = viewModel.getUserRole()
-
-        when (role) {
-            "admin" -> {
-                onNavigateToAdmin()
+        try {
+            if (!viewModel.isLoggedIn) {
+                onNavigateToLogin()
+                return@LaunchedEffect
             }
 
-            "shopkeeper" -> {
-                val isApproved = viewModel.isShopkeeperApproved()
+            val hasCompletedProfile = viewModel.hasCompletedProfile()
 
-                if (isApproved) {
-                    onNavigateToShopkeeper()
-                } else {
-                    onNavigateToPending()
+            if (!hasCompletedProfile) {
+                onNavigateToCompleteProfile()
+                return@LaunchedEffect
+            }
+
+            val role = viewModel.getUserRole()
+
+            when (role) {
+                "admin" -> {
+                    onNavigateToAdmin()
+                }
+
+                "shopkeeper" -> {
+                    val isApproved = viewModel.isShopkeeperApproved()
+
+                    if (isApproved) {
+                        onNavigateToShopkeeper()
+                    } else {
+                        onNavigateToPending()
+                    }
+                }
+
+                else -> {
+                    onNavigateToStudent()
                 }
             }
-
-            else -> {
-                onNavigateToStudent()
-            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            onNavigateToLogin()
         }
     }
 

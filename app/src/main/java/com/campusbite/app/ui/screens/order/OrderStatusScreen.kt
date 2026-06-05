@@ -55,6 +55,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -75,6 +76,9 @@ import com.campusbite.app.ui.theme.OrangeDark
 import com.campusbite.app.ui.theme.OrangeLight
 import com.campusbite.app.ui.theme.TextSecondary
 import com.campusbite.app.ui.viewmodel.OrderViewModel
+import com.campusbite.app.util.OrderStatusValue
+import com.campusbite.app.util.PaymentStatusValue
+import com.campusbite.app.util.RefundStatusValue
 
 private enum class OrderStep(
     val label: String,
@@ -113,13 +117,13 @@ private enum class StepState {
 }
 
 private fun statusToStepIndex(status: String?): Int {
-    return when (status) {
-        "pending" -> 0
-        "accepted" -> 1
-        "preparing" -> 2
-        "ready" -> 3
-        "picked_up" -> 3
-        "cancelled" -> 0
+    return when (status?.lowercase()) {
+        OrderStatusValue.PENDING -> 0
+        OrderStatusValue.ACCEPTED -> 1
+        OrderStatusValue.PREPARING -> 2
+        OrderStatusValue.READY -> 3
+        OrderStatusValue.PICKED_UP -> 3
+        OrderStatusValue.CANCELLED -> 0
         else -> 0
     }
 }
@@ -138,12 +142,19 @@ fun OrderStatusScreen(
         viewModel.listenToOrderById(orderId)
     }
 
+    DisposableEffect(Unit) {
+        onDispose {
+            // Do not clear currentOrder here.
+            // Student profile and notifications depend on the active listener/userOrders state.
+        }
+    }
+
     val currentStep = statusToStepIndex(order?.status)
 
-    val isReady = order?.status == "ready" ||
-            order?.status == "picked_up"
+    val isReady = order?.status?.lowercase() == OrderStatusValue.READY ||
+            order?.status?.lowercase() == OrderStatusValue.PICKED_UP
 
-    val isCancelled = order?.status == "cancelled"
+    val isCancelled = order?.status?.lowercase() == OrderStatusValue.CANCELLED
 
     Scaffold(
         topBar = {
@@ -192,12 +203,16 @@ fun OrderStatusScreen(
             }
 
             AnimatedVisibility(
-                visible = isCancelled,
+                visible = isCancelled && order != null,
                 enter = fadeIn() + scaleIn(
                     initialScale = 0.9f
                 )
             ) {
-                CancelledOrderBanner()
+                order?.let { currentOrder ->
+                    CancelledOrderBanner(
+                        order = currentOrder
+                    )
+                }
             }
 
             if (isReady || isCancelled) {
@@ -235,7 +250,9 @@ fun OrderStatusScreen(
                 }
 
                 if (isCancelled) {
-                    PaymentHelpCard()
+                    CancelledPaymentInfoCard(
+                        order = currentOrder
+                    )
 
                     Spacer(modifier = Modifier.height(16.dp))
                 }
@@ -363,14 +380,56 @@ private fun ReadyBanner() {
 }
 
 @Composable
-private fun CancelledOrderBanner() {
+private fun CancelledOrderBanner(
+    order: Order
+) {
+    val refundStatus = order.refundStatus.lowercase()
+    val paymentStatus = order.paymentStatus.lowercase()
+
+    val isRefundPending = refundStatus == RefundStatusValue.REFUND_PENDING
+    val isRefunded = refundStatus == RefundStatusValue.REFUNDED
+
+    val title = when {
+        isRefunded -> "Order Cancelled - Refund Settled"
+        isRefundPending -> "Order Cancelled - Refund Pending"
+        else -> "Order Cancelled"
+    }
+
+    val mainMessage = when {
+        isRefunded -> "The shopkeeper has marked your refund as settled."
+        isRefundPending -> "The shopkeeper has received your payment and will settle the refund manually."
+        paymentStatus == PaymentStatusValue.PAYMENT_NOT_RECEIVED ->
+            "The shopkeeper cancelled this order because payment was not received."
+        else -> "This order has been cancelled by the shopkeeper."
+    }
+
+    val helperMessage = when {
+        isRefunded && order.refundReferenceId.isNotBlank() ->
+            "Refund Reference: ${order.refundReferenceId}"
+
+        isRefunded ->
+            "Please contact the shopkeeper if the refund is not visible in your account."
+
+        isRefundPending ->
+            "You may call the shopkeeper if needed. Keep your payment proof ready."
+
+        else ->
+            "If you already paid, call the shopkeeper and share your payment proof."
+    }
+
+    val bannerColor = if (isRefunded) {
+        Color(0xFF2E7D32)
+    } else {
+        Color(0xFFD32F2F)
+    }
+
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
-        color = Color(0xFFD32F2F).copy(alpha = 0.10f),
+        color = bannerColor.copy(alpha = 0.10f),
         border = BorderStroke(
             width = 1.dp,
-            color = Color(0xFFD32F2F).copy(alpha = 0.35f)
+            color = bannerColor.copy(alpha = 0.35f)
         )
     ) {
         Row(
@@ -378,7 +437,11 @@ private fun CancelledOrderBanner() {
             verticalAlignment = Alignment.Top
         ) {
             Text(
-                text = "⚠️",
+                text = if (isRefunded) {
+                    "✅"
+                } else {
+                    "⚠️"
+                },
                 fontSize = 26.sp
             )
 
@@ -386,24 +449,35 @@ private fun CancelledOrderBanner() {
 
             Column {
                 Text(
-                    text = "Order Cancelled",
+                    text = title,
                     fontWeight = FontWeight.ExtraBold,
                     fontSize = 17.sp,
-                    color = Color(0xFFD32F2F)
+                    color = bannerColor
                 )
 
                 Spacer(modifier = Modifier.height(4.dp))
 
+                if (order.cancelReason.isNotBlank()) {
+                    Text(
+                        text = "Reason: ${order.cancelReason}",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = bannerColor.copy(alpha = 0.9f)
+                    )
+
+                    Spacer(modifier = Modifier.height(4.dp))
+                }
+
                 Text(
-                    text = "The shopkeeper cancelled this order because payment was not received.",
+                    text = mainMessage,
                     fontSize = 13.sp,
-                    color = Color(0xFFD32F2F).copy(alpha = 0.88f)
+                    color = bannerColor.copy(alpha = 0.88f)
                 )
 
                 Spacer(modifier = Modifier.height(6.dp))
 
                 Text(
-                    text = "If you already paid, call the shopkeeper and share your payment proof.",
+                    text = helperMessage,
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -413,21 +487,55 @@ private fun CancelledOrderBanner() {
 }
 
 @Composable
-private fun PaymentHelpCard() {
+private fun CancelledPaymentInfoCard(
+    order: Order
+) {
+    val refundStatus = order.refundStatus.lowercase()
+    val paymentStatus = order.paymentStatus.lowercase()
+
+    val title = when {
+        refundStatus == RefundStatusValue.REFUND_PENDING -> "Refund pending"
+        refundStatus == RefundStatusValue.REFUNDED -> "Refund settled"
+        paymentStatus == PaymentStatusValue.PAYMENT_NOT_RECEIVED -> "Payment not received"
+        else -> "Need help?"
+    }
+
+    val message = when {
+        refundStatus == RefundStatusValue.REFUND_PENDING ->
+            "The shopkeeper has marked payment as received. They will manually settle the refund. You can call them for updates."
+
+        refundStatus == RefundStatusValue.REFUNDED && order.refundReferenceId.isNotBlank() ->
+            "Refund marked settled by shopkeeper. Reference ID: ${order.refundReferenceId}"
+
+        refundStatus == RefundStatusValue.REFUNDED ->
+            "Refund marked settled by shopkeeper. Contact the shopkeeper if you have not received it."
+
+        paymentStatus == PaymentStatusValue.PAYMENT_NOT_RECEIVED ->
+            "If you already paid, contact the shopkeeper directly and share your UPI screenshot or transaction proof."
+
+        else ->
+            "Please contact the shopkeeper directly. Keep your UPI screenshot or payment proof ready."
+    }
+
+    val borderColor = when {
+        refundStatus == RefundStatusValue.REFUNDED -> Color(0xFF2E7D32)
+        else -> Color(0xFFD32F2F)
+    }
+
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(14.dp),
         color = MaterialTheme.colorScheme.surface,
         border = BorderStroke(
             width = 1.dp,
-            color = Color(0xFFD32F2F).copy(alpha = 0.25f)
+            color = borderColor.copy(alpha = 0.25f)
         )
     ) {
         Column(
             modifier = Modifier.padding(14.dp)
         ) {
             Text(
-                text = "Paid already?",
+                text = title,
                 fontWeight = FontWeight.Bold,
                 fontSize = 14.sp,
                 color = MaterialTheme.colorScheme.onSurface
@@ -436,7 +544,7 @@ private fun PaymentHelpCard() {
             Spacer(modifier = Modifier.height(4.dp))
 
             Text(
-                text = "Please contact the shopkeeper directly. Keep your UPI screenshot or payment proof ready.",
+                text = message,
                 fontSize = 12.sp,
                 color = TextSecondary
             )

@@ -62,8 +62,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.campusbite.app.data.model.Order
 import com.campusbite.app.ui.viewmodel.OrderViewModel
 import com.campusbite.app.ui.viewmodel.ProfileViewModel
+import com.campusbite.app.util.OrderStatusValue
+import com.campusbite.app.util.PaymentStatusValue
+import com.campusbite.app.util.RefundStatusValue
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 
@@ -125,13 +129,19 @@ fun StudentProfileScreen(
     val userOrders by orderViewModel.userOrders.collectAsState()
     val profileMessage by profileViewModel.message.collectAsState()
 
-    val latestOrder = userOrders.firstOrNull()
-
-    val latestCancelledOrder = latestOrder?.takeIf {
-        it.status.lowercase() == "cancelled"
+    val latestRefundPendingOrder = userOrders.firstOrNull { order ->
+        order.status.lowercase() == OrderStatusValue.CANCELLED &&
+                order.refundStatus.lowercase() == RefundStatusValue.REFUND_PENDING
     }
 
-    val trackableOrder = activeOrder ?: latestCancelledOrder
+    val latestActionableCancelledOrder = userOrders.firstOrNull { order ->
+        order.status.lowercase() == OrderStatusValue.CANCELLED &&
+                order.refundStatus.lowercase() != RefundStatusValue.REFUNDED
+    }
+
+    val trackableOrder = activeOrder
+        ?: latestRefundPendingOrder
+        ?: latestActionableCancelledOrder
 
     DisposableEffect(currentUser?.uid) {
         val uid = currentUser?.uid
@@ -257,56 +267,13 @@ fun StudentProfileScreen(
                 Text("Edit Profile")
             }
 
-            if (trackableOrder != null) {
-                val isCancelled = trackableOrder.status.lowercase() == "cancelled"
-
-                SectionCard(
-                    title = if (isCancelled) {
-                        "Order Cancelled"
-                    } else {
-                        "Track Your Order"
-                    },
-                    icon = Icons.Outlined.History
-                ) {
-                    Text(
-                        text = if (isCancelled) {
-                            "Your latest order was cancelled because payment was not received."
-                        } else {
-                            "Current Status: ${trackableOrder.status}"
-                        },
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-
-                    if (isCancelled) {
-                        Spacer(modifier = Modifier.height(6.dp))
-
-                        Text(
-                            text = "If you already paid, open details and call the shopkeeper.",
-                            color = MaterialTheme.colorScheme.error,
-                            style = MaterialTheme.typography.bodySmall
-                        )
+            trackableOrder?.let { order ->
+                TrackableOrderCard(
+                    order = order,
+                    onOpenOrder = {
+                        onNavigateToOrderStatus(order.orderId)
                     }
-
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    Button(
-                        onClick = {
-                            onNavigateToOrderStatus(trackableOrder.orderId)
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = BrandOrange
-                        )
-                    ) {
-                        Text(
-                            text = if (isCancelled) {
-                                "View Details"
-                            } else {
-                                "Track Order"
-                            }
-                        )
-                    }
-                }
+                )
             }
 
             SectionCard(
@@ -327,6 +294,30 @@ fun StudentProfileScreen(
                         text = "Status: ${latest.status}",
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+
+                    if (latest.status.lowercase() == OrderStatusValue.CANCELLED &&
+                        latest.refundStatus.lowercase() == RefundStatusValue.REFUND_PENDING
+                    ) {
+                        Spacer(modifier = Modifier.height(4.dp))
+
+                        Text(
+                            text = "Refund Status: Pending",
+                            color = MaterialTheme.colorScheme.error,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+
+                    if (latest.status.lowercase() == OrderStatusValue.CANCELLED &&
+                        latest.refundStatus.lowercase() == RefundStatusValue.REFUNDED
+                    ) {
+                        Spacer(modifier = Modifier.height(4.dp))
+
+                        Text(
+                            text = "Refund Status: Settled",
+                            color = Color(0xFF2E7D32),
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
 
                     Spacer(modifier = Modifier.height(4.dp))
 
@@ -533,7 +524,7 @@ fun StudentProfileScreen(
                         },
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(
-                            keyboardType = KeyboardType.Phone
+                            keyboardType = KeyboardType.Number
                         ),
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -543,7 +534,16 @@ fun StudentProfileScreen(
 
                         Text(
                             text = it,
-                            color = MaterialTheme.colorScheme.error,
+                            color = if (
+                                it.contains(
+                                    other = "success",
+                                    ignoreCase = true
+                                )
+                            ) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.error
+                            },
                             style = MaterialTheme.typography.bodySmall
                         )
                     }
@@ -608,6 +608,89 @@ fun StudentProfileScreen(
                 }
             }
         )
+    }
+}
+
+@Composable
+private fun TrackableOrderCard(
+    order: Order,
+    onOpenOrder: () -> Unit
+) {
+    val isCancelled = order.status.lowercase() == OrderStatusValue.CANCELLED
+    val isRefundPending = order.refundStatus.lowercase() == RefundStatusValue.REFUND_PENDING
+    val isPaymentNotReceived = order.paymentStatus.lowercase() == PaymentStatusValue.PAYMENT_NOT_RECEIVED
+
+    val title = when {
+        isRefundPending -> "Refund Pending"
+        isCancelled -> "Order Cancelled"
+        else -> "Track Your Order"
+    }
+
+    val message = when {
+        isRefundPending ->
+            "Your order was cancelled after payment was received. The shopkeeper will settle the refund manually."
+
+        isCancelled && isPaymentNotReceived ->
+            "Your latest order was cancelled because payment was not received."
+
+        isCancelled ->
+            "Your latest order was cancelled. Open details for more information."
+
+        else ->
+            "Current Status: ${order.status}"
+    }
+
+    val helper = when {
+        isRefundPending ->
+            "Open details to view reason and call the shopkeeper if needed."
+
+        isCancelled ->
+            "If you already paid, open details and call the shopkeeper."
+
+        else ->
+            ""
+    }
+
+    SectionCard(
+        title = title,
+        icon = Icons.Outlined.History
+    ) {
+        Text(
+            text = message,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+
+        if (helper.isNotBlank()) {
+            Spacer(modifier = Modifier.height(6.dp))
+
+            Text(
+                text = helper,
+                color = if (isRefundPending || isCancelled) {
+                    MaterialTheme.colorScheme.error
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+                style = MaterialTheme.typography.bodySmall
+            )
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        Button(
+            onClick = onOpenOrder,
+            modifier = Modifier.fillMaxWidth(),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = BrandOrange
+            )
+        ) {
+            Text(
+                text = if (isCancelled) {
+                    "View Details"
+                } else {
+                    "Track Order"
+                }
+            )
+        }
     }
 }
 
