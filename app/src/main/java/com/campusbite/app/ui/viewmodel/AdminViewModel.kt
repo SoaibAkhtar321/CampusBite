@@ -6,9 +6,11 @@ import androidx.lifecycle.viewModelScope
 import com.campusbite.app.data.model.Order
 import com.google.firebase.firestore.DocumentReference
 import com.google.firebase.firestore.DocumentSnapshot
+import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.Query
+import com.google.firebase.firestore.SetOptions
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -18,6 +20,10 @@ import kotlinx.coroutines.tasks.await
 import java.time.LocalDate
 import java.time.YearMonth
 import javax.inject.Inject
+import com.campusbite.app.util.OrderStatusValue
+import com.campusbite.app.util.PaymentReceivedType
+import com.campusbite.app.util.PaymentStatusValue
+import com.campusbite.app.util.RefundStatusValue
 
 data class AdminShop(
     val docId: String = "",
@@ -893,6 +899,244 @@ class AdminViewModel @Inject constructor(
                 _message.value = e.message ?: "Failed to update role"
             }
         }
+    }
+
+
+    fun cancelOrderByAdmin(
+        orderId: String,
+        paymentReceivedType: String,
+        cancelReason: String
+    ) {
+        if (orderId.isBlank()) {
+            _message.value = "Order ID missing"
+            return
+        }
+
+        viewModelScope.launch {
+            try {
+                val cleanPaymentType = paymentReceivedType
+                    .trim()
+                    .lowercase()
+
+                val cleanReason = cancelReason.trim()
+
+                val validPaymentTypes = listOf(
+                    PaymentReceivedType.NONE,
+                    PaymentReceivedType.PARTIAL,
+                    PaymentReceivedType.FULL
+                )
+
+                if (cleanPaymentType !in validPaymentTypes) {
+                    throw IllegalStateException("Please select payment status.")
+                }
+
+                val paymentReceivedByShopkeeper = cleanPaymentType in listOf(
+                    PaymentReceivedType.PARTIAL,
+                    PaymentReceivedType.FULL
+                )
+
+                if (paymentReceivedByShopkeeper && cleanReason.isBlank()) {
+                    throw IllegalStateException("Please select a cancellation reason.")
+                }
+
+                val orderRef = firestore.collection("orders")
+                    .document(orderId)
+
+                firestore.runTransaction { transaction ->
+                    val orderDoc = transaction.get(orderRef)
+
+                    if (!orderDoc.exists()) {
+                        throw IllegalStateException("Order not found.")
+                    }
+
+                    val currentStatus = orderDoc.getString("status")
+                        ?.lowercase()
+                        .orEmpty()
+
+                    if (currentStatus == OrderStatusValue.CANCELLED) {
+                        throw IllegalStateException("This order is already cancelled.")
+                    }
+
+                    if (currentStatus == OrderStatusValue.PICKED_UP) {
+                        throw IllegalStateException("Picked up order cannot be cancelled.")
+                    }
+
+                    val paymentStatus = when (cleanPaymentType) {
+                        PaymentReceivedType.FULL -> PaymentStatusValue.PAID
+                        PaymentReceivedType.PARTIAL -> PaymentStatusValue.PARTIAL_PAYMENT_RECEIVED
+                        else -> PaymentStatusValue.PAYMENT_NOT_RECEIVED
+                    }
+
+                    val refundStatus = if (paymentReceivedByShopkeeper) {
+                        RefundStatusValue.REFUND_PENDING
+                    } else {
+                        RefundStatusValue.NONE
+                    }
+
+                    val finalCancelReason = if (paymentReceivedByShopkeeper) {
+                        cleanReason
+                    } else {
+                        "Payment not received"
+                    }
+
+                    val totalPrice = orderDoc.getDouble("totalPrice")
+                        ?: orderDoc.getLong("totalPrice")?.toDouble()
+                        ?: 0.0
+
+                    val refundAmount = when (cleanPaymentType) {
+                        PaymentReceivedType.FULL -> totalPrice
+                        PaymentReceivedType.PARTIAL -> 0.0
+                        else -> 0.0
+                    }
+
+                    val now = System.currentTimeMillis()
+
+                    transaction.update(
+                        orderRef,
+                        mapOf(
+                            "status" to OrderStatusValue.CANCELLED,
+
+                            "paymentStatus" to paymentStatus,
+                            "paymentReceivedByShopkeeper" to paymentReceivedByShopkeeper,
+                            "paymentReceivedType" to cleanPaymentType,
+
+                            "cancelReason" to finalCancelReason,
+                            "cancelledBy" to "admin",
+                            "cancelledAt" to now,
+
+                            "refundStatus" to refundStatus,
+                            "refundAmount" to refundAmount,
+                            "refundReferenceId" to "",
+                            "refundSettledAt" to 0L,
+                            "refundNote" to "",
+
+                            "updatedAt" to now
+                        )
+                    )
+
+                    val orderShopId = orderDoc.getString("shopId").orEmpty()
+
+                    val pickupDate = orderDoc.getString("pickupDate")
+                        ?.takeIf { it.isNotBlank() }
+                        ?: LocalDate.now().toString()
+
+                    val month = pickupDate.take(7)
+
+                    if (orderShopId.isNotBlank()) {
+                        incrementCancelledAnalytics(
+                            transaction = transaction,
+                            shopId = orderShopId,
+                            pickupDate = pickupDate,
+                            month = month
+                        )
+                    }
+
+                    null
+                }.await()
+
+                _message.value = if (paymentReceivedByShopkeeper) {
+                    "Order cancelled by admin. Refund is now pending."
+                } else {
+                    "Order cancelled by admin because payment was not received."
+                }
+            } catch (e: Exception) {
+                Log.e("AdminViewModel", "Failed to cancel order by admin", e)
+                _message.value = e.message ?: "Failed to cancel order."
+            }
+        }
+    }
+
+    fun markRefundSettledByAdmin(
+        orderId: String,
+        refundReferenceId: String,
+        refundNote: String
+    ) {
+        if (orderId.isBlank()) {
+            _message.value = "Order ID missing"
+            return
+        }
+
+        viewModelScope.launch {
+            try {
+                val cleanRefundReferenceId = refundReferenceId.trim()
+                val cleanRefundNote = refundNote.trim()
+
+                if (cleanRefundReferenceId.isBlank()) {
+                    throw IllegalStateException("Refund reference ID is required.")
+                }
+
+                val orderRef = firestore.collection("orders")
+                    .document(orderId)
+
+                firestore.runTransaction { transaction ->
+                    val orderDoc = transaction.get(orderRef)
+
+                    if (!orderDoc.exists()) {
+                        throw IllegalStateException("Order not found.")
+                    }
+
+                    val refundStatus = orderDoc.getString("refundStatus")
+                        ?.lowercase()
+                        .orEmpty()
+
+                    if (refundStatus != RefundStatusValue.REFUND_PENDING) {
+                        throw IllegalStateException("This order is not pending refund.")
+                    }
+
+                    val now = System.currentTimeMillis()
+
+                    transaction.update(
+                        orderRef,
+                        mapOf(
+                            "paymentStatus" to PaymentStatusValue.REFUNDED,
+                            "refundStatus" to RefundStatusValue.REFUNDED,
+                            "refundReferenceId" to cleanRefundReferenceId,
+                            "refundNote" to cleanRefundNote,
+                            "refundSettledAt" to now,
+                            "refundSettledBy" to "admin",
+                            "updatedAt" to now
+                        )
+                    )
+
+                    null
+                }.await()
+
+                _message.value = "Refund marked as settled by admin."
+            } catch (e: Exception) {
+                Log.e("AdminViewModel", "Failed to mark refund settled by admin", e)
+                _message.value = e.message ?: "Failed to mark refund settled."
+            }
+        }
+    }
+
+    private fun incrementCancelledAnalytics(
+        transaction: com.google.firebase.firestore.Transaction,
+        shopId: String,
+        pickupDate: String,
+        month: String
+    ) {
+        val dailyRef = dailyAnalyticsRef(
+            shopId = shopId,
+            date = pickupDate
+        )
+
+        val monthlyRef = monthlyAnalyticsRef(
+            shopId = shopId,
+            month = month
+        )
+
+        val lifetimeRef = lifetimeAnalyticsRef(
+            shopId = shopId
+        )
+
+        val update = mapOf(
+            "cancelledOrders" to FieldValue.increment(1),
+            "updatedAt" to FieldValue.serverTimestamp()
+        )
+
+        transaction.set(dailyRef, update, SetOptions.merge())
+        transaction.set(monthlyRef, update, SetOptions.merge())
+        transaction.set(lifetimeRef, update, SetOptions.merge())
     }
 
     fun clearMessage() {

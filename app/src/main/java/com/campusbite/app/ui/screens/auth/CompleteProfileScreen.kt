@@ -192,10 +192,9 @@ fun CompleteProfileScreen(
             singleLine = true,
             isError = nameError != null,
             supportingText = {
-                Text(
-                    text = nameError
-                        ?: "Use your real name. Emojis, numbers, and random symbols are not allowed."
-                )
+                nameError?.let {
+                    Text(text = it)
+                }
             },
             keyboardOptions = KeyboardOptions(
                 keyboardType = KeyboardType.Text,
@@ -237,7 +236,7 @@ fun CompleteProfileScreen(
         Spacer(modifier = Modifier.height(4.dp))
 
         Text(
-            text = "Use a valid phone number for order updates, cancellation, and refund support.",
+            text = "Use a valid phone number for order updates and refund support.",
             fontSize = 12.sp,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -275,18 +274,8 @@ fun CompleteProfileScreen(
                     localError = null
                 },
                 label = {
-                    Text("Vendor / Shopkeeper")
+                    Text("Shopkeeper")
                 }
-            )
-        }
-
-        if (selectedRole == "student") {
-            Spacer(modifier = Modifier.height(6.dp))
-
-            Text(
-                text = "For students, faculty, staff, employees, hostel residents, and other campus users.",
-                fontSize = 12.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
 
@@ -294,7 +283,7 @@ fun CompleteProfileScreen(
             Spacer(modifier = Modifier.height(6.dp))
 
             Text(
-                text = "Vendor / shopkeeper accounts require admin approval and are campus specific.",
+                text = "Shopkeeper accounts require admin approval.",
                 fontSize = 12.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
