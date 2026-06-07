@@ -49,6 +49,8 @@ class ShopRepository @Inject constructor(
                         ownerEmail = doc.getString("ownerEmail") ?: "",
                         ownerPhone = doc.getString("ownerPhone") ?: "",
 
+                        displayOrder = doc.getLong("displayOrder")?.toInt() ?: 1000,
+
                         createdAt = doc.getLong("createdAt") ?: 0L
                     )
                 } catch (e: Exception) {
@@ -56,7 +58,12 @@ class ShopRepository @Inject constructor(
                 }
             }
 
-            Result.success(shops)
+            Result.success(
+                shops.sortedWith(
+                    compareBy<Shop> { it.displayOrder }
+                        .thenBy { it.name.lowercase() }
+                )
+            )
 
         } catch (e: Exception) {
             Result.failure(e)

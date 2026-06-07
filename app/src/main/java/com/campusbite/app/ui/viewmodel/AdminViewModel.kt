@@ -4,6 +4,10 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.campusbite.app.data.model.Order
+import com.campusbite.app.util.OrderStatusValue
+import com.campusbite.app.util.PaymentReceivedType
+import com.campusbite.app.util.PaymentStatusValue
+import com.campusbite.app.util.RefundStatusValue
 import com.google.firebase.firestore.DocumentReference
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FieldValue
@@ -20,10 +24,6 @@ import kotlinx.coroutines.tasks.await
 import java.time.LocalDate
 import java.time.YearMonth
 import javax.inject.Inject
-import com.campusbite.app.util.OrderStatusValue
-import com.campusbite.app.util.PaymentReceivedType
-import com.campusbite.app.util.PaymentStatusValue
-import com.campusbite.app.util.RefundStatusValue
 
 data class AdminShop(
     val docId: String = "",
@@ -33,7 +33,8 @@ data class AdminShop(
     val isOpen: Boolean = false,
     val isApproved: Boolean = false,
     val isBlocked: Boolean = false,
-    val isDeleted: Boolean = false
+    val isDeleted: Boolean = false,
+    val displayOrder: Int = 1000
 )
 
 data class AdminUser(
@@ -144,10 +145,14 @@ class AdminViewModel @Inject constructor(
                             isOpen = doc.getBoolean("isOpen") ?: false,
                             isApproved = doc.getBoolean("isApproved") ?: false,
                             isBlocked = doc.getBoolean("isBlocked") ?: false,
-                            isDeleted = doc.getBoolean("isDeleted") ?: false
+                            isDeleted = doc.getBoolean("isDeleted") ?: false,
+                            displayOrder = doc.getLong("displayOrder")?.toInt() ?: 1000
                         )
                     }
-                    ?.sortedBy { it.name.lowercase() }
+                    ?.sortedWith(
+                        compareBy<AdminShop> { it.displayOrder }
+                            .thenBy { it.name.lowercase() }
+                    )
                     ?: emptyList()
 
                 _shops.value = shopList
@@ -208,18 +213,6 @@ class AdminViewModel @Inject constructor(
             }
     }
 
-    /*
-     * Optimized report:
-     * Old version read all orders of a shop.
-     *
-     * New version reads:
-     * 1. shop document
-     * 2. today's analytics document
-     * 3. current month analytics document
-     * 4. lifetime analytics document
-     * 5. active orders only
-     * 6. recent 50 orders only
-     */
     fun loadShopReport(shopId: String) {
         clearShopReportListeners()
 
@@ -275,7 +268,8 @@ class AdminViewModel @Inject constructor(
                     isOpen = shopDoc.getBoolean("isOpen") ?: false,
                     isApproved = shopDoc.getBoolean("isApproved") ?: false,
                     isBlocked = shopDoc.getBoolean("isBlocked") ?: false,
-                    isDeleted = shopDoc.getBoolean("isDeleted") ?: false
+                    isDeleted = shopDoc.getBoolean("isDeleted") ?: false,
+                    displayOrder = shopDoc.getLong("displayOrder")?.toInt() ?: 1000
                 )
 
                 startShopReportListeners(
@@ -577,11 +571,16 @@ class AdminViewModel @Inject constructor(
                         "maxOrdersPerSlot" to 5,
                         "closedSlots" to emptyList<String>(),
 
+                        "displayOrder" to getNextShopDisplayOrder(),
+
                         "createdAt" to System.currentTimeMillis()
                     )
 
                     shopRef.set(shopData).await()
                 } else {
+                    val existingDisplayOrder = shopSnapshot.getLong("displayOrder")?.toInt()
+                        ?: getNextShopDisplayOrder()
+
                     shopRef.update(
                         mapOf(
                             "isApproved" to true,
@@ -590,7 +589,8 @@ class AdminViewModel @Inject constructor(
                             "ownerUid" to uid,
                             "ownerEmail" to email,
                             "ownerPhone" to phone,
-                            "phone" to phone
+                            "phone" to phone,
+                            "displayOrder" to existingDisplayOrder
                         )
                     ).await()
                 }
@@ -901,6 +901,135 @@ class AdminViewModel @Inject constructor(
         }
     }
 
+    fun moveShopToTop(shop: AdminShop) {
+        viewModelScope.launch {
+            try {
+                val orderedShops = getOrderedActiveShops().toMutableList()
+
+                val currentIndex = orderedShops.indexOfFirst {
+                    it.docId == shop.docId
+                }
+
+                if (currentIndex <= 0) {
+                    _message.value = "Shop is already at top"
+                    return@launch
+                }
+
+                val selectedShop = orderedShops.removeAt(currentIndex)
+                orderedShops.add(0, selectedShop)
+
+                updateShopDisplayOrders(orderedShops)
+
+                _message.value = "Shop moved to top"
+            } catch (e: Exception) {
+                Log.e("AdminViewModel", "Failed to move shop to top", e)
+                _message.value = e.message ?: "Failed to update shop position"
+            }
+        }
+    }
+
+    fun moveShopUp(shop: AdminShop) {
+        viewModelScope.launch {
+            try {
+                val orderedShops = getOrderedActiveShops().toMutableList()
+
+                val currentIndex = orderedShops.indexOfFirst {
+                    it.docId == shop.docId
+                }
+
+                if (currentIndex <= 0) {
+                    _message.value = "Shop is already at top"
+                    return@launch
+                }
+
+                val temp = orderedShops[currentIndex - 1]
+                orderedShops[currentIndex - 1] = orderedShops[currentIndex]
+                orderedShops[currentIndex] = temp
+
+                updateShopDisplayOrders(orderedShops)
+
+                _message.value = "Shop moved up"
+            } catch (e: Exception) {
+                Log.e("AdminViewModel", "Failed to move shop up", e)
+                _message.value = e.message ?: "Failed to update shop position"
+            }
+        }
+    }
+
+    fun moveShopDown(shop: AdminShop) {
+        viewModelScope.launch {
+            try {
+                val orderedShops = getOrderedActiveShops().toMutableList()
+
+                val currentIndex = orderedShops.indexOfFirst {
+                    it.docId == shop.docId
+                }
+
+                if (currentIndex == -1 || currentIndex >= orderedShops.lastIndex) {
+                    _message.value = "Shop is already at bottom"
+                    return@launch
+                }
+
+                val temp = orderedShops[currentIndex + 1]
+                orderedShops[currentIndex + 1] = orderedShops[currentIndex]
+                orderedShops[currentIndex] = temp
+
+                updateShopDisplayOrders(orderedShops)
+
+                _message.value = "Shop moved down"
+            } catch (e: Exception) {
+                Log.e("AdminViewModel", "Failed to move shop down", e)
+                _message.value = e.message ?: "Failed to update shop position"
+            }
+        }
+    }
+
+    private fun getOrderedActiveShops(): List<AdminShop> {
+        return _shops.value
+            .filter { !it.isDeleted }
+            .sortedWith(
+                compareBy<AdminShop> { it.displayOrder }
+                    .thenBy { it.name.lowercase() }
+            )
+    }
+
+    private suspend fun updateShopDisplayOrders(
+        orderedShops: List<AdminShop>
+    ) {
+        val batch = firestore.batch()
+
+        orderedShops.forEachIndexed { index, shop ->
+            val newDisplayOrder = (index + 1) * 10
+
+            if (shop.docId.isNotBlank()) {
+                val shopRef = firestore.collection("shops")
+                    .document(shop.docId)
+
+                batch.update(
+                    shopRef,
+                    "displayOrder",
+                    newDisplayOrder
+                )
+            }
+        }
+
+        batch.commit().await()
+    }
+
+    private suspend fun getNextShopDisplayOrder(): Int {
+        val snapshot = firestore.collection("shops")
+            .get()
+            .await()
+
+        val maxOrder = snapshot.documents
+            .mapNotNull { doc ->
+                doc.getLong("displayOrder")?.toInt()
+            }
+            .maxOrNull()
+            ?: 0
+
+        return maxOrder + 10
+    }
 
     fun cancelOrderByAdmin(
         orderId: String,

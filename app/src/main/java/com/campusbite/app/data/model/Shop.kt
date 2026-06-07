@@ -24,5 +24,7 @@ data class Shop(
     val ownerEmail: String = "",
     val ownerPhone: String = "",
 
+    val displayOrder: Int = 1000,
+
     val createdAt: Long = 0L
 )

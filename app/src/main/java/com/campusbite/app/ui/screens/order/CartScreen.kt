@@ -898,7 +898,7 @@ private fun PaymentQrCard(
                 Spacer(modifier = Modifier.height(8.dp))
 
                 Text(
-                    text = "Now place your order. Shopkeeper will verify payment.",
+                    text = "Place order only after payment. The shopkeeper will verify it. If payment is not found, order will be cancelled and your account may be blocked.",
                     fontSize = 12.sp,
                     color = Color(0xFF2E7D32),
                     fontWeight = FontWeight.SemiBold

@@ -9,14 +9,18 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -28,6 +32,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
@@ -42,7 +47,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.campusbite.app.ui.theme.Orange
@@ -58,6 +65,10 @@ private data class ConfirmAction(
     val onConfirm: () -> Unit
 )
 
+private val SuccessGreen = Color(0xFF2E7D32)
+private val DangerRed = Color(0xFFD32F2F)
+private val MutedGrey = Color(0xFF616161)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AdminDashboardScreen(
@@ -71,10 +82,17 @@ fun AdminDashboardScreen(
     val isLoading by viewModel.isLoading.collectAsState()
     val message by viewModel.message.collectAsState()
 
-    var tabIndex by remember { mutableStateOf(0) }
-    var confirmAction by remember { mutableStateOf<ConfirmAction?>(null) }
+    var tabIndex by remember {
+        mutableStateOf(0)
+    }
 
-    val activeShops = shops.filter { !it.isDeleted }
+    var confirmAction by remember {
+        mutableStateOf<ConfirmAction?>(null)
+    }
+
+    val activeShops = shops.filter { shop ->
+        !shop.isDeleted
+    }
 
     val tabs = listOf(
         "Pending (${pendingShopkeepers.size})",
@@ -92,7 +110,9 @@ fun AdminDashboardScreen(
                     )
                 },
                 actions = {
-                    IconButton(onClick = onNavigateToProfile) {
+                    IconButton(
+                        onClick = onNavigateToProfile
+                    ) {
                         Icon(
                             imageVector = Icons.Default.Person,
                             contentDescription = "Profile"
@@ -108,7 +128,9 @@ fun AdminDashboardScreen(
                 .fillMaxSize()
                 .padding(padding)
         ) {
-            TabRow(selectedTabIndex = tabIndex) {
+            TabRow(
+                selectedTabIndex = tabIndex
+            ) {
                 tabs.forEachIndexed { index, title ->
                     Tab(
                         selected = tabIndex == index,
@@ -122,6 +144,11 @@ fun AdminDashboardScreen(
                                     Orange
                                 } else {
                                     MaterialTheme.colorScheme.onSurface
+                                },
+                                fontWeight = if (tabIndex == index) {
+                                    FontWeight.Bold
+                                } else {
+                                    FontWeight.Medium
                                 }
                             )
                         }
@@ -130,21 +157,8 @@ fun AdminDashboardScreen(
             }
 
             if (!message.isNullOrBlank()) {
-                Text(
-                    text = message ?: "",
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 14.dp, vertical = 8.dp),
-                    color = if (
-                        message?.contains("failed", ignoreCase = true) == true ||
-                        message?.contains("missing", ignoreCase = true) == true ||
-                        message?.contains("error", ignoreCase = true) == true
-                    ) {
-                        MaterialTheme.colorScheme.error
-                    } else {
-                        MaterialTheme.colorScheme.primary
-                    },
-                    fontWeight = FontWeight.SemiBold
+                MessageBanner(
+                    message = message.orEmpty()
                 )
             }
 
@@ -153,8 +167,11 @@ fun AdminDashboardScreen(
                     modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center
                 ) {
-                    CircularProgressIndicator()
+                    CircularProgressIndicator(
+                        color = Orange
+                    )
                 }
+
                 return@Column
             }
 
@@ -203,7 +220,20 @@ fun AdminDashboardScreen(
                 1 -> ShopsTab(
                     shops = activeShops,
                     onViewReport = { shop ->
-                        onNavigateToShopReport(shop.shopId.ifBlank { shop.docId })
+                        onNavigateToShopReport(
+                            shop.shopId.ifBlank {
+                                shop.docId
+                            }
+                        )
+                    },
+                    onMoveTop = { shop ->
+                        viewModel.moveShopToTop(shop)
+                    },
+                    onMoveUp = { shop ->
+                        viewModel.moveShopUp(shop)
+                    },
+                    onMoveDown = { shop ->
+                        viewModel.moveShopDown(shop)
                     },
                     onApprovedChange = { shop, approved ->
                         confirmAction = ConfirmAction(
@@ -247,7 +277,7 @@ fun AdminDashboardScreen(
                                 "Unblock Shop?"
                             },
                             message = if (shouldBlock) {
-                                "This shop will be hidden from students and marked closed."
+                                "This shop will be hidden from users and marked closed."
                             } else {
                                 "This shop can become visible again if approved."
                             },
@@ -364,16 +394,59 @@ fun AdminDashboardScreen(
 }
 
 @Composable
+private fun MessageBanner(
+    message: String
+) {
+    val isError = message.contains("failed", ignoreCase = true) ||
+            message.contains("missing", ignoreCase = true) ||
+            message.contains("error", ignoreCase = true)
+
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(
+                horizontal = 12.dp,
+                vertical = 8.dp
+            ),
+        shape = RoundedCornerShape(14.dp),
+        color = if (isError) {
+            MaterialTheme.colorScheme.error.copy(alpha = 0.10f)
+        } else {
+            Orange.copy(alpha = 0.10f)
+        }
+    ) {
+        Text(
+            text = message,
+            modifier = Modifier.padding(
+                horizontal = 14.dp,
+                vertical = 10.dp
+            ),
+            color = if (isError) {
+                MaterialTheme.colorScheme.error
+            } else {
+                Orange
+            },
+            fontWeight = FontWeight.SemiBold
+        )
+    }
+}
+
+@Composable
 private fun PendingShopkeepersTab(
     pendingShopkeepers: List<AdminUser>,
     onApprove: (AdminUser) -> Unit,
     onBlock: (AdminUser) -> Unit,
     onRemove: (AdminUser) -> Unit
 ) {
-    var query by remember { mutableStateOf("") }
+    var query by remember {
+        mutableStateOf("")
+    }
 
     val filteredUsers = pendingShopkeepers.filter { user ->
-        matchesUserSearch(user, query)
+        matchesUserSearch(
+            user = user,
+            query = query
+        )
     }
 
     Column(
@@ -389,7 +462,9 @@ private fun PendingShopkeepersTab(
             placeholder = "Search pending shopkeepers..."
         )
 
-        Spacer(modifier = Modifier.height(10.dp))
+        Spacer(
+            modifier = Modifier.height(10.dp)
+        )
 
         if (filteredUsers.isEmpty()) {
             EmptyState(
@@ -399,6 +474,7 @@ private fun PendingShopkeepersTab(
                     "No pending request found"
                 }
             )
+
             return@Column
         }
 
@@ -407,7 +483,9 @@ private fun PendingShopkeepersTab(
         ) {
             items(
                 items = filteredUsers,
-                key = { user -> user.docId }
+                key = { user ->
+                    user.docId
+                }
             ) { user ->
                 PendingShopkeeperCard(
                     user = user,
@@ -434,34 +512,65 @@ private fun PendingShopkeeperCard(
     onRemove: () -> Unit
 ) {
     Card(
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface
+        ),
+        elevation = CardDefaults.cardElevation(
+            defaultElevation = 2.dp
+        )
     ) {
         Column(
             modifier = Modifier.padding(14.dp)
         ) {
             Text(
-                text = user.name.ifBlank { "Unnamed Shopkeeper" },
+                text = user.name.ifBlank {
+                    "Unnamed Shopkeeper"
+                },
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold
             )
 
-            Spacer(modifier = Modifier.height(4.dp))
-
-            Text("Email: ${user.email.ifBlank { "Not available" }}")
-            Text("Phone: ${user.phone.ifBlank { "Not available" }}")
-            Text("Role: ${user.role}")
-
-            if (user.shopId.isNotBlank()) {
-                Text("ShopId: ${user.shopId}")
-            }
-
-            Text(
-                text = "Status: Pending approval",
-                color = MaterialTheme.colorScheme.error,
-                fontWeight = FontWeight.SemiBold
+            Spacer(
+                modifier = Modifier.height(6.dp)
             )
 
-            Spacer(modifier = Modifier.height(12.dp))
+            InfoRow(
+                label = "Email",
+                value = user.email.ifBlank { "Not available" }
+            )
+
+            InfoRow(
+                label = "Phone",
+                value = user.phone.ifBlank { "Not available" }
+            )
+
+            InfoRow(
+                label = "Role",
+                value = user.role
+            )
+
+            if (user.shopId.isNotBlank()) {
+                InfoRow(
+                    label = "Shop ID",
+                    value = user.shopId
+                )
+            }
+
+            Spacer(
+                modifier = Modifier.height(8.dp)
+            )
+
+            StatusBadge(
+                text = "Pending approval",
+                backgroundColor = DangerRed.copy(alpha = 0.10f),
+                contentColor = DangerRed
+            )
+
+            Spacer(
+                modifier = Modifier.height(12.dp)
+            )
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -469,21 +578,24 @@ private fun PendingShopkeeperCard(
             ) {
                 Button(
                     onClick = onApprove,
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(12.dp)
                 ) {
                     Text("Approve")
                 }
 
                 OutlinedButton(
                     onClick = onBlock,
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(12.dp)
                 ) {
                     Text("Block")
                 }
 
                 OutlinedButton(
                     onClick = onRemove,
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(12.dp)
                 ) {
                     Text("Remove")
                 }
@@ -496,12 +608,17 @@ private fun PendingShopkeeperCard(
 private fun ShopsTab(
     shops: List<AdminShop>,
     onViewReport: (AdminShop) -> Unit,
+    onMoveTop: (AdminShop) -> Unit,
+    onMoveUp: (AdminShop) -> Unit,
+    onMoveDown: (AdminShop) -> Unit,
     onApprovedChange: (AdminShop, Boolean) -> Unit,
     onOpenChange: (AdminShop, Boolean) -> Unit,
     onBlockToggle: (AdminShop) -> Unit,
     onDelete: (AdminShop) -> Unit
 ) {
-    var query by remember { mutableStateOf("") }
+    var query by remember {
+        mutableStateOf("")
+    }
 
     val filteredShops = shops.filter { shop ->
         val q = query.trim().lowercase()
@@ -525,7 +642,9 @@ private fun ShopsTab(
             placeholder = "Search shops..."
         )
 
-        Spacer(modifier = Modifier.height(10.dp))
+        Spacer(
+            modifier = Modifier.height(10.dp)
+        )
 
         if (filteredShops.isEmpty()) {
             EmptyState(
@@ -535,20 +654,32 @@ private fun ShopsTab(
                     "No shop found"
                 }
             )
+
             return@Column
         }
 
         LazyColumn(
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             items(
                 items = filteredShops,
-                key = { shop -> shop.docId }
+                key = { shop ->
+                    shop.docId
+                }
             ) { shop ->
                 ShopAdminCard(
                     shop = shop,
                     onViewReport = {
                         onViewReport(shop)
+                    },
+                    onMoveTop = {
+                        onMoveTop(shop)
+                    },
+                    onMoveUp = {
+                        onMoveUp(shop)
+                    },
+                    onMoveDown = {
+                        onMoveDown(shop)
                     },
                     onApprovedChange = {
                         onApprovedChange(shop, it)
@@ -572,88 +703,272 @@ private fun ShopsTab(
 private fun ShopAdminCard(
     shop: AdminShop,
     onViewReport: () -> Unit,
+    onMoveTop: () -> Unit,
+    onMoveUp: () -> Unit,
+    onMoveDown: () -> Unit,
     onApprovedChange: (Boolean) -> Unit,
     onOpenChange: (Boolean) -> Unit,
     onBlockToggle: () -> Unit,
     onDelete: () -> Unit
 ) {
     Card(
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(22.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface
+        ),
+        elevation = CardDefaults.cardElevation(
+            defaultElevation = 3.dp
+        )
     ) {
         Column(
-            modifier = Modifier.padding(14.dp)
+            modifier = Modifier.padding(16.dp)
         ) {
-            Text(
-                text = shop.name.ifBlank { "Unnamed Shop" },
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold
-            )
-
-            Spacer(modifier = Modifier.height(4.dp))
-
-            Text("ShopId: ${shop.shopId.ifBlank { "Not available" }}")
-            Text("OwnerUid: ${shop.ownerUid.ifBlank { "Not assigned" }}")
-
-            Text(
-                text = when {
-                    shop.isBlocked -> "Status: Blocked"
-                    shop.isApproved -> "Status: Approved"
-                    else -> "Status: Not approved"
-                },
-                color = when {
-                    shop.isBlocked -> MaterialTheme.colorScheme.error
-                    shop.isApproved -> MaterialTheme.colorScheme.primary
-                    else -> MaterialTheme.colorScheme.error
-                },
-                fontWeight = FontWeight.SemiBold
-            )
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            OutlinedButton(
-                onClick = onViewReport,
-                modifier = Modifier.fillMaxWidth()
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Top
             ) {
-                Text(
-                    text = "View Report",
-                    fontWeight = FontWeight.Bold,
-                    color = Orange
+                Column(
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(
+                        text = shop.name.ifBlank {
+                            "Unnamed Shop"
+                        },
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold
+                    )
+
+                    Spacer(
+                        modifier = Modifier.height(4.dp)
+                    )
+
+                    Text(
+                        text = shop.shopId.ifBlank {
+                            "No Shop ID"
+                        },
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                Spacer(
+                    modifier = Modifier.width(10.dp)
+                )
+
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = Orange.copy(alpha = 0.12f)
+                ) {
+                    Text(
+                        text = "#${shop.displayOrder}",
+                        modifier = Modifier.padding(
+                            horizontal = 12.dp,
+                            vertical = 8.dp
+                        ),
+                        color = Orange,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+
+            Spacer(
+                modifier = Modifier.height(12.dp)
+            )
+
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                StatusBadge(
+                    text = if (shop.isApproved) {
+                        "Approved"
+                    } else {
+                        "Not approved"
+                    },
+                    backgroundColor = if (shop.isApproved) {
+                        SuccessGreen.copy(alpha = 0.10f)
+                    } else {
+                        DangerRed.copy(alpha = 0.10f)
+                    },
+                    contentColor = if (shop.isApproved) {
+                        SuccessGreen
+                    } else {
+                        DangerRed
+                    }
+                )
+
+                StatusBadge(
+                    text = if (shop.isOpen) {
+                        "Open"
+                    } else {
+                        "Closed"
+                    },
+                    backgroundColor = if (shop.isOpen) {
+                        SuccessGreen.copy(alpha = 0.10f)
+                    } else {
+                        MutedGrey.copy(alpha = 0.10f)
+                    },
+                    contentColor = if (shop.isOpen) {
+                        SuccessGreen
+                    } else {
+                        MutedGrey
+                    }
                 )
             }
 
-            Spacer(modifier = Modifier.height(10.dp))
+            if (shop.isBlocked) {
+                Spacer(
+                    modifier = Modifier.height(8.dp)
+                )
+
+                StatusBadge(
+                    text = "Blocked",
+                    backgroundColor = DangerRed.copy(alpha = 0.10f),
+                    contentColor = DangerRed
+                )
+            }
+
+            Spacer(
+                modifier = Modifier.height(14.dp)
+            )
+
+            SectionTitle("Details")
+
+            Spacer(
+                modifier = Modifier.height(8.dp)
+            )
+
+            InfoRow(
+                label = "Owner UID",
+                value = shop.ownerUid.ifBlank {
+                    "Not assigned"
+                }
+            )
+
+            InfoRow(
+                label = "Position",
+                value = shop.displayOrder.toString()
+            )
+
+            Spacer(
+                modifier = Modifier.height(12.dp)
+            )
+
+            Button(
+                onClick = onViewReport,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp)
+            ) {
+                Text(
+                    text = "View Report",
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+
+            Spacer(
+                modifier = Modifier.height(14.dp)
+            )
+
+            SectionTitle("Reorder")
+
+            Spacer(
+                modifier = Modifier.height(8.dp)
+            )
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically
+                OutlinedButton(
+                    onClick = onMoveTop,
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(14.dp)
                 ) {
-                    Text("Approved")
-
-                    Switch(
-                        checked = shop.isApproved,
-                        enabled = !shop.isBlocked,
-                        onCheckedChange = onApprovedChange
-                    )
+                    Text("Top")
                 }
 
-                Row(
-                    verticalAlignment = Alignment.CenterVertically
+                OutlinedButton(
+                    onClick = onMoveUp,
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(14.dp)
                 ) {
-                    Text("Open")
+                    Text("Up")
+                }
 
-                    Switch(
-                        checked = shop.isOpen,
-                        enabled = !shop.isBlocked && shop.isApproved,
-                        onCheckedChange = onOpenChange
-                    )
+                OutlinedButton(
+                    onClick = onMoveDown,
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(14.dp)
+                ) {
+                    Text("Down")
                 }
             }
 
-            HorizontalDivider(
-                modifier = Modifier.padding(vertical = 10.dp)
+            Spacer(
+                modifier = Modifier.height(14.dp)
+            )
+
+            SectionTitle("Controls")
+
+            Spacer(
+                modifier = Modifier.height(8.dp)
+            )
+
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(18.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
+            ) {
+                Column(
+                    modifier = Modifier.padding(
+                        horizontal = 14.dp,
+                        vertical = 10.dp
+                    ),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Approved",
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.Medium
+                        )
+
+                        Switch(
+                            checked = shop.isApproved,
+                            enabled = !shop.isBlocked,
+                            onCheckedChange = onApprovedChange
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Open",
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.Medium
+                        )
+
+                        Switch(
+                            checked = shop.isOpen,
+                            enabled = !shop.isBlocked && shop.isApproved,
+                            onCheckedChange = onOpenChange
+                        )
+                    }
+                }
+            }
+
+            Spacer(
+                modifier = Modifier.height(14.dp)
             )
 
             Row(
@@ -662,24 +977,36 @@ private fun ShopAdminCard(
             ) {
                 OutlinedButton(
                     onClick = onBlockToggle,
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(14.dp)
                 ) {
                     Text(
                         text = if (shop.isBlocked) {
                             "Unblock"
                         } else {
                             "Block"
-                        }
+                        },
+                        color = if (shop.isBlocked) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            DangerRed
+                        },
+                        fontWeight = FontWeight.SemiBold
                     )
                 }
 
-                OutlinedButton(
+                Button(
                     onClick = onDelete,
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = DangerRed,
+                        contentColor = Color.White
+                    )
                 ) {
                     Text(
                         text = "Delete",
-                        color = MaterialTheme.colorScheme.error
+                        fontWeight = FontWeight.SemiBold
                     )
                 }
             }
@@ -694,10 +1021,15 @@ private fun UsersTab(
     onBlockedChange: (AdminUser, Boolean) -> Unit,
     onShopkeeperApprovedChange: (AdminUser, Boolean) -> Unit
 ) {
-    var query by remember { mutableStateOf("") }
+    var query by remember {
+        mutableStateOf("")
+    }
 
     val filteredUsers = users.filter { user ->
-        matchesUserSearch(user, query)
+        matchesUserSearch(
+            user = user,
+            query = query
+        )
     }
 
     Column(
@@ -713,7 +1045,9 @@ private fun UsersTab(
             placeholder = "Search users..."
         )
 
-        Spacer(modifier = Modifier.height(10.dp))
+        Spacer(
+            modifier = Modifier.height(10.dp)
+        )
 
         if (filteredUsers.isEmpty()) {
             EmptyState(
@@ -723,6 +1057,7 @@ private fun UsersTab(
                     "No user found"
                 }
             )
+
             return@Column
         }
 
@@ -731,7 +1066,9 @@ private fun UsersTab(
         ) {
             items(
                 items = filteredUsers,
-                key = { user -> user.docId }
+                key = { user ->
+                    user.docId
+                }
             ) { user ->
                 UserAdminCard(
                     user = user,
@@ -758,52 +1095,99 @@ private fun UserAdminCard(
     onShopkeeperApprovedChange: (Boolean) -> Unit
 ) {
     Card(
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface
+        ),
+        elevation = CardDefaults.cardElevation(
+            defaultElevation = 2.dp
+        )
     ) {
         Column(
             modifier = Modifier.padding(14.dp)
         ) {
             Text(
-                text = user.name.ifBlank { "Unnamed User" },
+                text = user.name.ifBlank {
+                    "Unnamed User"
+                },
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold
             )
 
-            Spacer(modifier = Modifier.height(4.dp))
+            Spacer(
+                modifier = Modifier.height(6.dp)
+            )
 
-            Text("Email: ${user.email.ifBlank { "Not available" }}")
-            Text("Phone: ${user.phone.ifBlank { "Not available" }}")
-            Text("Role: ${user.role}")
+            InfoRow(
+                label = "Email",
+                value = user.email.ifBlank {
+                    "Not available"
+                }
+            )
+
+            InfoRow(
+                label = "Phone",
+                value = user.phone.ifBlank {
+                    "Not available"
+                }
+            )
+
+            InfoRow(
+                label = "Role",
+                value = user.role
+            )
 
             if (user.role == "shopkeeper") {
-                Text(
+                Spacer(
+                    modifier = Modifier.height(4.dp)
+                )
+
+                StatusBadge(
                     text = if (user.isApproved) {
-                        "Approval: Approved"
+                        "Approved"
                     } else {
-                        "Approval: Pending"
+                        "Pending"
                     },
-                    color = if (user.isApproved) {
-                        MaterialTheme.colorScheme.primary
+                    backgroundColor = if (user.isApproved) {
+                        SuccessGreen.copy(alpha = 0.10f)
                     } else {
-                        MaterialTheme.colorScheme.error
+                        DangerRed.copy(alpha = 0.10f)
                     },
-                    fontWeight = FontWeight.SemiBold
+                    contentColor = if (user.isApproved) {
+                        SuccessGreen
+                    } else {
+                        DangerRed
+                    }
                 )
 
                 if (user.shopId.isNotBlank()) {
-                    Text("ShopId: ${user.shopId}")
+                    Spacer(
+                        modifier = Modifier.height(8.dp)
+                    )
+
+                    InfoRow(
+                        label = "Shop ID",
+                        value = user.shopId
+                    )
                 }
             }
 
             if (user.isBlocked) {
-                Text(
+                Spacer(
+                    modifier = Modifier.height(8.dp)
+                )
+
+                StatusBadge(
                     text = "Blocked",
-                    color = MaterialTheme.colorScheme.error,
-                    fontWeight = FontWeight.Bold
+                    backgroundColor = DangerRed.copy(alpha = 0.10f),
+                    contentColor = DangerRed
                 )
             }
 
-            Spacer(modifier = Modifier.height(10.dp))
+            Spacer(
+                modifier = Modifier.height(10.dp)
+            )
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -828,7 +1212,9 @@ private fun UserAdminCard(
             }
 
             if (user.role == "shopkeeper") {
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(
+                    modifier = Modifier.height(8.dp)
+                )
 
                 Row(
                     verticalAlignment = Alignment.CenterVertically
@@ -857,16 +1243,88 @@ private fun AdminSearchBar(
         onValueChange = onQueryChange,
         modifier = Modifier.fillMaxWidth(),
         singleLine = true,
+        shape = RoundedCornerShape(16.dp),
         leadingIcon = {
             Icon(
                 imageVector = Icons.Default.Search,
-                contentDescription = null
+                contentDescription = null,
+                tint = Orange
             )
         },
         placeholder = {
-            Text(placeholder)
+            Text(
+                text = placeholder,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     )
+}
+
+@Composable
+private fun SectionTitle(
+    text: String
+) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.titleSmall,
+        fontWeight = FontWeight.SemiBold,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+}
+
+@Composable
+private fun InfoRow(
+    label: String,
+    value: String
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.Top
+    ) {
+        Text(
+            text = label,
+            modifier = Modifier.weight(0.38f),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+
+        Text(
+            text = value,
+            modifier = Modifier.weight(0.62f),
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.Medium,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+
+    Spacer(
+        modifier = Modifier.height(6.dp)
+    )
+}
+
+@Composable
+private fun StatusBadge(
+    text: String,
+    backgroundColor: Color,
+    contentColor: Color
+) {
+    Surface(
+        shape = RoundedCornerShape(50),
+        color = backgroundColor
+    ) {
+        Text(
+            text = text,
+            modifier = Modifier.padding(
+                horizontal = 10.dp,
+                vertical = 6.dp
+            ),
+            color = contentColor,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.SemiBold
+        )
+    }
 }
 
 @Composable
@@ -879,7 +1337,8 @@ private fun EmptyState(
     ) {
         Text(
             text = text,
-            style = MaterialTheme.typography.titleMedium
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
 }
@@ -941,7 +1400,8 @@ private fun RoleDropdown(
         OutlinedButton(
             onClick = {
                 expanded = true
-            }
+            },
+            shape = RoundedCornerShape(12.dp)
         ) {
             Text(currentRole)
         }

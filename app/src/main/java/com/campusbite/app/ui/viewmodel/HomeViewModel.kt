@@ -101,6 +101,10 @@ class HomeViewModel @Inject constructor(
                             !shop.isBlocked &&
                                     !shop.isDeleted
                         }
+                        .sortedWith(
+                            compareBy<Shop> { it.displayOrder }
+                                .thenBy { it.name.lowercase() }
+                        )
 
                     _shops.value = visibleShops
 
