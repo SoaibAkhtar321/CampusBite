@@ -3,288 +3,235 @@ const { onDocumentUpdated } = require("firebase-functions/v2/firestore");
 const admin = require("firebase-admin");
 
 admin.initializeApp();
-
 const db = admin.firestore();
 
-const ORDER_STATUS = {
-  PENDING: "pending",
-  ACCEPTED: "accepted",
-  PREPARING: "preparing",
-  READY: "ready",
-  PICKED_UP: "picked_up",
-  CANCELLED: "cancelled",
-};
-
-const PAYMENT_STATUS = {
-  PENDING_VERIFICATION: "pending_verification",
-  VERIFIED: "verified",
-  PAID: "paid",
-};
-
-function getString(value) {
-  return typeof value === "string" ? value.trim() : "";
+function clean(v) {
+  return typeof v === "string" ? v.trim().toLowerCase() : "";
 }
 
-function getLowerString(value) {
-  return getString(value).toLowerCase();
+function str(v) {
+  return typeof v === "string" ? v.trim() : "";
 }
 
-function getNumber(value) {
-  if (typeof value === "number") return value;
+async function verifyShopkeeper(uid, orderId) {
+  const userSnap = await db.collection("users").doc(uid).get();
+  const orderSnap = await db.collection("orders").doc(orderId).get();
 
-  if (typeof value === "string") {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : 0;
-  }
+  if (!userSnap.exists) throw new HttpsError("not-found", "User not found");
+  if (!orderSnap.exists) throw new HttpsError("not-found", "Order not found");
 
-  return 0;
+  const user = userSnap.data();
+  const order = orderSnap.data();
+
+  if (user.role !== "shopkeeper") throw new HttpsError("permission-denied", "Only shopkeeper allowed");
+  if (user.isApproved !== true || user.isBlocked === true) throw new HttpsError("permission-denied", "Shopkeeper inactive");
+  if (order.shopId !== user.shopId) throw new HttpsError("permission-denied", "Order not from your shop");
+
+  return { user, order };
 }
 
-function dailyAnalyticsRef(shopId, date) {
-  return db
-    .collection("shopAnalytics")
-    .doc(shopId)
-    .collection("daily")
-    .doc(date);
-}
+exports.updateOrderStatus = onCall({ region: "us-central1" }, async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Login required");
 
-function monthlyAnalyticsRef(shopId, month) {
-  return db
-    .collection("shopAnalytics")
-    .doc(shopId)
-    .collection("monthly")
-    .doc(month);
-}
+  const orderId = str(request.data?.orderId);
+  const newStatus = clean(request.data?.newStatus);
 
-function lifetimeAnalyticsRef(shopId) {
-  return db
-    .collection("shopAnalytics")
-    .doc(shopId)
-    .collection("lifetime")
-    .doc("summary");
-}
+  if (!orderId || !newStatus) throw new HttpsError("invalid-argument", "Missing data");
 
-function incrementVerifiedAnalytics(transaction, shopId, pickupDate, month, amount) {
-  const update = {
-    verifiedOrders: admin.firestore.FieldValue.increment(1),
-    verifiedSales: admin.firestore.FieldValue.increment(amount),
-    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  const allowed = {
+    pending: ["preparing"],
+    preparing: ["ready"],
+    ready: ["picked_up"],
   };
 
-  transaction.set(dailyAnalyticsRef(shopId, pickupDate), update, { merge: true });
-  transaction.set(monthlyAnalyticsRef(shopId, month), update, { merge: true });
-  transaction.set(lifetimeAnalyticsRef(shopId), update, { merge: true });
-}
-
-exports.updateOrderStatus = onCall(async (request) => {
-  const uid = request.auth && request.auth.uid;
-
-  if (!uid) {
-    throw new HttpsError("unauthenticated", "User must be logged in.");
-  }
-
-  const data = request.data || {};
-  const orderId = getString(data.orderId);
-  const newStatus = getLowerString(data.newStatus);
-
-  if (!orderId) {
-    throw new HttpsError("invalid-argument", "Order ID is required.");
-  }
-
-  if (!newStatus) {
-    throw new HttpsError("invalid-argument", "New order status is required.");
-  }
-
-  const allowedStatuses = [
-    ORDER_STATUS.ACCEPTED,
-    ORDER_STATUS.PREPARING,
-    ORDER_STATUS.READY,
-    ORDER_STATUS.PICKED_UP,
-  ];
-
-  if (!allowedStatuses.includes(newStatus)) {
-    throw new HttpsError("invalid-argument", "Invalid order status.");
-  }
-
-  const userRef = db.collection("users").doc(uid);
   const orderRef = db.collection("orders").doc(orderId);
 
-  return await db.runTransaction(async (transaction) => {
-    const userSnap = await transaction.get(userRef);
-    const orderSnap = await transaction.get(orderRef);
+  await db.runTransaction(async (tx) => {
+    const userSnap = await tx.get(db.collection("users").doc(uid));
+    const orderSnap = await tx.get(orderRef);
 
-    if (!userSnap.exists) {
-      throw new HttpsError("not-found", "User not found.");
+    if (!userSnap.exists) throw new HttpsError("not-found", "User not found");
+    if (!orderSnap.exists) throw new HttpsError("not-found", "Order not found");
+
+    const user = userSnap.data();
+    const order = orderSnap.data();
+
+    if (user.role !== "shopkeeper") throw new HttpsError("permission-denied", "Only shopkeeper allowed");
+    if (user.isApproved !== true || user.isBlocked === true) throw new HttpsError("permission-denied", "Shopkeeper inactive");
+    if (order.shopId !== user.shopId) throw new HttpsError("permission-denied", "Order not from your shop");
+
+    const oldStatus = clean(order.status);
+    if (!allowed[oldStatus]?.includes(newStatus)) {
+      throw new HttpsError("failed-precondition", `Cannot change ${oldStatus} to ${newStatus}`);
     }
 
-    if (!orderSnap.exists) {
-      throw new HttpsError("not-found", "Order not found.");
-    }
-
-    const user = userSnap.data() || {};
-    const order = orderSnap.data() || {};
-
-    const role = getLowerString(user.role);
-    const userShopId = getString(user.shopId);
-    const isApproved = user.isApproved === true;
-    const isBlocked = user.isBlocked === true;
-
-    if (role !== "shopkeeper") {
-      throw new HttpsError(
-        "permission-denied",
-        "Only shopkeepers can update order status."
-      );
-    }
-
-    if (isBlocked) {
-      throw new HttpsError("permission-denied", "Your account is blocked.");
-    }
-
-    if (!isApproved) {
-      throw new HttpsError(
-        "permission-denied",
-        "Shopkeeper is not approved yet."
-      );
-    }
-
-    if (!userShopId) {
-      throw new HttpsError(
-        "failed-precondition",
-        "Shopkeeper has no assigned shop."
-      );
-    }
-
-    const orderShopId = getString(order.shopId);
-
-    if (orderShopId !== userShopId) {
-      throw new HttpsError(
-        "permission-denied",
-        "This order does not belong to your shop."
-      );
-    }
-
-    const oldStatus = getLowerString(order.status);
-    const oldPaymentStatus = getLowerString(order.paymentStatus);
-
-    if (oldStatus === ORDER_STATUS.CANCELLED) {
-      throw new HttpsError(
-        "failed-precondition",
-        "Cancelled order cannot be updated."
-      );
-    }
-
-    if (oldStatus === ORDER_STATUS.PICKED_UP) {
-      throw new HttpsError(
-        "failed-precondition",
-        "Picked up order cannot be updated."
-      );
-    }
-
-    const validTransitions = {
-      [ORDER_STATUS.PENDING]: [
-        ORDER_STATUS.ACCEPTED,
-        ORDER_STATUS.PREPARING,
-      ],
-      [ORDER_STATUS.ACCEPTED]: [ORDER_STATUS.PREPARING],
-      [ORDER_STATUS.PREPARING]: [ORDER_STATUS.READY],
-      [ORDER_STATUS.READY]: [ORDER_STATUS.PICKED_UP],
-    };
-
-    const nextAllowedStatuses = validTransitions[oldStatus] || [];
-
-    if (!nextAllowedStatuses.includes(newStatus)) {
-      throw new HttpsError(
-        "failed-precondition",
-        `Cannot change order from ${oldStatus || "unknown"} to ${newStatus}.`
-      );
-    }
-
-    const updates = {
+    const now = Date.now();
+    const update = {
       status: newStatus,
-      updatedAt: Date.now(),
-      updatedBy: uid,
+      updatedAt: now,
     };
 
-    const shouldVerifyPayment =
-      newStatus === ORDER_STATUS.PREPARING &&
-      oldPaymentStatus !== PAYMENT_STATUS.VERIFIED &&
-      oldPaymentStatus !== PAYMENT_STATUS.PAID;
-
-    if (shouldVerifyPayment) {
-      updates.paymentStatus = PAYMENT_STATUS.VERIFIED;
+    if (newStatus === "preparing") {
+      update.paymentStatus = "verified";
+      update.preparingAt = now;
     }
 
-    transaction.update(orderRef, updates);
-
-    if (shouldVerifyPayment) {
-      const pickupDate =
-        getString(order.pickupDate) || new Date().toISOString().slice(0, 10);
-
-      const month = pickupDate.slice(0, 7);
-      const totalPrice = getNumber(order.totalPrice);
-
-      incrementVerifiedAnalytics(
-        transaction,
-        userShopId,
-        pickupDate,
-        month,
-        totalPrice
-      );
+    if (newStatus === "ready") {
+      update.readyAt = now;
     }
 
-    return {
-      success: true,
-      orderId,
-      oldStatus,
-      newStatus,
-    };
+    if (newStatus === "picked_up") {
+      update.pickedUpAt = now;
+    }
+
+    tx.update(orderRef, update);
   });
+
+  return { success: true };
+});
+
+exports.cancelOrderByShopkeeper = onCall({ region: "us-central1" }, async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Login required");
+
+  const orderId = str(request.data?.orderId);
+  const paymentReceivedType = clean(request.data?.paymentReceivedType);
+  const cancelReason = str(request.data?.cancelReason);
+
+  if (!orderId) throw new HttpsError("invalid-argument", "Order ID required");
+  if (!["none", "partial", "full"].includes(paymentReceivedType)) {
+    throw new HttpsError("invalid-argument", "Invalid payment type");
+  }
+
+  const orderRef = db.collection("orders").doc(orderId);
+
+  await db.runTransaction(async (tx) => {
+    const userSnap = await tx.get(db.collection("users").doc(uid));
+    const orderSnap = await tx.get(orderRef);
+
+    if (!userSnap.exists) throw new HttpsError("not-found", "User not found");
+    if (!orderSnap.exists) throw new HttpsError("not-found", "Order not found");
+
+    const user = userSnap.data();
+    const order = orderSnap.data();
+
+    if (user.role !== "shopkeeper") throw new HttpsError("permission-denied", "Only shopkeeper allowed");
+    if (user.isApproved !== true || user.isBlocked === true) throw new HttpsError("permission-denied", "Shopkeeper inactive");
+    if (order.shopId !== user.shopId) throw new HttpsError("permission-denied", "Order not from your shop");
+
+    const oldStatus = clean(order.status);
+    if (!["pending", "preparing"].includes(oldStatus)) {
+      throw new HttpsError("failed-precondition", "This order cannot be cancelled");
+    }
+
+    const paymentReceived = paymentReceivedType === "partial" || paymentReceivedType === "full";
+    const totalPrice = typeof order.totalPrice === "number" ? order.totalPrice : 0;
+    const now = Date.now();
+
+    tx.update(orderRef, {
+      status: "cancelled",
+      paymentStatus: paymentReceived
+        ? paymentReceivedType === "full"
+          ? "paid"
+          : "partial_payment_received"
+        : "payment_not_received",
+      paymentReceivedByShopkeeper: paymentReceived,
+      paymentReceivedType,
+      cancelReason: cancelReason || "Payment not received",
+      cancelledBy: "shopkeeper",
+      cancelledAt: now,
+      refundStatus: paymentReceived ? "refund_pending" : "none",
+      refundAmount: paymentReceivedType === "full" ? totalPrice : 0,
+      refundReferenceId: "",
+      refundSettledAt: 0,
+      refundSettledBy: "",
+      refundNote: "",
+      updatedAt: now,
+    });
+  });
+
+  return { success: true };
+});
+
+exports.markRefundSettled = onCall({ region: "us-central1" }, async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Login required");
+
+  const orderId = str(request.data?.orderId);
+  const refundReferenceId = str(request.data?.refundReferenceId);
+  const refundNote = str(request.data?.refundNote);
+
+  if (!orderId || !refundReferenceId) {
+    throw new HttpsError("invalid-argument", "Missing refund details");
+  }
+
+  const orderRef = db.collection("orders").doc(orderId);
+
+  await db.runTransaction(async (tx) => {
+    const userSnap = await tx.get(db.collection("users").doc(uid));
+    const orderSnap = await tx.get(orderRef);
+
+    if (!userSnap.exists) throw new HttpsError("not-found", "User not found");
+    if (!orderSnap.exists) throw new HttpsError("not-found", "Order not found");
+
+    const user = userSnap.data();
+    const order = orderSnap.data();
+
+    if (user.role !== "shopkeeper") throw new HttpsError("permission-denied", "Only shopkeeper allowed");
+    if (order.shopId !== user.shopId) throw new HttpsError("permission-denied", "Order not from your shop");
+    if (clean(order.refundStatus) !== "refund_pending") throw new HttpsError("failed-precondition", "Refund not pending");
+
+    tx.update(orderRef, {
+      paymentStatus: "refunded",
+      refundStatus: "refunded",
+      refundReferenceId,
+      refundNote,
+      refundSettledBy: "shopkeeper",
+      refundSettledAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+  });
+
+  return { success: true };
 });
 
 exports.sendOrderReadyNotification = onDocumentUpdated(
-  "orders/{orderId}",
+  { document: "orders/{orderId}", region: "asia-south1" },
   async (event) => {
-    if (!event.data) {
-      return null;
-    }
+    if (!event.data) return null;
 
     const before = event.data.before.data() || {};
     const after = event.data.after.data() || {};
 
-    if (before.status === after.status) {
-      return null;
-    }
+    if (clean(before.status) === clean(after.status)) return null;
+    if (clean(after.status) !== "ready") return null;
 
-    if (after.status !== ORDER_STATUS.READY) {
-      return null;
-    }
+    const studentId = str(after.studentId);
+    if (!studentId) return null;
 
-    const studentId = getString(after.studentId);
+    const userSnap = await db.collection("users").doc(studentId).get();
+    const token = str(userSnap.data()?.fcmToken);
 
-    if (!studentId) {
-      return null;
-    }
+    if (!token) return null;
 
-    const userDoc = await db.collection("users").doc(studentId).get();
-    const user = userDoc.data() || {};
-    const fcmToken = getString(user.fcmToken);
-
-    if (!fcmToken) {
-      return null;
-    }
-
-    const message = {
-      token: fcmToken,
+    return admin.messaging().send({
+      token,
       notification: {
-        title: "Order Ready",
-        body: "Your order is ready for pickup.",
+        title: "Order Ready ✅",
+        body: "Your CampusBite order is ready for pickup.",
       },
       data: {
         orderId: event.params.orderId,
-        status: ORDER_STATUS.READY,
+        status: "ready",
       },
-    };
-
-    return admin.messaging().send(message);
+      android: {
+        priority: "high",
+        notification: {
+          channelId: "order_updates",
+          sound: "default",
+        },
+      },
+    });
   }
 );

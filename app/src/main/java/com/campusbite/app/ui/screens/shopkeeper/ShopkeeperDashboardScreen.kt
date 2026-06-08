@@ -1143,7 +1143,7 @@ private fun OrderCard(
                 when (order.status.lowercase()) {
                     OrderStatusValue.PENDING -> {
                         ActionButton(
-                            label = "Payment Received & Accept",
+                            label = "Payment Received & Start Preparing",
                             color = StatusPending,
                             onClick = {
                                 onUpdateStatus(OrderStatusValue.PREPARING)
