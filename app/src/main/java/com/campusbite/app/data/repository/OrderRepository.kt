@@ -258,8 +258,37 @@ class OrderRepository @Inject constructor(
                     return@addSnapshotListener
                 }
 
-                val order = snapshot?.toObject(Order::class.java)
-                onUpdate(order)
+                if (snapshot == null || !snapshot.exists()) {
+                    Log.e("OrderRepository", "Order snapshot missing: $orderId")
+                    onUpdate(null)
+                    return@addSnapshotListener
+                }
+
+                try {
+                    val order = snapshot.toObject(Order::class.java)
+
+                    if (order == null) {
+                        Log.e("OrderRepository", "Order parse failed: $orderId")
+                        onUpdate(null)
+                        return@addSnapshotListener
+                    }
+
+                    val finalOrder = if (order.orderId.isBlank()) {
+                        order.copy(orderId = snapshot.id)
+                    } else {
+                        order
+                    }
+
+                    Log.d(
+                        "OrderRepository",
+                        "Order live update: ${finalOrder.orderId}, status=${finalOrder.status}"
+                    )
+
+                    onUpdate(finalOrder)
+                } catch (e: Exception) {
+                    Log.e("OrderRepository", "Failed to parse order update", e)
+                    onUpdate(null)
+                }
             }
     }
 

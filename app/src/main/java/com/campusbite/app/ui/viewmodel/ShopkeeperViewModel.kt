@@ -13,6 +13,7 @@ import androidx.lifecycle.viewModelScope
 import com.campusbite.app.R
 import com.campusbite.app.data.model.MenuItem
 import com.campusbite.app.data.model.Order
+import com.campusbite.app.data.repository.OrderActionRepository
 import com.campusbite.app.util.OrderStatusValue
 import com.campusbite.app.util.PaymentReceivedType
 import com.campusbite.app.util.PaymentStatusValue
@@ -23,7 +24,6 @@ import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
-import com.google.firebase.firestore.SetOptions
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -33,7 +33,6 @@ import kotlinx.coroutines.tasks.await
 import java.time.LocalDate
 import java.time.YearMonth
 import javax.inject.Inject
-import com.campusbite.app.data.repository.OrderActionRepository
 
 data class ShopkeeperSalesSummary(
     val todayOrders: Int = 0,
@@ -58,7 +57,7 @@ class ShopkeeperViewModel @Inject constructor(
     private val auth: FirebaseAuth,
     private val orderActionRepository: OrderActionRepository,
     @ApplicationContext private val appContext: Context
-) : ViewModel()  {
+) : ViewModel() {
 
     private val _orders = MutableStateFlow<List<Order>>(emptyList())
     val orders: StateFlow<List<Order>> = _orders
@@ -103,15 +102,16 @@ class ShopkeeperViewModel @Inject constructor(
     private var hasLoadedInitialOrders = false
 
     init {
-        loadShopIdAndOrders()
+        loadShopkeeperData()
     }
 
-    private fun loadShopIdAndOrders() {
+    private fun loadShopkeeperData() {
         viewModelScope.launch {
             _isLoading.value = true
 
             try {
-                val uid = auth.currentUser?.uid ?: return@launch
+                val uid = auth.currentUser?.uid
+                    ?: throw Exception("User not logged in.")
 
                 val userDoc = firestore.collection("users")
                     .document(uid)
@@ -120,12 +120,16 @@ class ShopkeeperViewModel @Inject constructor(
 
                 shopId = userDoc.getString("shopId").orEmpty()
 
-                if (shopId.isNotBlank()) {
-                    loadShopControls()
-                    listenToOrders()
-                    listenToAnalytics()
-                    loadMenuItems(shopId)
+                if (shopId.isBlank()) {
+                    _message.value = "Shop ID missing. Please login again."
+                    return@launch
                 }
+
+                loadShopControls()
+                listenToOrders()
+                listenToAnalytics()
+                loadMenuItems(shopId)
+
             } catch (e: Exception) {
                 e.printStackTrace()
                 _message.value = e.message ?: "Failed to load shopkeeper data."
@@ -149,14 +153,12 @@ class ShopkeeperViewModel @Inject constructor(
                     return@addSnapshotListener
                 }
 
-                if (doc == null || !doc.exists()) {
-                    return@addSnapshotListener
-                }
+                if (doc == null || !doc.exists()) return@addSnapshotListener
 
                 _shopOpen.value = doc.getBoolean("isOpen") ?: true
 
-                _closedSlots.value =
-                    doc.get("closedSlots") as? List<String> ?: emptyList()
+                _closedSlots.value = doc.get("closedSlots") as? List<String>
+                    ?: emptyList()
             }
     }
 
@@ -170,54 +172,31 @@ class ShopkeeperViewModel @Inject constructor(
 
         activeOrdersListener?.remove()
 
-        val activeStatuses = listOf(
-            OrderStatusValue.PENDING,
-            OrderStatusValue.PREPARING,
-            OrderStatusValue.READY
-        )
-
         activeOrdersListener = firestore.collection("orders")
             .whereEqualTo("shopId", shopId)
-            .whereIn("status", activeStatuses)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
                     error.printStackTrace()
                     activeOrdersCache = emptyList()
                     mergeOrders()
-                    _message.value = error.message ?: "Failed to load active orders."
                     updateSalesSummary()
+                    _message.value = error.message ?: "Failed to load active orders."
                     return@addSnapshotListener
                 }
 
                 val activeOrders = snapshot?.documents
-                    ?.mapNotNull { doc ->
-                        try {
-                            doc.toObject(Order::class.java)
-                        } catch (e: Exception) {
-                            e.printStackTrace()
-                            null
-                        }
+                    ?.mapNotNull { doc -> doc.toOrderOrNull() }
+                    ?.filter { order ->
+                        order.status.lowercase() in listOf(
+                            OrderStatusValue.PENDING,
+                            OrderStatusValue.PREPARING,
+                            OrderStatusValue.READY
+                        )
                     }
                     ?.sortedBy { it.createdAt }
                     ?: emptyList()
 
-                if (!hasLoadedInitialOrders) {
-                    knownOrderIds.clear()
-                    knownOrderIds.addAll(activeOrders.map { it.orderId })
-                    hasLoadedInitialOrders = true
-                } else {
-                    val newPendingOrders = activeOrders.filter { order ->
-                        order.status.lowercase() == OrderStatusValue.PENDING &&
-                                order.orderId !in knownOrderIds
-                    }
-
-                    newPendingOrders.forEach { order ->
-                        showNewOrderNotification(order)
-                    }
-
-                    knownOrderIds.clear()
-                    knownOrderIds.addAll(activeOrders.map { it.orderId })
-                }
+                handleNewPendingOrderNotifications(activeOrders)
 
                 activeOrdersCache = activeOrders
                 mergeOrders()
@@ -239,26 +218,55 @@ class ShopkeeperViewModel @Inject constructor(
                     error.printStackTrace()
                     refundPendingOrdersCache = emptyList()
                     mergeOrders()
-                    _message.value = error.message ?: "Failed to load refund pending orders."
                     updateSalesSummary()
+                    _message.value = error.message ?: "Failed to load refund pending orders."
                     return@addSnapshotListener
                 }
 
                 refundPendingOrdersCache = snapshot?.documents
-                    ?.mapNotNull { doc ->
-                        try {
-                            doc.toObject(Order::class.java)
-                        } catch (e: Exception) {
-                            e.printStackTrace()
-                            null
-                        }
-                    }
+                    ?.mapNotNull { doc -> doc.toOrderOrNull() }
                     ?.sortedByDescending { it.cancelledAt }
                     ?: emptyList()
 
                 mergeOrders()
                 updateSalesSummary()
             }
+    }
+
+    private fun DocumentSnapshot.toOrderOrNull(): Order? {
+        return try {
+            val order = toObject(Order::class.java) ?: return null
+
+            if (order.orderId.isBlank()) {
+                order.copy(orderId = id)
+            } else {
+                order
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        }
+    }
+
+    private fun handleNewPendingOrderNotifications(activeOrders: List<Order>) {
+        if (!hasLoadedInitialOrders) {
+            knownOrderIds.clear()
+            knownOrderIds.addAll(activeOrders.map { it.orderId })
+            hasLoadedInitialOrders = true
+            return
+        }
+
+        val newPendingOrders = activeOrders.filter { order ->
+            order.status.lowercase() == OrderStatusValue.PENDING &&
+                    order.orderId !in knownOrderIds
+        }
+
+        newPendingOrders.forEach { order ->
+            showNewOrderNotification(order)
+        }
+
+        knownOrderIds.clear()
+        knownOrderIds.addAll(activeOrders.map { it.orderId })
     }
 
     private fun mergeOrders() {
@@ -320,19 +328,17 @@ class ShopkeeperViewModel @Inject constructor(
         val today = LocalDate.now().toString()
         val currentMonth = YearMonth.now().toString()
 
-        val activeOrders = activeOrdersCache
-
-        val pendingTodayOrders = activeOrders.count { order ->
+        val pendingTodayOrders = activeOrdersCache.count { order ->
             order.pickupDate == today &&
                     order.paymentStatus.lowercase() == PaymentStatusValue.PENDING_VERIFICATION
         }
 
-        val pendingMonthOrders = activeOrders.count { order ->
+        val pendingMonthOrders = activeOrdersCache.count { order ->
             order.pickupDate.startsWith(currentMonth) &&
                     order.paymentStatus.lowercase() == PaymentStatusValue.PENDING_VERIFICATION
         }
 
-        val pendingPaymentOrders = activeOrders.count { order ->
+        val pendingPaymentOrders = activeOrdersCache.count { order ->
             order.paymentStatus.lowercase() == PaymentStatusValue.PENDING_VERIFICATION
         }
 
@@ -348,105 +354,59 @@ class ShopkeeperViewModel @Inject constructor(
         )
     }
 
-    fun toggleShopOpen(isOpen: Boolean) {
-        if (shopId.isBlank()) {
-            _message.value = "Shop ID missing. Please login again."
-            return
-        }
-
-        viewModelScope.launch {
-            try {
-                firestore.collection("shops")
-                    .document(shopId)
-                    .update(
-                        mapOf(
-                            "isOpen" to isOpen,
-                            "updatedAt" to FieldValue.serverTimestamp()
-                        )
-                    )
-                    .await()
-
-                _message.value = if (isOpen) {
-                    "Shop opened"
-                } else {
-                    "Shop closed"
-                }
-            } catch (e: Exception) {
-                e.printStackTrace()
-                _message.value = e.message ?: "Failed to update shop status."
-            }
-        }
-    }
-
-    fun toggleSlot(slot: String) {
-        if (shopId.isBlank()) return
-
-        viewModelScope.launch {
-            try {
-                val shopRef = firestore.collection("shops")
-                    .document(shopId)
-
-                if (_closedSlots.value.contains(slot)) {
-                    shopRef.update(
-                        "closedSlots",
-                        FieldValue.arrayRemove(slot)
-                    ).await()
-                } else {
-                    shopRef.update(
-                        "closedSlots",
-                        FieldValue.arrayUnion(slot)
-                    ).await()
-                }
-            } catch (e: Exception) {
-                e.printStackTrace()
-                _message.value = e.message ?: "Failed to update slot."
-            }
-        }
-    }
-
     fun updateOrderStatus(
         orderId: String,
         newStatus: String
     ) {
-        if (orderId.isBlank()) return
+        if (orderId.isBlank()) {
+            _message.value = "Order ID missing."
+            return
+        }
 
         viewModelScope.launch {
-            try {
-                val result = orderActionRepository.updateOrderStatus(
-                    orderId = orderId,
-                    newStatus = newStatus
-                )
+            val result = orderActionRepository.updateOrderStatus(
+                orderId = orderId,
+                newStatus = newStatus
+            )
 
-                result.fold(
-                    onSuccess = {
-                        // No manual refresh needed.
-                        // Your Firestore snapshot listener will update the UI automatically.
-                    },
-                    onFailure = { error ->
-                        error.printStackTrace()
-                        _message.value = error.message ?: "Failed to update order."
+            result.fold(
+                onSuccess = {
+                    _message.value = when (newStatus.lowercase()) {
+                        OrderStatusValue.PREPARING -> "Order accepted and started preparing."
+                        OrderStatusValue.READY -> "Order marked as ready."
+                        OrderStatusValue.PICKED_UP -> "Order marked as picked up."
+                        else -> "Order updated successfully."
                     }
-                )
-            } catch (e: Exception) {
-                e.printStackTrace()
-                _message.value = e.message ?: "Failed to update order."
-            }
+                },
+                onFailure = { error ->
+                    error.printStackTrace()
+                    _message.value = error.message ?: "Failed to update order."
+                }
+            )
         }
     }
+
     fun cancelOrderByShopkeeper(
         orderId: String,
         paymentReceivedType: String,
         cancelReason: String
     ) {
-        if (orderId.isBlank()) return
+        if (orderId.isBlank()) {
+            _message.value = "Order ID missing."
+            return
+        }
+
+        val cleanReason = cancelReason.trim()
+
+        if (cleanReason.isBlank()) {
+            _message.value = "Cancellation reason is required."
+            return
+        }
 
         viewModelScope.launch {
-            val cleanPaymentType = paymentReceivedType.trim().lowercase()
-            val cleanReason = cancelReason.trim()
-
             val result = orderActionRepository.cancelOrderByShopkeeper(
                 orderId = orderId,
-                paymentReceivedType = cleanPaymentType,
+                paymentReceivedType = paymentReceivedType.trim().lowercase(),
                 cancelReason = cleanReason
             )
 
@@ -461,12 +421,16 @@ class ShopkeeperViewModel @Inject constructor(
             )
         }
     }
+
     fun markRefundSettled(
         orderId: String,
         refundReferenceId: String,
         refundNote: String
     ) {
-        if (orderId.isBlank()) return
+        if (orderId.isBlank()) {
+            _message.value = "Order ID missing."
+            return
+        }
 
         viewModelScope.launch {
             val result = orderActionRepository.markRefundSettled(
@@ -486,7 +450,6 @@ class ShopkeeperViewModel @Inject constructor(
             )
         }
     }
-
     fun cancelOrderForPaymentNotReceived(orderId: String) {
         cancelOrderByShopkeeper(
             orderId = orderId,
@@ -495,128 +458,62 @@ class ShopkeeperViewModel @Inject constructor(
         )
     }
 
-    private fun incrementVerifiedAnalytics(
-        transaction: com.google.firebase.firestore.Transaction,
-        shopId: String,
-        pickupDate: String,
-        month: String,
-        amount: Double
-    ) {
-        val dailyRef = dailyAnalyticsRef(shopId, pickupDate)
-        val monthlyRef = monthlyAnalyticsRef(shopId, month)
-        val lifetimeRef = lifetimeAnalyticsRef(shopId)
 
-        val update = mapOf(
-            "verifiedOrders" to FieldValue.increment(1),
-            "verifiedSales" to FieldValue.increment(amount),
-            "updatedAt" to FieldValue.serverTimestamp()
-        )
 
-        transaction.set(dailyRef, update, SetOptions.merge())
-        transaction.set(monthlyRef, update, SetOptions.merge())
-        transaction.set(lifetimeRef, update, SetOptions.merge())
-    }
-
-    private fun incrementCancelledAnalytics(
-        transaction: com.google.firebase.firestore.Transaction,
-        shopId: String,
-        pickupDate: String,
-        month: String
-    ) {
-        val dailyRef = dailyAnalyticsRef(shopId, pickupDate)
-        val monthlyRef = monthlyAnalyticsRef(shopId, month)
-        val lifetimeRef = lifetimeAnalyticsRef(shopId)
-
-        val update = mapOf(
-            "cancelledOrders" to FieldValue.increment(1),
-            "updatedAt" to FieldValue.serverTimestamp()
-        )
-
-        transaction.set(dailyRef, update, SetOptions.merge())
-        transaction.set(monthlyRef, update, SetOptions.merge())
-        transaction.set(lifetimeRef, update, SetOptions.merge())
-    }
-
-    private fun dailyAnalyticsRef(shopId: String, date: String): DocumentReference {
-        return firestore.collection("shopAnalytics")
-            .document(shopId)
-            .collection("daily")
-            .document(date)
-    }
-
-    private fun monthlyAnalyticsRef(shopId: String, month: String): DocumentReference {
-        return firestore.collection("shopAnalytics")
-            .document(shopId)
-            .collection("monthly")
-            .document(month)
-    }
-
-    private fun lifetimeAnalyticsRef(shopId: String): DocumentReference {
-        return firestore.collection("shopAnalytics")
-            .document(shopId)
-            .collection("lifetime")
-            .document("summary")
-    }
-
-    private fun DocumentSnapshot?.toShopkeeperAnalyticsSnapshot(): ShopkeeperAnalyticsSnapshot {
-        if (this == null || !exists()) return ShopkeeperAnalyticsSnapshot()
-
-        return ShopkeeperAnalyticsSnapshot(
-            verifiedOrders = getLong("verifiedOrders")?.toInt() ?: 0,
-            verifiedSales = getDouble("verifiedSales")
-                ?: getLong("verifiedSales")?.toDouble()
-                ?: 0.0,
-            cancelledOrders = getLong("cancelledOrders")?.toInt() ?: 0
-        )
-    }
-
-    fun clearMessage() {
-        _message.value = ""
-    }
-
-    private fun showNewOrderNotification(order: Order) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            val hasPermission = ContextCompat.checkSelfPermission(
-                appContext,
-                android.Manifest.permission.POST_NOTIFICATIONS
-            ) == PackageManager.PERMISSION_GRANTED
-
-            if (!hasPermission) return
+    fun toggleShopOpen(isOpen: Boolean) {
+        if (shopId.isBlank()) {
+            _message.value = "Shop ID missing. Please login again."
+            return
         }
 
-        val channelId = "staff_order_updates"
+        viewModelScope.launch {
+            try {
+                firestore.collection("shops")
+                    .document(shopId)
+                    .update(
+                        mapOf(
+                            "isOpen" to isOpen,
+                            "updatedAt" to FieldValue.serverTimestamp()
+                        )
+                    )
+                    .await()
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                channelId,
-                "Staff Order Updates",
-                NotificationManager.IMPORTANCE_HIGH
-            )
+                _message.value = if (isOpen) "Shop opened" else "Shop closed"
 
-            val notificationManager = appContext.getSystemService(
-                NotificationManager::class.java
-            )
+            } catch (e: Exception) {
+                e.printStackTrace()
+                _message.value = e.message ?: "Failed to update shop status."
+            }
+        }
+    }
 
-            notificationManager.createNotificationChannel(channel)
+    fun toggleSlot(slot: String) {
+        if (shopId.isBlank()) {
+            _message.value = "Shop ID missing. Please login again."
+            return
         }
 
-        val itemSummary = order.items.joinToString {
-            "${it.name} x${it.quantity}"
-        }
+        viewModelScope.launch {
+            try {
+                val shopRef = firestore.collection("shops")
+                    .document(shopId)
 
-        val notification = NotificationCompat.Builder(appContext, channelId)
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
-            .setContentTitle("New Order Received 🔔")
-            .setContentText(itemSummary.ifBlank { "You have a new order" })
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setAutoCancel(true)
-            .build()
+                if (_closedSlots.value.contains(slot)) {
+                    shopRef.update(
+                        "closedSlots",
+                        FieldValue.arrayRemove(slot)
+                    ).await()
+                } else {
+                    shopRef.update(
+                        "closedSlots",
+                        FieldValue.arrayUnion(slot)
+                    ).await()
+                }
 
-        try {
-            NotificationManagerCompat.from(appContext)
-                .notify(order.orderId.hashCode(), notification)
-        } catch (e: SecurityException) {
-            e.printStackTrace()
+            } catch (e: Exception) {
+                e.printStackTrace()
+                _message.value = e.message ?: "Failed to update slot."
+            }
         }
     }
 
@@ -653,9 +550,16 @@ class ShopkeeperViewModel @Inject constructor(
     }
 
     fun addMenuItem(menuItem: MenuItem) {
+        if (shopId.isBlank()) {
+            _message.value = "Shop ID missing. Please login again."
+            return
+        }
+
         viewModelScope.launch {
             try {
-                val itemId = firestore.collection("menuItems").document().id
+                val itemId = firestore.collection("menuItems")
+                    .document()
+                    .id
 
                 val newItem = menuItem.copy(
                     itemId = itemId,
@@ -666,6 +570,9 @@ class ShopkeeperViewModel @Inject constructor(
                     .document(itemId)
                     .set(newItem)
                     .await()
+
+                _message.value = "Menu item added."
+
             } catch (e: Exception) {
                 e.printStackTrace()
                 _message.value = e.message ?: "Failed to add menu item."
@@ -674,7 +581,10 @@ class ShopkeeperViewModel @Inject constructor(
     }
 
     fun updateMenuItem(menuItem: MenuItem) {
-        if (menuItem.itemId.isBlank()) return
+        if (menuItem.itemId.isBlank()) {
+            _message.value = "Item ID missing."
+            return
+        }
 
         viewModelScope.launch {
             try {
@@ -682,6 +592,9 @@ class ShopkeeperViewModel @Inject constructor(
                     .document(menuItem.itemId)
                     .set(menuItem)
                     .await()
+
+                _message.value = "Menu item updated."
+
             } catch (e: Exception) {
                 e.printStackTrace()
                 _message.value = e.message ?: "Failed to update menu item."
@@ -690,7 +603,10 @@ class ShopkeeperViewModel @Inject constructor(
     }
 
     fun deleteMenuItem(itemId: String) {
-        if (itemId.isBlank()) return
+        if (itemId.isBlank()) {
+            _message.value = "Item ID missing."
+            return
+        }
 
         viewModelScope.launch {
             try {
@@ -698,6 +614,9 @@ class ShopkeeperViewModel @Inject constructor(
                     .document(itemId)
                     .delete()
                     .await()
+
+                _message.value = "Menu item deleted."
+
             } catch (e: Exception) {
                 e.printStackTrace()
                 _message.value = e.message ?: "Failed to delete menu item."
@@ -705,20 +624,121 @@ class ShopkeeperViewModel @Inject constructor(
         }
     }
 
-    fun toggleMenuItemAvailability(itemId: String, currentItem: MenuItem) {
-        if (itemId.isBlank()) return
+    fun toggleMenuItemAvailability(
+        itemId: String,
+        currentItem: MenuItem
+    ) {
+        if (itemId.isBlank()) {
+            _message.value = "Item ID missing."
+            return
+        }
 
         viewModelScope.launch {
             try {
                 firestore.collection("menuItems")
                     .document(itemId)
-                    .update("isAvailable", !currentItem.isAvailable)
+                    .update(
+                        mapOf(
+                            "isAvailable" to !currentItem.isAvailable,
+                            "updatedAt" to FieldValue.serverTimestamp()
+                        )
+                    )
                     .await()
+
             } catch (e: Exception) {
                 e.printStackTrace()
                 _message.value = e.message ?: "Failed to update item availability."
             }
         }
+    }
+
+    private fun dailyAnalyticsRef(
+        shopId: String,
+        date: String
+    ): DocumentReference {
+        return firestore.collection("shopAnalytics")
+            .document(shopId)
+            .collection("daily")
+            .document(date)
+    }
+
+    private fun monthlyAnalyticsRef(
+        shopId: String,
+        month: String
+    ): DocumentReference {
+        return firestore.collection("shopAnalytics")
+            .document(shopId)
+            .collection("monthly")
+            .document(month)
+    }
+
+    private fun lifetimeAnalyticsRef(shopId: String): DocumentReference {
+        return firestore.collection("shopAnalytics")
+            .document(shopId)
+            .collection("lifetime")
+            .document("summary")
+    }
+
+    private fun DocumentSnapshot?.toShopkeeperAnalyticsSnapshot(): ShopkeeperAnalyticsSnapshot {
+        if (this == null || !exists()) return ShopkeeperAnalyticsSnapshot()
+
+        return ShopkeeperAnalyticsSnapshot(
+            verifiedOrders = getLong("verifiedOrders")?.toInt() ?: 0,
+            verifiedSales = getDouble("verifiedSales")
+                ?: getLong("verifiedSales")?.toDouble()
+                ?: 0.0,
+            cancelledOrders = getLong("cancelledOrders")?.toInt() ?: 0
+        )
+    }
+
+    private fun showNewOrderNotification(order: Order) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val hasPermission = ContextCompat.checkSelfPermission(
+                appContext,
+                android.Manifest.permission.POST_NOTIFICATIONS
+            ) == PackageManager.PERMISSION_GRANTED
+
+            if (!hasPermission) return
+        }
+
+        val channelId = STAFF_ORDER_UPDATES_CHANNEL_ID
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                channelId,
+                "Staff Order Updates",
+                NotificationManager.IMPORTANCE_HIGH
+            )
+
+            val notificationManager = appContext.getSystemService(
+                NotificationManager::class.java
+            )
+
+            notificationManager.createNotificationChannel(channel)
+        }
+
+        val itemSummary = order.items.joinToString {
+            "${it.name} x${it.quantity}"
+        }
+
+        val notification = NotificationCompat.Builder(appContext, channelId)
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setContentTitle("New Order Received 🔔")
+            .setContentText(itemSummary.ifBlank { "You have a new order" })
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setAutoCancel(true)
+            .build()
+
+        try {
+            NotificationManagerCompat.from(appContext)
+                .notify(order.orderId.hashCode(), notification)
+        } catch (e: SecurityException) {
+            e.printStackTrace()
+        }
+    }
+
+    fun clearMessage() {
+        _message.value = ""
     }
 
     override fun onCleared() {
@@ -732,5 +752,9 @@ class ShopkeeperViewModel @Inject constructor(
         todayAnalyticsListener?.remove()
         monthAnalyticsListener?.remove()
         lifetimeAnalyticsListener?.remove()
+    }
+
+    companion object {
+        private const val STAFF_ORDER_UPDATES_CHANNEL_ID = "staff_order_updates"
     }
 }

@@ -75,6 +75,7 @@ class OrderViewModel @Inject constructor(
 
     private var activeOrderListener: ListenerRegistration? = null
     private var currentOrderListener: ListenerRegistration? = null
+    private var userOrdersListener: ListenerRegistration? = null
     private var shopAvailabilityListener: ListenerRegistration? = null
 
     private val lastKnownOrderStates = mutableMapOf<String, String>()
@@ -362,17 +363,24 @@ class OrderViewModel @Inject constructor(
                     return@addSnapshotListener
                 }
 
-                val allOrders = snapshot?.documents
-                    ?.mapNotNull { doc ->
+                val documents = snapshot?.documents ?: emptyList()
+
+                val allOrders = documents
+                    .mapNotNull { doc ->
                         try {
-                            doc.toObject(Order::class.java)
+                            val order = doc.toObject(Order::class.java)
+
+                            when {
+                                order == null -> null
+                                order.orderId.isBlank() -> order.copy(orderId = doc.id)
+                                else -> order
+                            }
                         } catch (e: Exception) {
                             Log.e("OrderVM", "Failed to parse order", e)
                             null
                         }
                     }
-                    ?.sortedByDescending { it.createdAt }
-                    ?: emptyList()
+                    .sortedByDescending { it.createdAt }
 
                 allOrders.forEach { order ->
                     val orderId = order.orderId
@@ -405,35 +413,50 @@ class OrderViewModel @Inject constructor(
     }
 
     fun loadUserOrders(userId: String) {
-        viewModelScope.launch {
-            try {
-                if (userId.isBlank()) {
+        if (userId.isBlank()) {
+            _userOrders.value = emptyList()
+            return
+        }
+
+        userOrdersListener?.remove()
+
+        userOrdersListener = firestore.collection("orders")
+            .whereEqualTo("studentId", userId)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.e("OrderVM", "User orders listener error", error)
                     _userOrders.value = emptyList()
-                    return@launch
+                    return@addSnapshotListener
                 }
 
-                val snapshot = firestore.collection("orders")
-                    .whereEqualTo("studentId", userId)
-                    .get()
-                    .await()
+                val documents = snapshot?.documents ?: emptyList()
 
-                _userOrders.value = snapshot.documents
+                val orders = documents
                     .mapNotNull { doc ->
                         try {
-                            doc.toObject(Order::class.java)
+                            val order = doc.toObject(Order::class.java)
+
+                            when {
+                                order == null -> null
+                                order.orderId.isBlank() -> order.copy(orderId = doc.id)
+                                else -> order
+                            }
                         } catch (e: Exception) {
                             Log.e("OrderVM", "Failed to parse user order", e)
                             null
                         }
                     }
                     .sortedByDescending { it.createdAt }
-            } catch (e: Exception) {
-                Log.e("OrderVM", "Failed to load user orders", e)
-                _userOrders.value = emptyList()
-            }
-        }
-    }
 
+                Log.d("OrderVM", "User profile orders updated: ${orders.size}")
+
+                _userOrders.value = orders
+
+                _activeOrder.value = orders.firstOrNull { order ->
+                    order.status.lowercase() in activeStatuses
+                }
+            }
+    }
     fun resetState() {
         _orderState.value = OrderState.Idle
     }
@@ -915,6 +938,7 @@ class OrderViewModel @Inject constructor(
         super.onCleared()
         activeOrderListener?.remove()
         currentOrderListener?.remove()
+        userOrdersListener?.remove()
         shopAvailabilityListener?.remove()
     }
 }

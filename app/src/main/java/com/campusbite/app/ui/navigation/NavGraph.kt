@@ -34,14 +34,49 @@ import com.campusbite.app.ui.viewmodel.AuthViewModel
 import com.campusbite.app.ui.viewmodel.CartViewModel
 import com.campusbite.app.ui.viewmodel.HomeViewModel
 import com.campusbite.app.ui.viewmodel.OrderViewModel
-
+import kotlinx.coroutines.delay
 @Composable
 fun NavGraph(
-    navController: NavHostController
+    navController: NavHostController,
+    notificationOrderId: String? = null,
+    notificationType: String? = null,
+    onNotificationHandled: () -> Unit = {}
 ) {
     val authViewModel: AuthViewModel = hiltViewModel()
     val cartViewModel: CartViewModel = hiltViewModel()
     val orderViewModel: OrderViewModel = hiltViewModel()
+
+    LaunchedEffect(notificationOrderId, notificationType) {
+        val orderId = notificationOrderId.orEmpty()
+        val type = notificationType.orEmpty()
+
+        if (orderId.isBlank() && type.isBlank()) {
+            return@LaunchedEffect
+        }
+
+        delay(700)
+
+        when {
+            type == "new_order" || type == "shopkeeper_order" -> {
+                navController.navigate(Routes.SHOPKEEPER_DASHBOARD) {
+                    launchSingleTop = true
+                    popUpTo(Routes.SPLASH) {
+                        inclusive = false
+                    }
+                }
+
+                onNotificationHandled()
+            }
+
+            orderId.isNotBlank() -> {
+                navController.navigate(Routes.orderStatus(orderId)) {
+                    launchSingleTop = true
+                }
+
+                onNotificationHandled()
+            }
+        }
+    }
 
     NavHost(
         navController = navController,

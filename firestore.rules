@@ -1,0 +1,232 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function userPath() {
+      return /databases/$(database)/documents/users/$(request.auth.uid);
+    }
+
+    function userExists() {
+      return isSignedIn() && exists(userPath());
+    }
+
+    function currentUser() {
+      return get(userPath());
+    }
+
+    function isAdmin() {
+      return userExists()
+        && currentUser().data.role == "admin"
+        && currentUser().data.isBlocked != true;
+    }
+
+    function isShopkeeper() {
+      return userExists()
+        && currentUser().data.role == "shopkeeper"
+        && currentUser().data.isApproved == true
+        && currentUser().data.isBlocked != true;
+    }
+
+    function isStudent() {
+      return userExists()
+        && currentUser().data.role == "student"
+        && currentUser().data.isBlocked != true;
+    }
+
+    function userShopId() {
+      return currentUser().data.shopId;
+    }
+
+    function changedKeys() {
+      return request.resource.data.diff(resource.data).affectedKeys();
+    }
+
+    function shopPath(shopId) {
+      return /databases/$(database)/documents/shops/$(shopId);
+    }
+
+    function shopExists(shopId) {
+      return shopId is string
+        && shopId != ""
+        && exists(shopPath(shopId));
+    }
+
+    function shopIsOrderable(shopId) {
+      return shopExists(shopId)
+        && get(shopPath(shopId)).data.isApproved == true
+        && get(shopPath(shopId)).data.isBlocked != true
+        && get(shopPath(shopId)).data.isDeleted != true
+        && get(shopPath(shopId)).data.isOpen == true;
+    }
+
+    match /users/{userId} {
+      allow create: if isSignedIn()
+        && request.auth.uid == userId
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.role in ["student", "shopkeeper"];
+
+      allow read: if isSignedIn()
+        && (
+          request.auth.uid == userId
+          || isAdmin()
+        );
+
+      allow update: if isAdmin()
+        || (
+          isSignedIn()
+          && request.auth.uid == userId
+          && changedKeys().hasOnly([
+            "name",
+            "phone",
+            "fcmToken",
+            "fcmTokens",
+            "fcmTokenUpdatedAt",
+            "lastSeenAt",
+            "updatedAt"
+          ])
+        );
+
+      allow delete: if isAdmin();
+    }
+
+    match /shops/{shopId} {
+      allow read: if isSignedIn();
+
+      allow create: if isAdmin();
+
+      allow update: if isAdmin()
+        || (
+          isShopkeeper()
+          && userShopId() == shopId
+          && request.resource.data.shopId == resource.data.shopId
+          && request.resource.data.ownerUid == resource.data.ownerUid
+          && request.resource.data.ownerEmail == resource.data.ownerEmail
+          && request.resource.data.isApproved == resource.data.isApproved
+          && request.resource.data.isBlocked == resource.data.isBlocked
+          && request.resource.data.isDeleted == resource.data.isDeleted
+          && request.resource.data.displayOrder == resource.data.displayOrder
+          && changedKeys().hasOnly([
+            "name",
+            "description",
+            "imageUrl",
+            "isOpen",
+            "openingTime",
+            "closingTime",
+            "maxOrdersPerSlot",
+            "closedSlots",
+            "upiId",
+            "phone",
+            "ownerPhone",
+            "updatedAt",
+            "lastActiveAt"
+          ])
+        );
+
+      allow delete: if isAdmin();
+    }
+
+    match /menuItems/{menuItemId} {
+      allow read: if isSignedIn();
+
+      allow create: if isAdmin()
+        || (
+          isShopkeeper()
+          && request.resource.data.itemId == menuItemId
+          && request.resource.data.shopId == userShopId()
+          && request.resource.data.name is string
+          && request.resource.data.name != ""
+          && request.resource.data.price is number
+          && request.resource.data.price > 0
+        );
+
+      allow update: if isAdmin()
+        || (
+          isShopkeeper()
+          && resource.data.shopId == userShopId()
+          && request.resource.data.shopId == resource.data.shopId
+          && request.resource.data.itemId == resource.data.itemId
+        );
+
+      allow delete: if isAdmin()
+        || (
+          isShopkeeper()
+          && resource.data.shopId == userShopId()
+        );
+    }
+
+    match /orders/{orderId} {
+      allow create: if isStudent()
+        && request.resource.data.orderId == orderId
+        && request.resource.data.studentId == request.auth.uid
+        && request.resource.data.shopId is string
+        && shopIsOrderable(request.resource.data.shopId)
+        && request.resource.data.items is list
+        && request.resource.data.items.size() > 0
+        && request.resource.data.totalPrice is number
+        && request.resource.data.totalPrice > 0
+        && request.resource.data.status == "pending"
+        && request.resource.data.paymentStatus == "pending_verification";
+
+      allow read: if isAdmin()
+        || (
+          isStudent()
+          && resource.data.studentId == request.auth.uid
+        )
+        || (
+          isShopkeeper()
+          && resource.data.shopId == userShopId()
+        );
+
+      allow update: if isAdmin();
+
+      allow delete: if isAdmin();
+    }
+
+    match /slotAvailability/{slotId} {
+      allow read: if isSignedIn();
+
+      allow create: if isAdmin()
+        || (
+          isShopkeeper()
+          && request.resource.data.shopId == userShopId()
+        );
+
+      allow update: if isAdmin()
+        || (
+          isShopkeeper()
+          && resource.data.shopId == userShopId()
+          && request.resource.data.shopId == resource.data.shopId
+        );
+
+      allow delete: if isAdmin()
+        || (
+          isShopkeeper()
+          && resource.data.shopId == userShopId()
+        );
+    }
+
+    match /shopAnalytics/{shopId}/{period}/{docId} {
+      allow read: if isAdmin()
+        || (
+          isShopkeeper()
+          && userShopId() == shopId
+        );
+
+      allow write: if isAdmin();
+    }
+
+    match /appConfig/{docId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

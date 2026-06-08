@@ -11,17 +11,19 @@ object OrderStatusValue {
 
 object PaymentStatusValue {
     const val PENDING_VERIFICATION = "pending_verification"
+    const val PAID = "paid"
     const val PAYMENT_NOT_RECEIVED = "payment_not_received"
     const val PARTIAL_PAYMENT_RECEIVED = "partial_payment_received"
-    const val PAID = "paid"
+    const val REFUND_PENDING = "refund_pending"
+    const val REFUND_SETTLED = "refund_settled"
     const val REFUNDED = "refunded"
 }
 
 object RefundStatusValue {
     const val NONE = "none"
-    const val REFUND_PENDING = "refund_pending"
-    const val REFUNDED = "refunded"
-    const val REFUND_DISPUTED = "refund_disputed"
+    const val REFUND_PENDING = "pending"
+    const val REFUNDED = "settled"
+    const val REFUND_DISPUTED = "disputed"
 }
 
 object PaymentReceivedType {

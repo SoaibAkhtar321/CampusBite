@@ -1,15 +1,21 @@
 *.iml
 .gradle/
-/local.properties
-/.idea/
-/.kotlin/
+local.properties
+.idea/
+.kotlin/
 
 .DS_Store
 
-/build/
-/captures/
+build/
+captures/
 .externalNativeBuild/
 .cxx/
+
+*.apk
+*.aab
+*.ap_
+app/release/
+app/debug/
 
 google-services.json
 app/google-services.json
@@ -22,5 +28,19 @@ secrets.properties
 
 functions/node_modules/
 functions/.env
+functions/.runtimeconfig.json
+functions/.cache/
 
-/CaptainGame/
+.firebase/
+firebase-debug.log
+firestore-debug.log
+database-debug.log
+pubsub-debug.log
+ui-debug.log
+
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+CaptainGame/
