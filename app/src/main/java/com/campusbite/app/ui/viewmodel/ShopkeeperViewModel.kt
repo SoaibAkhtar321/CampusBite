@@ -33,6 +33,7 @@ import kotlinx.coroutines.tasks.await
 import java.time.LocalDate
 import java.time.YearMonth
 import javax.inject.Inject
+import com.campusbite.app.data.repository.OrderActionRepository
 
 data class ShopkeeperSalesSummary(
     val todayOrders: Int = 0,
@@ -55,8 +56,9 @@ private data class ShopkeeperAnalyticsSnapshot(
 class ShopkeeperViewModel @Inject constructor(
     private val firestore: FirebaseFirestore,
     private val auth: FirebaseAuth,
+    private val orderActionRepository: OrderActionRepository,
     @ApplicationContext private val appContext: Context
-) : ViewModel() {
+) : ViewModel()  {
 
     private val _orders = MutableStateFlow<List<Order>>(emptyList())
     val orders: StateFlow<List<Order>> = _orders
@@ -388,64 +390,35 @@ class ShopkeeperViewModel @Inject constructor(
         }
     }
 
-    fun updateOrderStatus(orderId: String, newStatus: String) {
+    fun updateOrderStatus(
+        orderId: String,
+        newStatus: String
+    ) {
         if (orderId.isBlank()) return
 
         viewModelScope.launch {
             try {
-                val orderRef = firestore.collection("orders").document(orderId)
+                val result = orderActionRepository.updateOrderStatus(
+                    orderId = orderId,
+                    newStatus = newStatus
+                )
 
-                firestore.runTransaction { transaction ->
-                    val orderDoc = transaction.get(orderRef)
-
-                    if (!orderDoc.exists()) throw IllegalStateException("Order not found.")
-
-                    val orderShopId = orderDoc.getString("shopId").orEmpty()
-                    if (orderShopId != shopId) throw IllegalStateException("You cannot update this order.")
-
-                    val oldPaymentStatus = orderDoc.getString("paymentStatus")?.lowercase().orEmpty()
-                    val oldStatus = orderDoc.getString("status")?.lowercase().orEmpty()
-
-                    if (oldStatus == OrderStatusValue.CANCELLED) {
-                        throw IllegalStateException("Cancelled order cannot be updated.")
+                result.fold(
+                    onSuccess = {
+                        // No manual refresh needed.
+                        // Your Firestore snapshot listener will update the UI automatically.
+                    },
+                    onFailure = { error ->
+                        error.printStackTrace()
+                        _message.value = error.message ?: "Failed to update order."
                     }
-
-                    val updates = mutableMapOf<String, Any>(
-                        "status" to newStatus,
-                        "updatedAt" to System.currentTimeMillis()
-                    )
-
-                    val shouldVerifyPayment =
-                        newStatus == OrderStatusValue.PREPARING &&
-                                oldPaymentStatus !in listOf("verified", PaymentStatusValue.PAID)
-
-                    if (shouldVerifyPayment) updates["paymentStatus"] = PaymentStatusValue.PAID
-
-                    transaction.update(orderRef, updates)
-
-                    if (shouldVerifyPayment) {
-                        val pickupDate = orderDoc.getString("pickupDate")
-                            ?.takeIf { it.isNotBlank() }
-                            ?: LocalDate.now().toString()
-
-                        val month = pickupDate.take(7)
-
-                        val totalPrice = orderDoc.getDouble("totalPrice")
-                            ?: orderDoc.getLong("totalPrice")?.toDouble()
-                            ?: 0.0
-
-                        incrementVerifiedAnalytics(transaction, shopId, pickupDate, month, totalPrice)
-                    }
-
-                    null
-                }.await()
+                )
             } catch (e: Exception) {
                 e.printStackTrace()
                 _message.value = e.message ?: "Failed to update order."
             }
         }
     }
-
     fun cancelOrderByShopkeeper(
         orderId: String,
         paymentReceivedType: String,

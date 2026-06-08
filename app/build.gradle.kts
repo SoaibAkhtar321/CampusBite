@@ -57,6 +57,11 @@ dependencies {
     implementation("com.google.firebase:firebase-messaging")
     implementation("com.google.firebase:firebase-crashlytics")
     implementation("com.google.firebase:firebase-analytics")
+    implementation("com.google.firebase:firebase-functions")
+
+// Coroutines
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.9.0")
 
     // Hilt
     implementation("com.google.dagger:hilt-android:2.51.1")
@@ -69,8 +74,6 @@ dependencies {
     // Images
     implementation("io.coil-kt:coil-compose:2.7.0")
 
-    // Coroutines
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
 
     // Network
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
