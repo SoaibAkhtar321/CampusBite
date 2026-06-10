@@ -29,12 +29,14 @@ import com.campusbite.app.ui.screens.profile.StudentProfileScreen
 import com.campusbite.app.ui.screens.shop.ShopDetailScreen
 import com.campusbite.app.ui.screens.shopkeeper.MenuManagementScreen
 import com.campusbite.app.ui.screens.shopkeeper.ShopkeeperDashboardScreen
+import com.campusbite.app.ui.screens.shopkeeper.ShopkeeperOrderHistoryScreen
 import com.campusbite.app.ui.screens.splash.SplashScreen
 import com.campusbite.app.ui.viewmodel.AuthViewModel
 import com.campusbite.app.ui.viewmodel.CartViewModel
 import com.campusbite.app.ui.viewmodel.HomeViewModel
 import com.campusbite.app.ui.viewmodel.OrderViewModel
 import kotlinx.coroutines.delay
+
 @Composable
 fun NavGraph(
     navController: NavHostController,
@@ -227,7 +229,8 @@ fun NavGraph(
                 onNavigateToOrderStatus = { orderId ->
                     navController.navigate(Routes.orderStatus(orderId))
                 },
-                cartViewModel = cartViewModel
+                cartViewModel = cartViewModel,
+                orderViewModel = orderViewModel
             )
         }
 
@@ -328,6 +331,27 @@ fun NavGraph(
             )
         }
 
+        composable(
+            route = Routes.SHOPKEEPER_ORDER_HISTORY,
+            arguments = listOf(
+                navArgument("shopId") {
+                    type = NavType.StringType
+                }
+            )
+        ) { backStackEntry ->
+            val shopId = backStackEntry.arguments?.getString("shopId").orEmpty()
+
+            ShopkeeperOrderHistoryScreen(
+                shopId = shopId,
+                onNavigateBack = {
+                    navController.popBackStack()
+                },
+                onNavigateToOrderStatus = { orderId ->
+                    navController.navigate(Routes.orderStatus(orderId))
+                }
+            )
+        }
+
         composable(Routes.ADMIN_DASHBOARD) {
             AdminDashboardScreen(
                 onNavigateToProfile = {
@@ -384,6 +408,9 @@ fun NavGraph(
             ShopkeeperProfileScreen(
                 onNavigateBack = {
                     navController.popBackStack()
+                },
+                onNavigateToOrderHistory = { shopId ->
+                    navController.navigate(Routes.shopkeeperOrderHistory(shopId))
                 },
                 onLogout = {
                     authViewModel.logout()

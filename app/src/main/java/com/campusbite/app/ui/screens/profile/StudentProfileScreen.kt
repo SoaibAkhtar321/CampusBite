@@ -66,10 +66,10 @@ import com.campusbite.app.data.model.Order
 import com.campusbite.app.ui.viewmodel.OrderViewModel
 import com.campusbite.app.ui.viewmodel.ProfileViewModel
 import com.campusbite.app.util.OrderStatusValue
-import com.campusbite.app.util.PaymentStatusValue
 import com.campusbite.app.util.RefundStatusValue
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
+import java.time.LocalDate
 
 private val BrandOrange = Color(0xFFFF6B00)
 
@@ -93,55 +93,36 @@ fun StudentProfileScreen(
     val context = LocalContext.current
     val currentUser = FirebaseAuth.getInstance().currentUser
 
-    var showLogoutDialog by remember {
-        mutableStateOf(false)
-    }
+    var showLogoutDialog by remember { mutableStateOf(false) }
+    var showEditProfileDialog by remember { mutableStateOf(false) }
+    var notificationsEnabled by remember { mutableStateOf(true) }
 
-    var showEditProfileDialog by remember {
-        mutableStateOf(false)
-    }
+    var firestoreName by remember { mutableStateOf("") }
+    var firestoreEmail by remember { mutableStateOf("") }
+    var firestorePhone by remember { mutableStateOf("") }
 
-    var notificationsEnabled by remember {
-        mutableStateOf(true)
-    }
+    var editName by remember { mutableStateOf("") }
+    var editPhone by remember { mutableStateOf("") }
 
-    var firestoreName by remember {
-        mutableStateOf("")
-    }
-
-    var firestoreEmail by remember {
-        mutableStateOf("")
-    }
-
-    var firestorePhone by remember {
-        mutableStateOf("")
-    }
-
-    var editName by remember {
-        mutableStateOf("")
-    }
-
-    var editPhone by remember {
-        mutableStateOf("")
-    }
-
-    val activeOrder by orderViewModel.activeOrder.collectAsState()
+    val activeOrders by orderViewModel.activeOrders.collectAsState()
     val userOrders by orderViewModel.userOrders.collectAsState()
     val profileMessage by profileViewModel.message.collectAsState()
 
-    val latestRefundPendingOrder = userOrders.firstOrNull { order ->
-        order.status.lowercase() == OrderStatusValue.CANCELLED &&
-                order.refundStatus.lowercase() == RefundStatusValue.REFUND_PENDING
+    val today = LocalDate.now().toString()
+
+    val ongoingOrders = activeOrders.filter { order ->
+        val status = order.status.lowercase()
+
+        order.pickupDate == today &&
+                (
+                        status == OrderStatusValue.PENDING ||
+                                status == OrderStatusValue.ACCEPTED ||
+                                status == OrderStatusValue.PREPARING ||
+                                status == OrderStatusValue.READY
+                        )
     }
 
-    val latestActionableCancelledOrder = userOrders.firstOrNull { order ->
-        order.status.lowercase() == OrderStatusValue.CANCELLED &&
-                order.refundStatus.lowercase() != RefundStatusValue.REFUNDED
-    }
 
-    val trackableOrder = activeOrder
-        ?: latestRefundPendingOrder
-        ?: latestActionableCancelledOrder
 
     DisposableEffect(currentUser?.uid) {
         val uid = currentUser?.uid
@@ -182,53 +163,32 @@ fun StudentProfileScreen(
         val message = profileMessage.orEmpty()
 
         if (message.contains("success", ignoreCase = true)) {
-            Toast.makeText(
-                context,
-                message,
-                Toast.LENGTH_SHORT
-            ).show()
-
+            Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
             showEditProfileDialog = false
             profileViewModel.clearMessage()
         }
     }
 
     val displayEmail = firestoreEmail.trim()
-        .ifBlank {
-            currentUser?.email?.trim().orEmpty()
-        }
-        .ifBlank {
-            "No Email"
-        }
+        .ifBlank { currentUser?.email?.trim().orEmpty() }
+        .ifBlank { "No Email" }
 
     val displayName = firestoreName.trim()
-        .ifBlank {
-            currentUser?.displayName?.trim().orEmpty()
-        }
+        .ifBlank { currentUser?.displayName?.trim().orEmpty() }
         .ifBlank {
             currentUser?.email
                 ?.substringBefore("@")
                 ?.trim()
                 ?.replaceFirstChar { char ->
-                    if (char.isLowerCase()) {
-                        char.titlecase()
-                    } else {
-                        char.toString()
-                    }
+                    if (char.isLowerCase()) char.titlecase() else char.toString()
                 }
                 .orEmpty()
         }
-        .ifBlank {
-            "Student"
-        }
+        .ifBlank { "Student" }
 
     val displayPhone = firestorePhone.trim()
-        .ifBlank {
-            currentUser?.phoneNumber?.trim().orEmpty()
-        }
-        .ifBlank {
-            "Phone not added"
-        }
+        .ifBlank { currentUser?.phoneNumber?.trim().orEmpty() }
+        .ifBlank { "Phone not added" }
 
     Scaffold { paddingValues ->
         Column(
@@ -253,28 +213,17 @@ fun StudentProfileScreen(
                     showEditProfileDialog = true
                 },
                 modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = BrandOrange
-                )
+                colors = ButtonDefaults.buttonColors(containerColor = BrandOrange)
             ) {
-                Icon(
-                    imageVector = Icons.Outlined.Edit,
-                    contentDescription = null
-                )
-
+                Icon(imageVector = Icons.Outlined.Edit, contentDescription = null)
                 Spacer(modifier = Modifier.width(8.dp))
-
                 Text("Edit Profile")
             }
 
-            trackableOrder?.let { order ->
-                TrackableOrderCard(
-                    order = order,
-                    onOpenOrder = {
-                        onNavigateToOrderStatus(order.orderId)
-                    }
-                )
-            }
+            TrackOrdersSection(
+                activeOrders = ongoingOrders,
+                onNavigateToOrderStatus = onNavigateToOrderStatus
+            )
 
             SectionCard(
                 title = "Recent Orders",
@@ -283,19 +232,17 @@ fun StudentProfileScreen(
                 if (userOrders.isNotEmpty()) {
                     val latest = userOrders.first()
 
-                    Text(
-                        text = "Latest Order",
-                        fontWeight = FontWeight.SemiBold
-                    )
+                    Text(text = "Latest Order", fontWeight = FontWeight.SemiBold)
 
                     Spacer(modifier = Modifier.height(4.dp))
 
                     Text(
-                        text = "Status: ${latest.status}",
+                        text = "Status: ${formatStatus(latest.status)}",
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
 
-                    if (latest.status.lowercase() == OrderStatusValue.CANCELLED &&
+                    if (
+                        latest.status.lowercase() == OrderStatusValue.CANCELLED &&
                         latest.refundStatus.lowercase() == RefundStatusValue.REFUND_PENDING
                     ) {
                         Spacer(modifier = Modifier.height(4.dp))
@@ -307,7 +254,8 @@ fun StudentProfileScreen(
                         )
                     }
 
-                    if (latest.status.lowercase() == OrderStatusValue.CANCELLED &&
+                    if (
+                        latest.status.lowercase() == OrderStatusValue.CANCELLED &&
                         latest.refundStatus.lowercase() == RefundStatusValue.REFUNDED
                     ) {
                         Spacer(modifier = Modifier.height(4.dp))
@@ -333,16 +281,22 @@ fun StudentProfileScreen(
                         onClick = onNavigateToOrderHistory,
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text(
-                            text = "View Order History",
-                            color = BrandOrange
-                        )
+                        Text(text = "View Order History", color = BrandOrange)
                     }
                 } else {
                     Text(
                         text = "No recent orders yet.",
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    TextButton(
+                        onClick = onNavigateToOrderHistory,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(text = "Open Order History", color = BrandOrange)
+                    }
                 }
             }
 
@@ -355,9 +309,7 @@ fun StudentProfileScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(
                             imageVector = Icons.Outlined.Notifications,
                             contentDescription = null
@@ -378,26 +330,18 @@ fun StudentProfileScreen(
 
                     Switch(
                         checked = notificationsEnabled,
-                        onCheckedChange = {
-                            notificationsEnabled = it
-                        },
-                        colors = SwitchDefaults.colors(
-                            checkedTrackColor = BrandOrange
-                        )
+                        onCheckedChange = { notificationsEnabled = it },
+                        colors = SwitchDefaults.colors(checkedTrackColor = BrandOrange)
                     )
                 }
 
-                HorizontalDivider(
-                    modifier = Modifier.padding(vertical = 8.dp)
-                )
+                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
                 ActionRow(
                     icon = Icons.Outlined.Logout,
                     label = "Logout",
                     tint = MaterialTheme.colorScheme.error,
-                    onClick = {
-                        showLogoutDialog = true
-                    }
+                    onClick = { showLogoutDialog = true }
                 )
             }
 
@@ -425,9 +369,7 @@ fun StudentProfileScreen(
                     }
                 )
 
-                HorizontalDivider(
-                    modifier = Modifier.padding(vertical = 8.dp)
-                )
+                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
                 ActionRow(
                     icon = Icons.Outlined.SupportAgent,
@@ -450,35 +392,25 @@ fun StudentProfileScreen(
                     icon = Icons.Outlined.Settings,
                     label = "Privacy Policy",
                     trailingText = "Data usage",
-                    onClick = {
-                        openWebPage(context, PRIVACY_POLICY_URL)
-                    }
+                    onClick = { openWebPage(context, PRIVACY_POLICY_URL) }
                 )
 
-                HorizontalDivider(
-                    modifier = Modifier.padding(vertical = 8.dp)
-                )
+                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
                 ActionRow(
                     icon = Icons.Outlined.Settings,
                     label = "Terms & Conditions",
                     trailingText = "App rules",
-                    onClick = {
-                        openWebPage(context, TERMS_URL)
-                    }
+                    onClick = { openWebPage(context, TERMS_URL) }
                 )
 
-                HorizontalDivider(
-                    modifier = Modifier.padding(vertical = 8.dp)
-                )
+                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
                 ActionRow(
                     icon = Icons.Outlined.Settings,
                     label = "Refund & Cancellation Policy",
                     trailingText = "Refund support",
-                    onClick = {
-                        openWebPage(context, REFUND_POLICY_URL)
-                    }
+                    onClick = { openWebPage(context, REFUND_POLICY_URL) }
                 )
             }
         }
@@ -490,9 +422,7 @@ fun StudentProfileScreen(
                 showEditProfileDialog = false
                 profileViewModel.clearMessage()
             },
-            title = {
-                Text("Edit Profile")
-            },
+            title = { Text("Edit Profile") },
             text = {
                 Column {
                     OutlinedTextField(
@@ -501,9 +431,7 @@ fun StudentProfileScreen(
                             editName = it
                             profileViewModel.clearMessage()
                         },
-                        label = {
-                            Text("Full Name")
-                        },
+                        label = { Text("Full Name") },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -513,15 +441,10 @@ fun StudentProfileScreen(
                     OutlinedTextField(
                         value = editPhone,
                         onValueChange = { value ->
-                            editPhone = value
-                                .filter { it.isDigit() }
-                                .take(10)
-
+                            editPhone = value.filter { it.isDigit() }.take(10)
                             profileViewModel.clearMessage()
                         },
-                        label = {
-                            Text("Phone Number")
-                        },
+                        label = { Text("Phone Number") },
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(
                             keyboardType = KeyboardType.Number
@@ -534,12 +457,7 @@ fun StudentProfileScreen(
 
                         Text(
                             text = it,
-                            color = if (
-                                it.contains(
-                                    other = "success",
-                                    ignoreCase = true
-                                )
-                            ) {
+                            color = if (it.contains("success", ignoreCase = true)) {
                                 MaterialTheme.colorScheme.primary
                             } else {
                                 MaterialTheme.colorScheme.error
@@ -576,15 +494,9 @@ fun StudentProfileScreen(
 
     if (showLogoutDialog) {
         AlertDialog(
-            onDismissRequest = {
-                showLogoutDialog = false
-            },
-            title = {
-                Text("Logout")
-            },
-            text = {
-                Text("Are you sure you want to logout?")
-            },
+            onDismissRequest = { showLogoutDialog = false },
+            title = { Text("Logout") },
+            text = { Text("Are you sure you want to logout?") },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -600,9 +512,7 @@ fun StudentProfileScreen(
             },
             dismissButton = {
                 TextButton(
-                    onClick = {
-                        showLogoutDialog = false
-                    }
+                    onClick = { showLogoutDialog = false }
                 ) {
                     Text("Cancel")
                 }
@@ -612,69 +522,129 @@ fun StudentProfileScreen(
 }
 
 @Composable
-private fun TrackableOrderCard(
-    order: Order,
-    onOpenOrder: () -> Unit
+private fun TrackOrdersSection(
+    activeOrders: List<Order>,
+    onNavigateToOrderStatus: (String) -> Unit
 ) {
-    val isCancelled = order.status.lowercase() == OrderStatusValue.CANCELLED
-    val isRefundPending = order.refundStatus.lowercase() == RefundStatusValue.REFUND_PENDING
-    val isPaymentNotReceived = order.paymentStatus.lowercase() == PaymentStatusValue.PAYMENT_NOT_RECEIVED
-
-    val title = when {
-        isRefundPending -> "Refund Pending"
-        isCancelled -> "Order Cancelled"
-        else -> "Track Your Order"
-    }
-
-    val message = when {
-        isRefundPending ->
-            "Your order was cancelled after payment was received. The shopkeeper will settle the refund manually."
-
-        isCancelled && isPaymentNotReceived ->
-            "Your latest order was cancelled because payment was not received."
-
-        isCancelled ->
-            "Your latest order was cancelled. Open details for more information."
-
-        else ->
-            "Current Status: ${order.status}"
-    }
-
-    val helper = when {
-        isRefundPending ->
-            "Open details to view reason and call the shopkeeper if needed."
-
-        isCancelled ->
-            "If you already paid, open details and call the shopkeeper."
-
-        else ->
-            ""
+    var showAllOrders by remember {
+        mutableStateOf(false)
     }
 
     SectionCard(
-        title = title,
+        title = "Track Orders",
         icon = Icons.Outlined.History
     ) {
+        if (activeOrders.isEmpty()) {
+            Text(
+                text = "You currently have no ongoing orders.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        } else {
+            Text(
+                text = if (activeOrders.size == 1) {
+                    "You have 1 ongoing order."
+                } else {
+                    "You have ${activeOrders.size} ongoing orders."
+                },
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            if (activeOrders.size == 1) {
+                val order = activeOrders.first()
+
+                TrackOrderRow(
+                    order = order,
+                    onOpenOrder = {
+                        if (order.orderId.isNotBlank()) {
+                            onNavigateToOrderStatus(order.orderId)
+                        }
+                    }
+                )
+            } else {
+                Button(
+                    onClick = {
+                        showAllOrders = !showAllOrders
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = BrandOrange
+                    )
+                ) {
+                    Text(
+                        text = if (showAllOrders) {
+                            "Hide Ongoing Orders"
+                        } else {
+                            "View Ongoing Orders"
+                        }
+                    )
+                }
+
+                if (showAllOrders) {
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    activeOrders.forEachIndexed { index, order ->
+                        TrackOrderRow(
+                            order = order,
+                            onOpenOrder = {
+                                if (order.orderId.isNotBlank()) {
+                                    onNavigateToOrderStatus(order.orderId)
+                                }
+                            }
+                        )
+
+                        if (index != activeOrders.lastIndex) {
+                            HorizontalDivider(
+                                modifier = Modifier.padding(vertical = 10.dp)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TrackOrderRow(
+    order: Order,
+    onOpenOrder: () -> Unit
+) {
+    Column {
         Text(
-            text = message,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            text = order.shopName.ifBlank {
+                "CampusBite Order"
+            },
+            fontWeight = FontWeight.SemiBold
         )
 
-        if (helper.isNotBlank()) {
-            Spacer(modifier = Modifier.height(6.dp))
+        Spacer(modifier = Modifier.height(4.dp))
+
+        Text(
+            text = "Status: ${formatStatus(order.status)}",
+            color = BrandOrange,
+            fontWeight = FontWeight.SemiBold
+        )
+
+        if (order.pickupSlot.isNotBlank()) {
+            Spacer(modifier = Modifier.height(2.dp))
 
             Text(
-                text = helper,
-                color = if (isRefundPending || isCancelled) {
-                    MaterialTheme.colorScheme.error
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                },
+                text = "Pickup: ${order.pickupSlot}",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.bodySmall
             )
         }
 
-        Spacer(modifier = Modifier.height(10.dp))
+        Spacer(modifier = Modifier.height(4.dp))
+
+        Text(
+            text = "Amount: ₹${order.totalPrice.toInt()}",
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
 
         Button(
             onClick = onOpenOrder,
@@ -683,15 +653,18 @@ private fun TrackableOrderCard(
                 containerColor = BrandOrange
             )
         ) {
-            Text(
-                text = if (isCancelled) {
-                    "View Details"
-                } else {
-                    "Track Order"
-                }
-            )
+            Text("Track Order")
         }
     }
+}
+
+private fun formatStatus(status: String): String {
+    return status
+        .replace("_", " ")
+        .trim()
+        .replaceFirstChar { char ->
+            if (char.isLowerCase()) char.titlecase() else char.toString()
+        }
 }
 
 private fun openWhatsAppSupport(
@@ -706,15 +679,9 @@ private fun openWhatsAppSupport(
     """.trimIndent()
 
     val encodedMessage = Uri.encode(message)
+    val uri = Uri.parse("https://wa.me/$SUPPORT_WHATSAPP_NUMBER?text=$encodedMessage")
 
-    val uri = Uri.parse(
-        "https://wa.me/$SUPPORT_WHATSAPP_NUMBER?text=$encodedMessage"
-    )
-
-    val intent = Intent(
-        Intent.ACTION_VIEW,
-        uri
-    )
+    val intent = Intent(Intent.ACTION_VIEW, uri)
 
     try {
         context.startActivity(intent)
@@ -734,10 +701,7 @@ private fun openEmailSupport(
     val intent = Intent(Intent.ACTION_SENDTO).apply {
         data = Uri.parse("mailto:$SUPPORT_EMAIL")
 
-        putExtra(
-            Intent.EXTRA_SUBJECT,
-            "CampusBite Support"
-        )
+        putExtra(Intent.EXTRA_SUBJECT, "CampusBite Support")
 
         putExtra(
             Intent.EXTRA_TEXT,
@@ -770,10 +734,7 @@ private fun openWebPage(
     context: android.content.Context,
     url: String
 ) {
-    val intent = Intent(
-        Intent.ACTION_VIEW,
-        Uri.parse(url)
-    )
+    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
 
     try {
         context.startActivity(intent)
@@ -799,9 +760,7 @@ private fun StudentHeaderCard(
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(18.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = BrandOrange
-        )
+        colors = CardDefaults.cardColors(containerColor = BrandOrange)
     ) {
         Row(
             modifier = Modifier.padding(20.dp),
@@ -826,9 +785,7 @@ private fun StudentHeaderCard(
 
             Column {
                 Text(
-                    text = name.ifBlank {
-                        "Student"
-                    },
+                    text = name.ifBlank { "Student" },
                     color = Color.White,
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold
@@ -837,9 +794,7 @@ private fun StudentHeaderCard(
                 Spacer(modifier = Modifier.height(2.dp))
 
                 Text(
-                    text = email.ifBlank {
-                        "No Email"
-                    },
+                    text = email.ifBlank { "No Email" },
                     color = Color.White.copy(alpha = 0.9f),
                     style = MaterialTheme.typography.bodyMedium
                 )
@@ -847,9 +802,7 @@ private fun StudentHeaderCard(
                 Spacer(modifier = Modifier.height(2.dp))
 
                 Text(
-                    text = phone.ifBlank {
-                        "Phone not added"
-                    },
+                    text = phone.ifBlank { "Phone not added" },
                     color = Color.White.copy(alpha = 0.85f),
                     style = MaterialTheme.typography.bodySmall
                 )
@@ -868,12 +821,8 @@ private fun SectionCard(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp)
     ) {
-        Column(
-            modifier = Modifier.padding(16.dp)
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically
-            ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
                     imageVector = icon,
                     contentDescription = null,
@@ -907,16 +856,12 @@ private fun ActionRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable {
-                onClick()
-            }
+            .clickable { onClick() }
             .padding(vertical = 10.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically
-        ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(
                 imageVector = icon,
                 contentDescription = null,
@@ -925,10 +870,7 @@ private fun ActionRow(
 
             Spacer(modifier = Modifier.width(12.dp))
 
-            Text(
-                text = label,
-                color = tint
-            )
+            Text(text = label, color = tint)
         }
 
         if (trailingText != null) {

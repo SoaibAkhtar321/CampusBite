@@ -1,11 +1,18 @@
 const admin = require("firebase-admin");
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
-const { onDocumentCreated, onDocumentUpdated } = require("firebase-functions/v2/firestore");const logger = require("firebase-functions/logger");
+const {
+  onDocumentCreated,
+  onDocumentUpdated,
+} = require("firebase-functions/v2/firestore");
+const logger = require("firebase-functions/logger");
 
 admin.initializeApp();
 
 const db = admin.firestore();
 const FieldValue = admin.firestore.FieldValue;
+
+const REGION = "us-central1";
+const ORDER_NOTIFICATION_CHANNEL_ID = "order_updates_high";
 
 const ORDER_STATUSES = [
   "pending",
@@ -37,6 +44,62 @@ function requireAuth(request) {
 
 function cleanString(value) {
   return String(value || "").trim();
+}
+
+function getUniqueTokens(user) {
+  const tokens = [];
+
+  if (typeof user.fcmToken === "string" && user.fcmToken.trim()) {
+    tokens.push(user.fcmToken.trim());
+  }
+
+  if (Array.isArray(user.fcmTokens)) {
+    user.fcmTokens.forEach((token) => {
+      if (typeof token === "string" && token.trim()) {
+        tokens.push(token.trim());
+      }
+    });
+  }
+
+  return [...new Set(tokens)];
+}
+
+function getInvalidTokens(response, tokens) {
+  const invalidTokens = [];
+
+  response.responses.forEach((result, index) => {
+    if (!result.success) {
+      const errorCode = result.error?.code;
+
+      if (
+        errorCode === "messaging/registration-token-not-registered" ||
+        errorCode === "messaging/invalid-registration-token"
+      ) {
+        invalidTokens.push(tokens[index]);
+      }
+    }
+  });
+
+  return invalidTokens;
+}
+
+async function removeInvalidTokensFromUser(userId, user, invalidTokens) {
+  if (invalidTokens.length === 0) {
+    return;
+  }
+
+  const updateData = {
+    fcmTokens: FieldValue.arrayRemove(...invalidTokens),
+  };
+
+  if (
+    typeof user.fcmToken === "string" &&
+    invalidTokens.includes(user.fcmToken)
+  ) {
+    updateData.fcmToken = FieldValue.delete();
+  }
+
+  await db.collection("users").doc(userId).update(updateData);
 }
 
 async function getUserOrThrow(uid) {
@@ -134,7 +197,7 @@ function buildCancelPaymentFields(paymentReceivedType) {
   };
 }
 
-function getNotificationContent(status, order) {
+function getStudentNotificationContent(status, order) {
   const shopName = cleanString(order.shopName) || "CampusBite";
 
   if (status === "preparing") {
@@ -176,8 +239,42 @@ function getNotificationContent(status, order) {
   };
 }
 
+async function sendMulticastNotification({
+  tokens,
+  title,
+  body,
+  data,
+}) {
+  const message = {
+    tokens,
+
+    notification: {
+      title,
+      body,
+    },
+
+    data,
+
+    android: {
+      priority: "high",
+      ttl: 60 * 60 * 1000,
+      notification: {
+        channelId: ORDER_NOTIFICATION_CHANNEL_ID,
+        sound: "default",
+        priority: "high",
+        defaultSound: true,
+        defaultVibrateTimings: true,
+      },
+    },
+  };
+
+  return admin.messaging().sendEachForMulticast(message);
+}
+
 exports.updateOrderStatus = onCall(
-  { region: "us-central1" },
+  {
+    region: REGION,
+  },
   async (request) => {
     const uid = requireAuth(request);
 
@@ -274,7 +371,9 @@ exports.updateOrderStatus = onCall(
 );
 
 exports.cancelOrderByShopkeeper = onCall(
-  { region: "us-central1" },
+  {
+    region: REGION,
+  },
   async (request) => {
     const uid = requireAuth(request);
 
@@ -318,7 +417,9 @@ exports.cancelOrderByShopkeeper = onCall(
         );
       }
 
-      if (!["pending", "accepted", "preparing", "ready"].includes(currentStatus)) {
+      if (
+        !["pending", "accepted", "preparing", "ready"].includes(currentStatus)
+      ) {
         throw new HttpsError(
           "failed-precondition",
           `Order cannot be cancelled from status: ${currentStatus}.`
@@ -331,8 +432,6 @@ exports.cancelOrderByShopkeeper = onCall(
       const updates = {
         status: "cancelled",
 
-        // Keep both names because your Android screens use cancelReason,
-        // while earlier backend used cancellationReason.
         cancelReason: reason,
         cancellationReason: reason,
 
@@ -358,7 +457,7 @@ exports.cancelOrderByShopkeeper = onCall(
       if (paymentFields.refundAmount === 0) {
         updates.refundAmount = 0;
       } else {
-        updates.refundAmount = order.totalPrice || 0;
+        updates.refundAmount = Number(order.totalPrice || 0);
       }
 
       tx.update(orderRef, updates);
@@ -372,7 +471,9 @@ exports.cancelOrderByShopkeeper = onCall(
 );
 
 exports.markRefundSettled = onCall(
-  { region: "us-central1" },
+  {
+    region: REGION,
+  },
   async (request) => {
     const uid = requireAuth(request);
 
@@ -446,9 +547,9 @@ exports.markRefundSettled = onCall(
   }
 );
 
-exports.sendOrderReadyNotification = onDocumentUpdated(
+exports.sendOrderStatusNotificationToStudent = onDocumentUpdated(
   {
-    region: "us-central1",
+    region: REGION,
     document: "orders/{orderId}",
   },
   async (event) => {
@@ -478,7 +579,7 @@ exports.sendOrderReadyNotification = onDocumentUpdated(
     }
 
     const orderId = event.params.orderId;
-    const studentId = after.studentId;
+    const studentId = cleanString(after.studentId);
 
     if (!studentId) {
       logger.warn("Order status changed but studentId missing", {
@@ -499,24 +600,9 @@ exports.sendOrderReadyNotification = onDocumentUpdated(
     }
 
     const student = studentSnap.data();
+    const tokens = getUniqueTokens(student);
 
-    const tokens = [];
-
-    if (typeof student.fcmToken === "string" && student.fcmToken.trim()) {
-      tokens.push(student.fcmToken.trim());
-    }
-
-    if (Array.isArray(student.fcmTokens)) {
-      student.fcmTokens.forEach((token) => {
-        if (typeof token === "string" && token.trim()) {
-          tokens.push(token.trim());
-        }
-      });
-    }
-
-    const uniqueTokens = [...new Set(tokens)];
-
-    if (uniqueTokens.length === 0) {
+    if (tokens.length === 0) {
       logger.warn("No FCM token found for student", {
         orderId,
         studentId,
@@ -525,38 +611,22 @@ exports.sendOrderReadyNotification = onDocumentUpdated(
       return;
     }
 
-    const content = getNotificationContent(afterStatus, after);
+    const content = getStudentNotificationContent(afterStatus, after);
 
-    const message = {
-      tokens: uniqueTokens,
-
-      notification: {
-        title: content.title,
-        body: content.body,
-      },
-
+    const response = await sendMulticastNotification({
+      tokens,
+      title: content.title,
+      body: content.body,
       data: {
+        type: "order_update",
         orderId: String(orderId),
         status: String(afterStatus),
         title: String(content.title),
         body: String(content.body),
       },
+    });
 
-      android: {
-        priority: "high",
-        ttl: 60 * 60 * 1000,
-        notification: {
-          channelId: "order_updates_high",
-          sound: "default",
-          priority: "high",
-          defaultSound: true,
-        },
-      },
-    };
-
-    const response = await admin.messaging().sendEachForMulticast(message);
-
-    logger.info("Order notification sent", {
+    logger.info("Order status notification sent to student", {
       orderId,
       studentId,
       status: afterStatus,
@@ -564,56 +634,15 @@ exports.sendOrderReadyNotification = onDocumentUpdated(
       failureCount: response.failureCount,
     });
 
-    const invalidTokens = [];
+    const invalidTokens = getInvalidTokens(response, tokens);
 
-    response.responses.forEach((result, index) => {
-      if (!result.success) {
-        const errorCode = result.error?.code;
-
-        logger.warn("FCM send failed", {
-          orderId,
-          studentId,
-          status: afterStatus,
-          token: uniqueTokens[index],
-          error: result.error?.message,
-          code: errorCode,
-        });
-
-        if (
-          errorCode === "messaging/registration-token-not-registered" ||
-          errorCode === "messaging/invalid-registration-token"
-        ) {
-          invalidTokens.push(uniqueTokens[index]);
-        }
-      }
-    });
-
-    if (invalidTokens.length === 0) {
-      return;
-    }
-
-    const updateData = {
-      fcmTokens: FieldValue.arrayRemove(...invalidTokens),
-    };
-
-    if (
-      typeof student.fcmToken === "string" &&
-      invalidTokens.includes(student.fcmToken)
-    ) {
-      updateData.fcmToken = FieldValue.delete();
-    }
-
-    await db.collection("users").doc(studentId).update(updateData);
-
-    logger.info("Invalid FCM tokens removed", {
-      studentId,
-      removedCount: invalidTokens.length,
-    });
+    await removeInvalidTokensFromUser(studentId, student, invalidTokens);
   }
 );
+
 exports.sendNewOrderNotificationToShopkeeper = onDocumentCreated(
   {
-    region: "us-central1",
+    region: REGION,
     document: "orders/{orderId}",
   },
   async (event) => {
@@ -627,11 +656,14 @@ exports.sendNewOrderNotificationToShopkeeper = onDocumentCreated(
     const shopId = cleanString(order.shopId);
 
     if (!shopId) {
-      logger.warn("New order created but shopId missing", { orderId });
+      logger.warn("New order created but shopId missing", {
+        orderId,
+      });
       return;
     }
 
-    const shopkeepersSnap = await db.collection("users")
+    const shopkeepersSnap = await db
+      .collection("users")
       .where("role", "==", "shopkeeper")
       .where("shopId", "==", shopId)
       .where("isApproved", "==", true)
@@ -646,6 +678,7 @@ exports.sendNewOrderNotificationToShopkeeper = onDocumentCreated(
     }
 
     const tokens = [];
+    const tokenOwners = [];
 
     shopkeepersSnap.docs.forEach((doc) => {
       const shopkeeper = doc.data();
@@ -654,17 +687,16 @@ exports.sendNewOrderNotificationToShopkeeper = onDocumentCreated(
         return;
       }
 
-      if (typeof shopkeeper.fcmToken === "string" && shopkeeper.fcmToken.trim()) {
-        tokens.push(shopkeeper.fcmToken.trim());
-      }
+      const shopkeeperTokens = getUniqueTokens(shopkeeper);
 
-      if (Array.isArray(shopkeeper.fcmTokens)) {
-        shopkeeper.fcmTokens.forEach((token) => {
-          if (typeof token === "string" && token.trim()) {
-            tokens.push(token.trim());
-          }
+      shopkeeperTokens.forEach((token) => {
+        tokens.push(token);
+        tokenOwners.push({
+          token,
+          userId: doc.id,
+          user: shopkeeper,
         });
-      }
+      });
     });
 
     const uniqueTokens = [...new Set(tokens)];
@@ -678,37 +710,22 @@ exports.sendNewOrderNotificationToShopkeeper = onDocumentCreated(
     }
 
     const customerName = cleanString(order.studentName) || "A student";
-    const totalPrice = order.totalPrice || 0;
+    const totalPrice = Number(order.totalPrice || 0);
+    const title = "New Order Received";
+    const body = `${customerName} placed a new order of ₹${totalPrice}.`;
 
-    const message = {
+    const response = await sendMulticastNotification({
       tokens: uniqueTokens,
-
-      notification: {
-        title: "New Order Received",
-        body: `${customerName} placed a new order of ₹${totalPrice}.`,
-      },
-
+      title,
+      body,
       data: {
         type: "new_order",
         orderId: String(orderId),
         status: "pending",
-        title: "New Order Received",
-        body: `${customerName} placed a new order of ₹${totalPrice}.`,
+        title,
+        body,
       },
-
-      android: {
-        priority: "high",
-        ttl: 60 * 60 * 1000,
-        notification: {
-         channelId: "order_updates_high",
-          sound: "default",
-          priority: "high",
-          defaultSound: true,
-        },
-      },
-    };
-
-    const response = await admin.messaging().sendEachForMulticast(message);
+    });
 
     logger.info("New order notification sent to shopkeeper", {
       orderId,
@@ -716,12 +733,26 @@ exports.sendNewOrderNotificationToShopkeeper = onDocumentCreated(
       successCount: response.successCount,
       failureCount: response.failureCount,
     });
+
+    const invalidTokens = getInvalidTokens(response, uniqueTokens);
+
+    if (invalidTokens.length === 0) {
+      return;
+    }
+
+    for (const token of invalidTokens) {
+      const owner = tokenOwners.find((item) => item.token === token);
+
+      if (owner) {
+        await removeInvalidTokensFromUser(owner.userId, owner.user, [token]);
+      }
+    }
   }
 );
 
 exports.updateShopAnalyticsOnOrderChange = onDocumentUpdated(
   {
-    region: "us-central1",
+    region: REGION,
     document: "orders/{orderId}",
   },
   async (event) => {
@@ -768,7 +799,6 @@ exports.updateShopAnalyticsOnOrderChange = onDocumentUpdated(
       pickupDate.length >= 10 ? pickupDate.slice(0, 10) : fallbackDate;
 
     const monthKey = dateKey.slice(0, 7);
-
     const totalPrice = Number(after.totalPrice || 0);
 
     const dailyRef = db
@@ -804,9 +834,17 @@ exports.updateShopAnalyticsOnOrderChange = onDocumentUpdated(
 
     const batch = db.batch();
 
-    batch.set(dailyRef, updates, { merge: true });
-    batch.set(monthlyRef, updates, { merge: true });
-    batch.set(lifetimeRef, updates, { merge: true });
+    batch.set(dailyRef, updates, {
+      merge: true,
+    });
+
+    batch.set(monthlyRef, updates, {
+      merge: true,
+    });
+
+    batch.set(lifetimeRef, updates, {
+      merge: true,
+    });
 
     await batch.commit();
 

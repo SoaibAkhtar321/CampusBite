@@ -26,6 +26,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Logout
 import androidx.compose.material.icons.outlined.Payments
 import androidx.compose.material.icons.outlined.Settings
@@ -68,22 +69,18 @@ import com.campusbite.app.ui.viewmodel.ProfileViewModel
 private val BrandOrange = Color(0xFFFF6B00)
 
 private const val SUPPORT_EMAIL = "support.campusbite@gmail.com"
-
-// Format: country code + number, without + sign.
 private const val SUPPORT_WHATSAPP_NUMBER = "918957833269"
 
 private const val WEBSITE_BASE_URL = "https://thecampusbite.vercel.app"
-
 private const val PRIVACY_POLICY_URL = "$WEBSITE_BASE_URL/privacy-policy"
-
 private const val TERMS_URL = "$WEBSITE_BASE_URL/terms-and-conditions"
-
 private const val REFUND_POLICY_URL = "$WEBSITE_BASE_URL/refund-cancellation-policy"
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ShopkeeperProfileScreen(
     onNavigateBack: () -> Unit,
+    onNavigateToOrderHistory: (shopId: String) -> Unit,
     onLogout: () -> Unit,
     viewModel: ProfileViewModel = hiltViewModel()
 ) {
@@ -138,6 +135,7 @@ fun ShopkeeperProfileScreen(
 
     val displayName = userProfile?.name?.trim().orEmpty()
     val displayEmail = userProfile?.email?.trim().orEmpty()
+    val currentShopId = userProfile?.shopId?.trim().orEmpty()
 
     val profileInitial =
         displayName.firstOrNull()?.uppercaseChar()?.toString()
@@ -263,9 +261,9 @@ fun ShopkeeperProfileScreen(
             ) {
                 InfoText(
                     label = "Shop ID",
-                    value = userProfile?.shopId
-                        ?.ifBlank { "Not assigned" }
-                        ?: "Loading..."
+                    value = currentShopId.ifBlank {
+                        "Not assigned"
+                    }
                 )
 
                 InfoText(
@@ -303,6 +301,41 @@ fun ShopkeeperProfileScreen(
                     Spacer(modifier = Modifier.width(8.dp))
 
                     Text("Edit Profile")
+                }
+            }
+
+            SectionCard(
+                title = "Order History",
+                icon = Icons.Outlined.History
+            ) {
+                Text(
+                    text = "View picked up and cancelled orders. Use this to verify past orders when a student comes to collect or reports an issue.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Button(
+                    onClick = {
+                        if (currentShopId.isNotBlank()) {
+                            onNavigateToOrderHistory(currentShopId)
+                        }
+                    },
+                    enabled = currentShopId.isNotBlank(),
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = BrandOrange
+                    )
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.History,
+                        contentDescription = null
+                    )
+
+                    Spacer(modifier = Modifier.width(8.dp))
+
+                    Text("View Order History")
                 }
             }
 
@@ -487,7 +520,7 @@ fun ShopkeeperProfileScreen(
                     onClick = {
                         openWhatsAppSupport(
                             context = context,
-                            shopId = userProfile?.shopId.orEmpty(),
+                            shopId = currentShopId,
                             shopkeeperEmail = displayEmail
                         )
                     }
@@ -504,7 +537,7 @@ fun ShopkeeperProfileScreen(
                     onClick = {
                         openEmailSupport(
                             context = context,
-                            shopId = userProfile?.shopId.orEmpty(),
+                            shopId = currentShopId,
                             shopkeeperEmail = displayEmail
                         )
                     }
