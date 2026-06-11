@@ -28,6 +28,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccessTime
 import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.RestaurantMenu
 import androidx.compose.material.icons.filled.Schedule
@@ -137,6 +138,7 @@ private fun paymentStatusColor(paymentStatus: String): Color {
 fun ShopkeeperDashboardScreen(
     onNavigateToProfile: () -> Unit,
     onNavigateToMenu: () -> Unit = {},
+    onNavigateToAnalytics: () -> Unit,
     viewModel: ShopkeeperViewModel = hiltViewModel()
 ) {
     val orders by viewModel.orders.collectAsState()
@@ -290,9 +292,9 @@ fun ShopkeeperDashboardScreen(
             }
 
             item {
-                CompactSalesSummaryCard(
-                    summary = salesSummary,
-                    refundPendingCount = refundPendingOrders.size
+                AnalyticsShortcutCard(
+                    refundPendingCount = refundPendingOrders.size,
+                    onClick = onNavigateToAnalytics
                 )
             }
 
@@ -370,6 +372,82 @@ fun ShopkeeperDashboardScreen(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun AnalyticsShortcutCard(
+    refundPendingCount: Int,
+    onClick: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable {
+                onClick()
+            },
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface
+        ),
+        elevation = CardDefaults.cardElevation(
+            defaultElevation = 1.dp
+        )
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(
+                modifier = Modifier.weight(1f)
+            ) {
+                Text(
+                    text = "Sales & Analytics",
+                    fontWeight = FontWeight.ExtraBold,
+                    fontSize = 16.sp
+                )
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                Text(
+                    text = "View today, monthly and lifetime reports",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                if (refundPendingCount > 0) {
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.error.copy(alpha = 0.10f)
+                    ) {
+                        Text(
+                            text = "Refund pending: $refundPendingCount",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.padding(
+                                horizontal = 12.dp,
+                                vertical = 7.dp
+                            )
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.width(12.dp))
+
+            Icon(
+                imageVector = Icons.Default.KeyboardArrowRight,
+                contentDescription = "Open analytics",
+                tint = Orange,
+                modifier = Modifier.size(28.dp)
+            )
         }
     }
 }

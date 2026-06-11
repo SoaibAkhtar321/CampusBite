@@ -17,6 +17,8 @@ object Routes {
     const val SHOPKEEPER_ORDER_HISTORY = "shopkeeper_order_history/{shopId}"
     const val MENU_MANAGEMENT = "menu_management"
 
+    const val SHOPKEEPER_ANALYTICS = "shopkeeper_analytics"
+
     const val ADMIN_DASHBOARD = "admin_dashboard"
     const val ADMIN_PROFILE = "admin_profile"
     const val ADMIN_SHOP_REPORT = "admin_shop_report/{shopId}"

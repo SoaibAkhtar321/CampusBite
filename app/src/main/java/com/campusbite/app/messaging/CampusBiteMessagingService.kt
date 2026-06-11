@@ -6,6 +6,8 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.media.AudioAttributes
+import android.media.RingtoneManager
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -17,10 +19,13 @@ import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
-import android.media.AudioAttributes
-import android.media.RingtoneManager
 
 class CampusBiteMessagingService : FirebaseMessagingService() {
+
+    override fun onCreate() {
+        super.onCreate()
+        createOrderAlertsChannel()
+    }
 
     override fun onNewToken(token: String) {
         super.onNewToken(token)
@@ -36,7 +41,7 @@ class CampusBiteMessagingService : FirebaseMessagingService() {
 
         val body = message.notification?.body
             ?: message.data["body"]
-            ?: "You have an order update."
+            ?: "You have a new order update."
 
         val orderId = message.data["orderId"].orEmpty()
         val status = message.data["status"].orEmpty()
@@ -82,7 +87,7 @@ class CampusBiteMessagingService : FirebaseMessagingService() {
             if (!hasPermission) return
         }
 
-        createOrderUpdatesChannel()
+        createOrderAlertsChannel()
 
         val intent = Intent(this, MainActivity::class.java).apply {
             putExtra("orderId", orderId)
@@ -100,17 +105,19 @@ class CampusBiteMessagingService : FirebaseMessagingService() {
 
         val soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
 
-        val notification = NotificationCompat.Builder(this, ORDER_UPDATES_CHANNEL_ID)
+        val notification = NotificationCompat.Builder(this, ORDER_ALERTS_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setContentTitle(title)
             .setContentText(body)
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+            .setPriority(NotificationCompat.PRIORITY_MAX)
+            .setCategory(NotificationCompat.CATEGORY_STATUS)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setDefaults(NotificationCompat.DEFAULT_SOUND or NotificationCompat.DEFAULT_VIBRATE)
             .setSound(soundUri)
             .setAutoCancel(true)
             .setContentIntent(pendingIntent)
             .build()
-
 
         try {
             NotificationManagerCompat.from(this)
@@ -120,7 +127,7 @@ class CampusBiteMessagingService : FirebaseMessagingService() {
         }
     }
 
-    private fun createOrderUpdatesChannel() {
+    private fun createOrderAlertsChannel() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
 
         val soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
@@ -131,11 +138,11 @@ class CampusBiteMessagingService : FirebaseMessagingService() {
             .build()
 
         val channel = NotificationChannel(
-            ORDER_UPDATES_CHANNEL_ID,
-            "Order Updates",
+            ORDER_ALERTS_CHANNEL_ID,
+            "Order Alerts",
             NotificationManager.IMPORTANCE_HIGH
         ).apply {
-            description = "Notifications about CampusBite order status updates"
+            description = "Loud alerts for new CampusBite orders and order updates"
             enableVibration(true)
             setSound(soundUri, audioAttributes)
         }
@@ -145,5 +152,6 @@ class CampusBiteMessagingService : FirebaseMessagingService() {
     }
 
     companion object {
-        private const val ORDER_UPDATES_CHANNEL_ID = "order_updates_high"    }
+        const val ORDER_ALERTS_CHANNEL_ID = "campusbite_order_alerts_v2"
+    }
 }

@@ -14,6 +14,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
@@ -21,7 +22,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -39,6 +39,7 @@ import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -81,6 +82,7 @@ fun AdminDashboardScreen(
     val pendingShopkeepers by viewModel.pendingShopkeepers.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val message by viewModel.message.collectAsState()
+
 
     var tabIndex by remember {
         mutableStateOf(0)
@@ -158,7 +160,10 @@ fun AdminDashboardScreen(
 
             if (!message.isNullOrBlank()) {
                 MessageBanner(
-                    message = message.orEmpty()
+                    message = message.orEmpty(),
+                    onDismiss = {
+                        viewModel.clearMessage()
+                    }
                 )
             }
 
@@ -391,15 +396,22 @@ fun AdminDashboardScreen(
             }
         )
     }
+
+
 }
 
 @Composable
 private fun MessageBanner(
-    message: String
+    message: String,
+    onDismiss: () -> Unit
 ) {
     val isError = message.contains("failed", ignoreCase = true) ||
             message.contains("missing", ignoreCase = true) ||
-            message.contains("error", ignoreCase = true)
+            message.contains("error", ignoreCase = true) ||
+            message.contains("denied", ignoreCase = true) ||
+            message.contains("permission", ignoreCase = true) ||
+            message.contains("failed_precondition", ignoreCase = true)
+
 
     Surface(
         modifier = Modifier
@@ -415,20 +427,44 @@ private fun MessageBanner(
             Orange.copy(alpha = 0.10f)
         }
     ) {
-        Text(
-            text = message,
-            modifier = Modifier.padding(
-                horizontal = 14.dp,
-                vertical = 10.dp
-            ),
-            color = if (isError) {
-                MaterialTheme.colorScheme.error
-            } else {
-                Orange
-            },
-            fontWeight = FontWeight.SemiBold
-        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(
+                    horizontal = 14.dp,
+                    vertical = 8.dp
+                ),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = message,
+                modifier = Modifier.weight(1f),
+                color = if (isError) {
+                    MaterialTheme.colorScheme.error
+                } else {
+                    Orange
+                },
+                fontWeight = FontWeight.SemiBold
+            )
+
+            IconButton(
+                onClick = onDismiss
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = "Dismiss message",
+                    tint = if (isError) {
+                        MaterialTheme.colorScheme.error
+                    } else {
+                        Orange
+                    }
+                )
+            }
+        }
     }
+
+
+
 }
 
 @Composable
@@ -441,6 +477,7 @@ private fun PendingShopkeepersTab(
     var query by remember {
         mutableStateOf("")
     }
+
 
     val filteredUsers = pendingShopkeepers.filter { user ->
         matchesUserSearch(
@@ -502,6 +539,8 @@ private fun PendingShopkeepersTab(
             }
         }
     }
+
+
 }
 
 @Composable
@@ -602,6 +641,8 @@ private fun PendingShopkeeperCard(
             }
         }
     }
+
+
 }
 
 @Composable
@@ -619,6 +660,7 @@ private fun ShopsTab(
     var query by remember {
         mutableStateOf("")
     }
+
 
     val filteredShops = shops.filter { shop ->
         val q = query.trim().lowercase()
@@ -697,6 +739,8 @@ private fun ShopsTab(
             }
         }
     }
+
+
 }
 
 @Composable
@@ -739,6 +783,7 @@ private fun ShopAdminCard(
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Bold
                     )
+
 
                     Spacer(
                         modifier = Modifier.height(4.dp)
@@ -1012,6 +1057,8 @@ private fun ShopAdminCard(
             }
         }
     }
+
+
 }
 
 @Composable
@@ -1024,6 +1071,7 @@ private fun UsersTab(
     var query by remember {
         mutableStateOf("")
     }
+
 
     val filteredUsers = users.filter { user ->
         matchesUserSearch(
@@ -1085,6 +1133,8 @@ private fun UsersTab(
             }
         }
     }
+
+
 }
 
 @Composable
@@ -1114,6 +1164,7 @@ private fun UserAdminCard(
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold
             )
+
 
             Spacer(
                 modifier = Modifier.height(6.dp)
@@ -1230,6 +1281,8 @@ private fun UserAdminCard(
             }
         }
     }
+
+
 }
 
 @Composable
@@ -1289,6 +1342,7 @@ private fun InfoRow(
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
 
+
         Text(
             text = value,
             modifier = Modifier.weight(0.62f),
@@ -1302,6 +1356,8 @@ private fun InfoRow(
     Spacer(
         modifier = Modifier.height(6.dp)
     )
+
+
 }
 
 @Composable
@@ -1392,6 +1448,7 @@ private fun RoleDropdown(
         "admin"
     )
 
+
     var expanded by remember {
         mutableStateOf(false)
     }
@@ -1425,6 +1482,8 @@ private fun RoleDropdown(
             }
         }
     }
+
+
 }
 
 private fun matchesUserSearch(
@@ -1433,10 +1492,13 @@ private fun matchesUserSearch(
 ): Boolean {
     val q = query.trim().lowercase()
 
+
     return q.isBlank() ||
             user.name.lowercase().contains(q) ||
             user.email.lowercase().contains(q) ||
             user.phone.lowercase().contains(q) ||
             user.role.lowercase().contains(q) ||
             user.shopId.lowercase().contains(q)
+
+
 }

@@ -65,6 +65,9 @@ class ShopkeeperViewModel @Inject constructor(
     private val _salesSummary = MutableStateFlow(ShopkeeperSalesSummary())
     val salesSummary: StateFlow<ShopkeeperSalesSummary> = _salesSummary
 
+    private val _analyticsState = MutableStateFlow(ShopkeeperAnalyticsState())
+    val analyticsState: StateFlow<ShopkeeperAnalyticsState> = _analyticsState
+
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading
 
@@ -324,6 +327,78 @@ class ShopkeeperViewModel @Inject constructor(
             }
     }
 
+    fun loadAnalytics() {
+        viewModelScope.launch {
+            _analyticsState.value = _analyticsState.value.copy(
+                isLoading = true,
+                error = null
+            )
+
+            try {
+                val finalShopId = resolveShopIdForAnalytics()
+
+                if (finalShopId.isBlank()) {
+                    _analyticsState.value = _analyticsState.value.copy(
+                        isLoading = false,
+                        error = "Shop ID missing. Please login again."
+                    )
+                    return@launch
+                }
+
+                val today = LocalDate.now().toString()
+                val currentMonth = YearMonth.now().toString()
+
+                val todaySnapshot = dailyAnalyticsRef(
+                    shopId = finalShopId,
+                    date = today
+                ).get().await()
+
+                val monthSnapshot = monthlyAnalyticsRef(
+                    shopId = finalShopId,
+                    month = currentMonth
+                ).get().await()
+
+                val lifetimeSnapshot = lifetimeAnalyticsRef(
+                    shopId = finalShopId
+                ).get().await()
+
+                todayAnalytics = todaySnapshot.toShopkeeperAnalyticsSnapshot()
+                monthAnalytics = monthSnapshot.toShopkeeperAnalyticsSnapshot()
+                lifetimeAnalytics = lifetimeSnapshot.toShopkeeperAnalyticsSnapshot()
+
+                updateAnalyticsStateFromCurrentData(
+                    isLoading = false,
+                    error = null
+                )
+
+            } catch (e: Exception) {
+                e.printStackTrace()
+
+                _analyticsState.value = _analyticsState.value.copy(
+                    isLoading = false,
+                    error = e.message ?: "Failed to load analytics."
+                )
+            }
+        }
+    }
+
+    private suspend fun resolveShopIdForAnalytics(): String {
+        if (shopId.isNotBlank()) {
+            return shopId
+        }
+
+        val uid = auth.currentUser?.uid ?: return ""
+
+        val userDoc = firestore.collection("users")
+            .document(uid)
+            .get()
+            .await()
+
+        shopId = userDoc.getString("shopId").orEmpty()
+
+        return shopId
+    }
+
     private fun updateSalesSummary() {
         val today = LocalDate.now().toString()
         val currentMonth = YearMonth.now().toString()
@@ -351,6 +426,53 @@ class ShopkeeperViewModel @Inject constructor(
             lifetimeSales = lifetimeAnalytics.verifiedSales,
             pendingPaymentOrders = pendingPaymentOrders,
             cancelledOrders = lifetimeAnalytics.cancelledOrders
+        )
+
+        updateAnalyticsStateFromCurrentData()
+    }
+
+    private fun updateAnalyticsStateFromCurrentData(
+        isLoading: Boolean = false,
+        error: String? = null
+    ) {
+        val today = LocalDate.now().toString()
+        val currentMonth = YearMonth.now().toString()
+
+        val pendingTodayOrders = activeOrdersCache.count { order ->
+            order.pickupDate == today &&
+                    order.paymentStatus.lowercase() == PaymentStatusValue.PENDING_VERIFICATION
+        }
+
+        val pendingMonthOrders = activeOrdersCache.count { order ->
+            order.pickupDate.startsWith(currentMonth) &&
+                    order.paymentStatus.lowercase() == PaymentStatusValue.PENDING_VERIFICATION
+        }
+
+        val pendingPaymentOrders = activeOrdersCache.count { order ->
+            order.paymentStatus.lowercase() == PaymentStatusValue.PENDING_VERIFICATION
+        }
+
+        _analyticsState.value = ShopkeeperAnalyticsState(
+            isLoading = isLoading,
+            error = error,
+
+            todaySales = todayAnalytics.verifiedSales,
+            todayOrders = todayAnalytics.verifiedOrders + pendingTodayOrders,
+            todayVerified = todayAnalytics.verifiedOrders,
+            todayCancelled = todayAnalytics.cancelledOrders,
+            todayPendingVerification = pendingTodayOrders,
+
+            monthSales = monthAnalytics.verifiedSales,
+            monthOrders = monthAnalytics.verifiedOrders + pendingMonthOrders,
+            monthVerified = monthAnalytics.verifiedOrders,
+            monthCancelled = monthAnalytics.cancelledOrders,
+            monthPendingVerification = pendingMonthOrders,
+
+            lifetimeSales = lifetimeAnalytics.verifiedSales,
+            lifetimeOrders = lifetimeAnalytics.verifiedOrders,
+            lifetimeVerified = lifetimeAnalytics.verifiedOrders,
+            lifetimeCancelled = lifetimeAnalytics.cancelledOrders,
+            lifetimePendingVerification = pendingPaymentOrders
         )
     }
 
@@ -450,6 +572,7 @@ class ShopkeeperViewModel @Inject constructor(
             )
         }
     }
+
     fun cancelOrderForPaymentNotReceived(orderId: String) {
         cancelOrderByShopkeeper(
             orderId = orderId,
@@ -457,8 +580,6 @@ class ShopkeeperViewModel @Inject constructor(
             cancelReason = "Payment not received"
         )
     }
-
-
 
     fun toggleShopOpen(isOpen: Boolean) {
         if (shopId.isBlank()) {

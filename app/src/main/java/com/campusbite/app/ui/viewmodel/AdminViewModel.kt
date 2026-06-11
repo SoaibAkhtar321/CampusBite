@@ -8,10 +8,13 @@ import com.campusbite.app.util.OrderStatusValue
 import com.campusbite.app.util.PaymentReceivedType
 import com.campusbite.app.util.PaymentStatusValue
 import com.campusbite.app.util.RefundStatusValue
+import com.google.firebase.FirebaseApp
+import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.DocumentReference
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.FirebaseFirestoreException
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.Query
 import com.google.firebase.firestore.SetOptions
@@ -100,6 +103,8 @@ class AdminViewModel @Inject constructor(
     private val _message = MutableStateFlow<String?>(null)
     val message: StateFlow<String?> = _message.asStateFlow()
 
+    private val _messageSource = MutableStateFlow<String?>(null)
+
     private var shopsListener: ListenerRegistration? = null
     private var usersListener: ListenerRegistration? = null
 
@@ -117,8 +122,76 @@ class AdminViewModel @Inject constructor(
     private var reportLifetimeAnalytics = AdminAnalyticsSnapshot()
 
     init {
+        logAdminIdentity()
         listenToShops()
         listenToUsers()
+    }
+
+    private fun logAdminIdentity() {
+        val user = FirebaseAuth.getInstance().currentUser
+
+        Log.d(
+            ADMIN_TAG,
+            "ADMIN DEBUG UID=${user?.uid}, email=${user?.email}"
+        )
+
+        try {
+            val projectId = FirebaseApp.getInstance().options.projectId
+
+            Log.d(
+                ADMIN_TAG,
+                "ADMIN DEBUG projectId=$projectId"
+            )
+        } catch (e: Exception) {
+            Log.e(
+                ADMIN_TAG,
+                "ADMIN DEBUG failed to read Firebase projectId",
+                e
+            )
+        }
+    }
+
+    private fun setAdminMessage(
+        source: String,
+        text: String
+    ) {
+        _messageSource.value = source
+        _message.value = "$source: $text"
+    }
+
+    private fun clearMessageIfSource(
+        source: String
+    ) {
+        val currentSource = _messageSource.value
+        val currentMessage = _message.value.orEmpty()
+
+        if (currentSource == source || currentMessage.startsWith("$source:")) {
+            _messageSource.value = null
+            _message.value = null
+        }
+    }
+
+    private fun Throwable.readableAdminError(): String {
+        return if (this is FirebaseFirestoreException) {
+            when (code) {
+                FirebaseFirestoreException.Code.PERMISSION_DENIED ->
+                    "PERMISSION_DENIED"
+
+                FirebaseFirestoreException.Code.FAILED_PRECONDITION ->
+                    "FAILED_PRECONDITION - likely missing Firestore index"
+
+                FirebaseFirestoreException.Code.UNAVAILABLE ->
+                    "UNAVAILABLE - network/server issue"
+
+                FirebaseFirestoreException.Code.NOT_FOUND ->
+                    "NOT_FOUND"
+
+                else ->
+                    "${code.name}: ${message.orEmpty()}"
+            }
+        } else {
+            message ?: "Unknown error"
+        }
     }
 
     private fun listenToShops() {
@@ -127,8 +200,19 @@ class AdminViewModel @Inject constructor(
         shopsListener = firestore.collection("shops")
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
-                    Log.e("AdminViewModel", "Failed to listen to shops", error)
-                    _message.value = error.message ?: "Failed to load shops"
+                    val readableError = error.readableAdminError()
+
+                    Log.e(
+                        ADMIN_TAG,
+                        "FAILED QUERY: shops listener | $readableError",
+                        error
+                    )
+
+                    setAdminMessage(
+                        source = "shops listener",
+                        text = readableError
+                    )
+
                     _isLoading.value = false
                     return@addSnapshotListener
                 }
@@ -156,7 +240,13 @@ class AdminViewModel @Inject constructor(
                     ?: emptyList()
 
                 _shops.value = shopList
+                clearMessageIfSource("shops listener")
                 _isLoading.value = false
+
+                Log.d(
+                    ADMIN_TAG,
+                    "SUCCESS QUERY: shops listener | count=${shopList.size}"
+                )
             }
     }
 
@@ -166,8 +256,19 @@ class AdminViewModel @Inject constructor(
         usersListener = firestore.collection("users")
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
-                    Log.e("AdminViewModel", "Failed to listen to users", error)
-                    _message.value = error.message ?: "Failed to load users"
+                    val readableError = error.readableAdminError()
+
+                    Log.e(
+                        ADMIN_TAG,
+                        "FAILED QUERY: users listener | $readableError",
+                        error
+                    )
+
+                    setAdminMessage(
+                        source = "users listener",
+                        text = readableError
+                    )
+
                     _isLoading.value = false
                     return@addSnapshotListener
                 }
@@ -209,7 +310,13 @@ class AdminViewModel @Inject constructor(
                     }
                     .sortedByDescending { it.createdAt }
 
+                clearMessageIfSource("users listener")
                 _isLoading.value = false
+
+                Log.d(
+                    ADMIN_TAG,
+                    "SUCCESS QUERY: users listener | count=${userList.size}"
+                )
             }
     }
 
@@ -222,6 +329,11 @@ class AdminViewModel @Inject constructor(
             )
             return
         }
+
+        Log.d(
+            ADMIN_TAG,
+            "LOAD SHOP REPORT: shopId=$shopId"
+        )
 
         _shopReportState.value = AdminShopReportState(isLoading = true)
 
@@ -240,8 +352,18 @@ class AdminViewModel @Inject constructor(
                     .await()
 
                 val shopDoc = if (directDoc.exists()) {
+                    Log.d(
+                        ADMIN_TAG,
+                        "SUCCESS QUERY: shop direct doc | shopId=$shopId"
+                    )
+
                     directDoc
                 } else {
+                    Log.d(
+                        ADMIN_TAG,
+                        "SHOP DIRECT DOC MISSING: falling back to where shopId | shopId=$shopId"
+                    )
+
                     firestore.collection("shops")
                         .whereEqualTo("shopId", shopId)
                         .limit(1)
@@ -253,7 +375,7 @@ class AdminViewModel @Inject constructor(
 
                 if (shopDoc == null || !shopDoc.exists()) {
                     _shopReportState.value = AdminShopReportState(
-                        error = "Shop not found."
+                        error = "Shop not found. shopId used: $shopId"
                     )
                     return@launch
                 }
@@ -277,10 +399,16 @@ class AdminViewModel @Inject constructor(
                 )
 
             } catch (e: Exception) {
-                Log.e("AdminViewModel", "Failed to start shop report", e)
+                val readableError = e.readableAdminError()
+
+                Log.e(
+                    ADMIN_TAG,
+                    "FAILED QUERY: start shop report | shopId=$shopId | $readableError",
+                    e
+                )
 
                 _shopReportState.value = AdminShopReportState(
-                    error = e.message ?: "Failed to load shop report."
+                    error = "Failed to load shop report. Source: start shop report. Error: $readableError"
                 )
             }
         }
@@ -297,12 +425,24 @@ class AdminViewModel @Inject constructor(
             date = today
         ).addSnapshotListener { snapshot, error ->
             if (error != null) {
-                Log.e("AdminViewModel", "Failed to listen today analytics", error)
+                val readableError = error.readableAdminError()
+
+                Log.e(
+                    ADMIN_TAG,
+                    "FAILED QUERY: today analytics | shopId=${shop.shopId} | $readableError",
+                    error
+                )
+
                 return@addSnapshotListener
             }
 
             reportTodayAnalytics = snapshot.toAdminAnalyticsSnapshot()
             updateShopReportState()
+
+            Log.d(
+                ADMIN_TAG,
+                "SUCCESS QUERY: today analytics | shopId=${shop.shopId}"
+            )
         }
 
         shopReportMonthAnalyticsListener = monthlyAnalyticsRef(
@@ -310,24 +450,48 @@ class AdminViewModel @Inject constructor(
             month = currentMonth
         ).addSnapshotListener { snapshot, error ->
             if (error != null) {
-                Log.e("AdminViewModel", "Failed to listen month analytics", error)
+                val readableError = error.readableAdminError()
+
+                Log.e(
+                    ADMIN_TAG,
+                    "FAILED QUERY: month analytics | shopId=${shop.shopId} | $readableError",
+                    error
+                )
+
                 return@addSnapshotListener
             }
 
             reportMonthAnalytics = snapshot.toAdminAnalyticsSnapshot()
             updateShopReportState()
+
+            Log.d(
+                ADMIN_TAG,
+                "SUCCESS QUERY: month analytics | shopId=${shop.shopId}"
+            )
         }
 
         shopReportLifetimeAnalyticsListener = lifetimeAnalyticsRef(
             shopId = shop.shopId
         ).addSnapshotListener { snapshot, error ->
             if (error != null) {
-                Log.e("AdminViewModel", "Failed to listen lifetime analytics", error)
+                val readableError = error.readableAdminError()
+
+                Log.e(
+                    ADMIN_TAG,
+                    "FAILED QUERY: lifetime analytics | shopId=${shop.shopId} | $readableError",
+                    error
+                )
+
                 return@addSnapshotListener
             }
 
             reportLifetimeAnalytics = snapshot.toAdminAnalyticsSnapshot()
             updateShopReportState()
+
+            Log.d(
+                ADMIN_TAG,
+                "SUCCESS QUERY: lifetime analytics | shopId=${shop.shopId}"
+            )
         }
 
         shopReportActiveOrdersListener = firestore.collection("orders")
@@ -335,11 +499,17 @@ class AdminViewModel @Inject constructor(
             .whereIn("status", listOf("pending", "preparing", "ready"))
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
-                    Log.e("AdminViewModel", "Failed to listen active orders", error)
+                    val readableError = error.readableAdminError()
+
+                    Log.e(
+                        ADMIN_TAG,
+                        "FAILED QUERY: active orders | shopId=${shop.shopId} | $readableError",
+                        error
+                    )
 
                     _shopReportState.value = _shopReportState.value.copy(
                         isLoading = false,
-                        error = error.message ?: "Failed to load active orders."
+                        error = "Source: active orders. Error: $readableError"
                     )
                     return@addSnapshotListener
                 }
@@ -349,13 +519,22 @@ class AdminViewModel @Inject constructor(
                         try {
                             doc.toObject(Order::class.java)
                         } catch (e: Exception) {
-                            Log.e("AdminViewModel", "Failed to parse active order", e)
+                            Log.e(
+                                ADMIN_TAG,
+                                "FAILED PARSE: active order | docId=${doc.id}",
+                                e
+                            )
                             null
                         }
                     }
                     ?: emptyList()
 
                 updateShopReportState()
+
+                Log.d(
+                    ADMIN_TAG,
+                    "SUCCESS QUERY: active orders | shopId=${shop.shopId} | count=${reportActiveOrders.size}"
+                )
             }
 
         shopReportRecentOrdersListener = firestore.collection("orders")
@@ -364,11 +543,17 @@ class AdminViewModel @Inject constructor(
             .limit(50)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
-                    Log.e("AdminViewModel", "Failed to listen recent orders", error)
+                    val readableError = error.readableAdminError()
+
+                    Log.e(
+                        ADMIN_TAG,
+                        "FAILED QUERY: recent orders | shopId=${shop.shopId} | $readableError",
+                        error
+                    )
 
                     _shopReportState.value = _shopReportState.value.copy(
                         isLoading = false,
-                        error = error.message ?: "Failed to load recent orders."
+                        error = "Source: recent orders. Error: $readableError"
                     )
                     return@addSnapshotListener
                 }
@@ -378,13 +563,22 @@ class AdminViewModel @Inject constructor(
                         try {
                             doc.toObject(Order::class.java)
                         } catch (e: Exception) {
-                            Log.e("AdminViewModel", "Failed to parse recent order", e)
+                            Log.e(
+                                ADMIN_TAG,
+                                "FAILED PARSE: recent order | docId=${doc.id}",
+                                e
+                            )
                             null
                         }
                     }
                     ?: emptyList()
 
                 updateShopReportState()
+
+                Log.d(
+                    ADMIN_TAG,
+                    "SUCCESS QUERY: recent orders | shopId=${shop.shopId} | count=${reportRecentOrders.size}"
+                )
             }
     }
 
@@ -606,8 +800,15 @@ class AdminViewModel @Inject constructor(
                 _message.value = "Shopkeeper approved and shop created"
 
             } catch (e: Exception) {
-                Log.e("AdminViewModel", "Failed to approve shopkeeper", e)
-                _message.value = e.message ?: "Failed to approve shopkeeper"
+                val readableError = e.readableAdminError()
+
+                Log.e(
+                    ADMIN_TAG,
+                    "FAILED WRITE: setShopkeeperApproved | userDocId=$userDocId | $readableError",
+                    e
+                )
+
+                _message.value = "Failed to approve shopkeeper: $readableError"
             }
         }
     }
@@ -649,8 +850,15 @@ class AdminViewModel @Inject constructor(
                 }
 
             } catch (e: Exception) {
-                Log.e("AdminViewModel", "Failed to update shop approval", e)
-                _message.value = e.message ?: "Failed to update shop approval"
+                val readableError = e.readableAdminError()
+
+                Log.e(
+                    ADMIN_TAG,
+                    "FAILED WRITE: setShopApproved | shopDocId=$shopDocId | $readableError",
+                    e
+                )
+
+                _message.value = "Failed to update shop approval: $readableError"
             }
         }
     }
@@ -678,8 +886,15 @@ class AdminViewModel @Inject constructor(
                 }
 
             } catch (e: Exception) {
-                Log.e("AdminViewModel", "Failed to update shop open status", e)
-                _message.value = e.message ?: "Failed to update shop status"
+                val readableError = e.readableAdminError()
+
+                Log.e(
+                    ADMIN_TAG,
+                    "FAILED WRITE: setShopOpen | shopDocId=$shopDocId | $readableError",
+                    e
+                )
+
+                _message.value = "Failed to update shop status: $readableError"
             }
         }
     }
@@ -732,8 +947,15 @@ class AdminViewModel @Inject constructor(
                 }
 
             } catch (e: Exception) {
-                Log.e("AdminViewModel", "Failed to block/unblock shop", e)
-                _message.value = e.message ?: "Failed to update shop"
+                val readableError = e.readableAdminError()
+
+                Log.e(
+                    ADMIN_TAG,
+                    "FAILED WRITE: setShopBlocked | shopDocId=$shopDocId | shopId=$shopId | $readableError",
+                    e
+                )
+
+                _message.value = "Failed to update shop: $readableError"
             }
         }
     }
@@ -784,8 +1006,15 @@ class AdminViewModel @Inject constructor(
                 _message.value = "Shop deleted completely"
 
             } catch (e: Exception) {
-                Log.e("AdminViewModel", "Failed to delete shop", e)
-                _message.value = e.message ?: "Failed to delete shop"
+                val readableError = e.readableAdminError()
+
+                Log.e(
+                    ADMIN_TAG,
+                    "FAILED WRITE: deleteShopCompletely | shopDocId=$shopDocId | shopId=$shopId | $readableError",
+                    e
+                )
+
+                _message.value = "Failed to delete shop: $readableError"
             }
         }
     }
@@ -815,8 +1044,15 @@ class AdminViewModel @Inject constructor(
                 _message.value = "Pending request removed"
 
             } catch (e: Exception) {
-                Log.e("AdminViewModel", "Failed to remove pending request", e)
-                _message.value = e.message ?: "Failed to remove request"
+                val readableError = e.readableAdminError()
+
+                Log.e(
+                    ADMIN_TAG,
+                    "FAILED WRITE: removePendingShopkeeper | userDocId=$userDocId | $readableError",
+                    e
+                )
+
+                _message.value = "Failed to remove request: $readableError"
             }
         }
     }
@@ -844,8 +1080,15 @@ class AdminViewModel @Inject constructor(
                 }
 
             } catch (e: Exception) {
-                Log.e("AdminViewModel", "Failed to update user block status", e)
-                _message.value = e.message ?: "Failed to update user"
+                val readableError = e.readableAdminError()
+
+                Log.e(
+                    ADMIN_TAG,
+                    "FAILED WRITE: setUserBlocked | userDocId=$userDocId | $readableError",
+                    e
+                )
+
+                _message.value = "Failed to update user: $readableError"
             }
         }
     }
@@ -895,8 +1138,15 @@ class AdminViewModel @Inject constructor(
                 _message.value = "User role updated to $cleanRole"
 
             } catch (e: Exception) {
-                Log.e("AdminViewModel", "Failed to update user role", e)
-                _message.value = e.message ?: "Failed to update role"
+                val readableError = e.readableAdminError()
+
+                Log.e(
+                    ADMIN_TAG,
+                    "FAILED WRITE: setUserRole | userDocId=$userDocId | role=$role | $readableError",
+                    e
+                )
+
+                _message.value = "Failed to update role: $readableError"
             }
         }
     }
@@ -922,8 +1172,15 @@ class AdminViewModel @Inject constructor(
 
                 _message.value = "Shop moved to top"
             } catch (e: Exception) {
-                Log.e("AdminViewModel", "Failed to move shop to top", e)
-                _message.value = e.message ?: "Failed to update shop position"
+                val readableError = e.readableAdminError()
+
+                Log.e(
+                    ADMIN_TAG,
+                    "FAILED WRITE: moveShopToTop | shop=${shop.docId} | $readableError",
+                    e
+                )
+
+                _message.value = "Failed to update shop position: $readableError"
             }
         }
     }
@@ -950,8 +1207,15 @@ class AdminViewModel @Inject constructor(
 
                 _message.value = "Shop moved up"
             } catch (e: Exception) {
-                Log.e("AdminViewModel", "Failed to move shop up", e)
-                _message.value = e.message ?: "Failed to update shop position"
+                val readableError = e.readableAdminError()
+
+                Log.e(
+                    ADMIN_TAG,
+                    "FAILED WRITE: moveShopUp | shop=${shop.docId} | $readableError",
+                    e
+                )
+
+                _message.value = "Failed to update shop position: $readableError"
             }
         }
     }
@@ -978,8 +1242,15 @@ class AdminViewModel @Inject constructor(
 
                 _message.value = "Shop moved down"
             } catch (e: Exception) {
-                Log.e("AdminViewModel", "Failed to move shop down", e)
-                _message.value = e.message ?: "Failed to update shop position"
+                val readableError = e.readableAdminError()
+
+                Log.e(
+                    ADMIN_TAG,
+                    "FAILED WRITE: moveShopDown | shop=${shop.docId} | $readableError",
+                    e
+                )
+
+                _message.value = "Failed to update shop position: $readableError"
             }
         }
     }
@@ -1169,8 +1440,15 @@ class AdminViewModel @Inject constructor(
                     "Order cancelled by admin because payment was not received."
                 }
             } catch (e: Exception) {
-                Log.e("AdminViewModel", "Failed to cancel order by admin", e)
-                _message.value = e.message ?: "Failed to cancel order."
+                val readableError = e.readableAdminError()
+
+                Log.e(
+                    ADMIN_TAG,
+                    "FAILED WRITE: cancelOrderByAdmin | orderId=$orderId | $readableError",
+                    e
+                )
+
+                _message.value = "Failed to cancel order: $readableError"
             }
         }
     }
@@ -1232,8 +1510,15 @@ class AdminViewModel @Inject constructor(
 
                 _message.value = "Refund marked as settled by admin."
             } catch (e: Exception) {
-                Log.e("AdminViewModel", "Failed to mark refund settled by admin", e)
-                _message.value = e.message ?: "Failed to mark refund settled."
+                val readableError = e.readableAdminError()
+
+                Log.e(
+                    ADMIN_TAG,
+                    "FAILED WRITE: markRefundSettledByAdmin | orderId=$orderId | $readableError",
+                    e
+                )
+
+                _message.value = "Failed to mark refund settled: $readableError"
             }
         }
     }
@@ -1270,6 +1555,7 @@ class AdminViewModel @Inject constructor(
 
     fun clearMessage() {
         _message.value = null
+        _messageSource.value = null
     }
 
     private fun generateShopId(
@@ -1292,4 +1578,10 @@ class AdminViewModel @Inject constructor(
         usersListener?.remove()
         clearShopReportListeners()
     }
+
+    companion object {
+        private const val ADMIN_TAG = "AdminViewModel"
+    }
+
+
 }

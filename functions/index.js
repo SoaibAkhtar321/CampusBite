@@ -12,7 +12,7 @@ const db = admin.firestore();
 const FieldValue = admin.firestore.FieldValue;
 
 const REGION = "us-central1";
-const ORDER_NOTIFICATION_CHANNEL_ID = "order_updates_high";
+const ORDER_NOTIFICATION_CHANNEL_ID = "campusbite_order_alerts_v2";
 
 const ORDER_STATUSES = [
   "pending",
@@ -261,7 +261,7 @@ async function sendMulticastNotification({
       notification: {
         channelId: ORDER_NOTIFICATION_CHANNEL_ID,
         sound: "default",
-        priority: "high",
+        priority: "max",
         defaultSound: true,
         defaultVibrateTimings: true,
       },
@@ -270,7 +270,6 @@ async function sendMulticastNotification({
 
   return admin.messaging().sendEachForMulticast(message);
 }
-
 exports.updateOrderStatus = onCall(
   {
     region: REGION,

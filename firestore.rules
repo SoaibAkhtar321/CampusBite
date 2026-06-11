@@ -3,6 +3,8 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    // ── Helpers ──────────────────────────────────────────────────────────────
+
     function isSignedIn() {
       return request.auth != null;
     }
@@ -64,6 +66,8 @@ service cloud.firestore {
         && get(shopPath(shopId)).data.isOpen == true;
     }
 
+    // ── users ─────────────────────────────────────────────────────────────────
+
     match /users/{userId} {
       allow create: if isSignedIn()
         && request.auth.uid == userId
@@ -71,34 +75,26 @@ service cloud.firestore {
         && request.resource.data.role in ["student", "shopkeeper"];
 
       allow read: if isSignedIn()
-        && (
-          request.auth.uid == userId
-          || isAdmin()
-        );
+        && (request.auth.uid == userId || isAdmin());
 
       allow update: if isAdmin()
         || (
           isSignedIn()
           && request.auth.uid == userId
           && changedKeys().hasOnly([
-            "name",
-            "phone",
-            "fcmToken",
-            "fcmTokens",
-            "fcmTokenUpdatedAt",
-            "lastSeenAt",
-            "updatedAt"
+            "name", "phone", "fcmToken", "fcmTokens",
+            "fcmTokenUpdatedAt", "lastSeenAt", "updatedAt"
           ])
         );
 
       allow delete: if isAdmin();
     }
 
+    // ── shops ─────────────────────────────────────────────────────────────────
+
     match /shops/{shopId} {
       allow read: if isSignedIn();
-
       allow create: if isAdmin();
-
       allow update: if isAdmin()
         || (
           isShopkeeper()
@@ -111,28 +107,19 @@ service cloud.firestore {
           && request.resource.data.isDeleted == resource.data.isDeleted
           && request.resource.data.displayOrder == resource.data.displayOrder
           && changedKeys().hasOnly([
-            "name",
-            "description",
-            "imageUrl",
-            "isOpen",
-            "openingTime",
-            "closingTime",
-            "maxOrdersPerSlot",
-            "closedSlots",
-            "upiId",
-            "phone",
-            "ownerPhone",
-            "updatedAt",
-            "lastActiveAt"
+            "name", "description", "imageUrl", "isOpen",
+            "openingTime", "closingTime", "maxOrdersPerSlot",
+            "closedSlots", "upiId", "phone", "ownerPhone",
+            "updatedAt", "lastActiveAt"
           ])
         );
-
       allow delete: if isAdmin();
     }
 
+    // ── menuItems ─────────────────────────────────────────────────────────────
+
     match /menuItems/{menuItemId} {
       allow read: if isSignedIn();
-
       allow create: if isAdmin()
         || (
           isShopkeeper()
@@ -143,7 +130,6 @@ service cloud.firestore {
           && request.resource.data.price is number
           && request.resource.data.price > 0
         );
-
       allow update: if isAdmin()
         || (
           isShopkeeper()
@@ -151,79 +137,75 @@ service cloud.firestore {
           && request.resource.data.shopId == resource.data.shopId
           && request.resource.data.itemId == resource.data.itemId
         );
-
       allow delete: if isAdmin()
-        || (
-          isShopkeeper()
-          && resource.data.shopId == userShopId()
-        );
+        || (isShopkeeper() && resource.data.shopId == userShopId());
     }
+
+    // ── orders ────────────────────────────────────────────────────────────────
 
     match /orders/{orderId} {
-      allow create: if isStudent()
-        && request.resource.data.orderId == orderId
-        && request.resource.data.studentId == request.auth.uid
-        && request.resource.data.shopId is string
-        && shopIsOrderable(request.resource.data.shopId)
-        && request.resource.data.items is list
-        && request.resource.data.items.size() > 0
-        && request.resource.data.totalPrice is number
-        && request.resource.data.totalPrice > 0
-        && request.resource.data.status == "pending"
-        && request.resource.data.paymentStatus == "pending_verification";
+  allow create: if isStudent()
+    && request.resource.data.orderId == orderId
+    && request.resource.data.studentId == request.auth.uid
+    && request.resource.data.shopId is string
+    && shopIsOrderable(request.resource.data.shopId)
+    && request.resource.data.items is list
+    && request.resource.data.items.size() > 0
+    && request.resource.data.totalPrice is number
+    && request.resource.data.totalPrice > 0
+    && request.resource.data.status == "pending"
+    && request.resource.data.paymentStatus == "pending_verification";
 
-      allow read: if isAdmin()
-        || (
-          isStudent()
-          && resource.data.studentId == request.auth.uid
-        )
-        || (
-          isShopkeeper()
-          && resource.data.shopId == userShopId()
-        );
+  allow read: if isAdmin()
+    || (isStudent() && resource.data.studentId == request.auth.uid)
+    || (isShopkeeper() && resource.data.shopId == userShopId());
 
-      allow update: if isAdmin();
+  allow update: if isAdmin();
 
-      allow delete: if isAdmin();
-    }
+  allow delete: if false;
+}
+
+    // ── slotAvailability ──────────────────────────────────────────────────────
 
     match /slotAvailability/{slotId} {
       allow read: if isSignedIn();
-
       allow create: if isAdmin()
-        || (
-          isShopkeeper()
-          && request.resource.data.shopId == userShopId()
-        );
-
+        || (isShopkeeper() && request.resource.data.shopId == userShopId());
       allow update: if isAdmin()
         || (
           isShopkeeper()
           && resource.data.shopId == userShopId()
           && request.resource.data.shopId == resource.data.shopId
         );
-
       allow delete: if isAdmin()
-        || (
-          isShopkeeper()
-          && resource.data.shopId == userShopId()
-        );
+        || (isShopkeeper() && resource.data.shopId == userShopId());
     }
+
+    // ── shopAnalytics ─────────────────────────────────────────────────────────
+    //
+    // Path structure: shopAnalytics/{shopId}/{period}/{docId}
+    //   period is "daily" | "monthly" | "lifetime"
+    //   docId  is a date string "yyyy-MM-dd", "yyyy-MM", or "summary"
+    //
+    // This explicit 3-segment match covers ALL documents under the collection.
+    // The previous rule was already correct — the bug was NOT here.
 
     match /shopAnalytics/{shopId}/{period}/{docId} {
       allow read: if isAdmin()
-        || (
-          isShopkeeper()
-          && userShopId() == shopId
-        );
+        || (isShopkeeper() && userShopId() == shopId);
 
+      // Write: admin writes directly; Cloud Functions write using Admin SDK (bypass rules)
       allow write: if isAdmin();
     }
+
+    // ── appConfig ─────────────────────────────────────────────────────────────
 
     match /appConfig/{docId} {
       allow read: if isSignedIn();
       allow write: if isAdmin();
     }
+
+    // ── Deny everything else ──────────────────────────────────────────────────
 
     match /{document=**} {
       allow read, write: if false;

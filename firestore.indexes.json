@@ -4,32 +4,50 @@
       "collectionGroup": "orders",
       "queryScope": "COLLECTION",
       "fields": [
-        {
-          "fieldPath": "shopId",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "status",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "createdAt",
-          "order": "DESCENDING"
-        }
+        { "fieldPath": "shopId", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" }
       ]
     },
     {
       "collectionGroup": "orders",
       "queryScope": "COLLECTION",
       "fields": [
-        {
-          "fieldPath": "studentId",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "createdAt",
-          "order": "DESCENDING"
-        }
+        { "fieldPath": "shopId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "orders",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "studentId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "orders",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "studentId", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "menuItems",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "shopId", "order": "ASCENDING" },
+        { "fieldPath": "isAvailable", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "shops",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "isApproved", "order": "ASCENDING" },
+        { "fieldPath": "isBlocked", "order": "ASCENDING" },
+        { "fieldPath": "isDeleted", "order": "ASCENDING" },
+        { "fieldPath": "displayOrder", "order": "ASCENDING" }
       ]
     }
   ],
