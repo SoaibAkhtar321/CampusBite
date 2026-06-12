@@ -1,5 +1,6 @@
 package com.campusbite.app.ui.screens.auth
 
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -32,6 +33,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
@@ -59,6 +61,20 @@ fun CompleteProfileScreen(
         "Amity University" to "amity_university",
         "Other" to "other"
     )
+
+    val isDarkTheme = isSystemInDarkTheme()
+
+    val screenTextColor = if (isDarkTheme) {
+        Color.White
+    } else {
+        TextPrimary
+    }
+
+    val screenSubTextColor = if (isDarkTheme) {
+        Color(0xFFBDBDBD)
+    } else {
+        TextSecondary
+    }
 
     var fullName by remember {
         mutableStateOf(sanitizeNameInput(viewModel.googleName))
@@ -139,16 +155,20 @@ fun CompleteProfileScreen(
     }
 
     val textFieldColors = OutlinedTextFieldDefaults.colors(
-        focusedTextColor = TextPrimary,
-        unfocusedTextColor = TextPrimary,
-        errorTextColor = TextPrimary,
+        focusedTextColor = screenTextColor,
+        unfocusedTextColor = screenTextColor,
+        errorTextColor = screenTextColor,
+
+        focusedContainerColor = Color.Transparent,
+        unfocusedContainerColor = Color.Transparent,
+        errorContainerColor = Color.Transparent,
 
         focusedBorderColor = Orange,
-        unfocusedBorderColor = TextSecondary,
+        unfocusedBorderColor = screenSubTextColor,
         errorBorderColor = MaterialTheme.colorScheme.error,
 
         focusedLabelColor = Orange,
-        unfocusedLabelColor = TextSecondary,
+        unfocusedLabelColor = screenSubTextColor,
         errorLabelColor = MaterialTheme.colorScheme.error,
 
         cursorColor = Orange,
@@ -166,7 +186,8 @@ fun CompleteProfileScreen(
         Text(
             text = "Complete Profile",
             fontSize = 30.sp,
-            fontWeight = FontWeight.Bold
+            fontWeight = FontWeight.Bold,
+            color = screenTextColor
         )
 
         Spacer(modifier = Modifier.height(8.dp))
@@ -174,7 +195,7 @@ fun CompleteProfileScreen(
         Text(
             text = "Add details to continue with CampusBite",
             fontSize = 13.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            color = screenSubTextColor
         )
 
         Spacer(modifier = Modifier.height(24.dp))
@@ -238,7 +259,7 @@ fun CompleteProfileScreen(
         Text(
             text = "Use a valid phone number for order updates and refund support.",
             fontSize = 12.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            color = screenSubTextColor
         )
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -246,7 +267,7 @@ fun CompleteProfileScreen(
         Text(
             text = "Continue as",
             fontSize = 14.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            color = screenSubTextColor
         )
 
         Spacer(modifier = Modifier.height(8.dp))
@@ -285,7 +306,7 @@ fun CompleteProfileScreen(
             Text(
                 text = "Shopkeeper accounts require admin approval.",
                 fontSize = 12.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = screenSubTextColor
             )
 
             Spacer(modifier = Modifier.height(16.dp))

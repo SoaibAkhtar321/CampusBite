@@ -84,6 +84,8 @@ import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 import java.util.Date
 import java.util.Locale
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 
 private val StatusPending = Color(0xFFE65100)
 private val StatusPreparing = Color(0xFF1565C0)
@@ -333,11 +335,12 @@ fun ShopkeeperDashboardScreen(
                             newStatus = newStatus
                         )
                     },
-                    onCancelOrder = { paymentReceivedType, cancelReason ->
+                    onCancelOrder = { paymentReceivedType, cancelReason, paymentReceivedAmount ->
                         viewModel.cancelOrderByShopkeeper(
                             orderId = order.orderId,
                             paymentReceivedType = paymentReceivedType,
-                            cancelReason = cancelReason
+                            cancelReason = cancelReason,
+                            paymentReceivedAmount = paymentReceivedAmount
                         )
                     }
                 )
@@ -688,8 +691,14 @@ private fun CompactRefundPendingOrderCard(
                     )
                 }
 
+                val refundAmountToShow = if (order.refundAmount > 0.0) {
+                    order.refundAmount
+                } else {
+                    order.totalPrice
+                }
+
                 Text(
-                    text = "₹${order.totalPrice.toInt()}",
+                    text = "Refund ₹${refundAmountToShow.toInt()}",
                     fontWeight = FontWeight.ExtraBold,
                     color = StatusCancelled,
                     fontSize = 15.sp
@@ -1007,8 +1016,12 @@ private fun EmptyOrdersCard() {
 private fun OrderCard(
     order: Order,
     onUpdateStatus: (String) -> Unit,
-    onCancelOrder: (paymentReceivedType: String, cancelReason: String) -> Unit
-) {
+    onCancelOrder: (
+        paymentReceivedType: String,
+        cancelReason: String,
+        paymentReceivedAmount: Double
+    ) -> Unit
+){
     val statusCol = statusColor(order.status)
     val context = LocalContext.current
 
@@ -1280,15 +1293,16 @@ private fun OrderCard(
 
     if (showCancelDialog) {
         CancelOrderDialog(
+            orderTotalPrice = order.totalPrice,
             onDismiss = {
                 showCancelDialog = false
             },
-            onConfirm = { paymentReceivedType, cancelReason ->
+            onConfirm = { paymentReceivedType, cancelReason, paymentReceivedAmount ->
                 showCancelDialog = false
-
                 onCancelOrder(
                     paymentReceivedType,
-                    cancelReason
+                    cancelReason,
+                    paymentReceivedAmount
                 )
             }
         )
@@ -1383,8 +1397,13 @@ private fun PaymentVerificationCard(
 
 @Composable
 private fun CancelOrderDialog(
+    orderTotalPrice: Double,
     onDismiss: () -> Unit,
-    onConfirm: (paymentReceivedType: String, cancelReason: String) -> Unit
+    onConfirm: (
+        paymentReceivedType: String,
+        cancelReason: String,
+        paymentReceivedAmount: Double
+    ) -> Unit
 ) {
     var selectedPaymentType by remember {
         mutableStateOf("")
@@ -1394,12 +1413,16 @@ private fun CancelOrderDialog(
         mutableStateOf("")
     }
 
+    var partialAmountText by remember {
+        mutableStateOf("")
+    }
+
     var localError by remember {
         mutableStateOf<String?>(null)
     }
 
     val paymentOptions = listOf(
-        PaymentReceivedType.NONE to "Payment not received",
+        PaymentReceivedType.NONE to "No payment received",
         PaymentReceivedType.FULL to "Full payment received",
         PaymentReceivedType.PARTIAL to "Partial payment received"
     )
@@ -1409,6 +1432,7 @@ private fun CancelOrderDialog(
         "Shop emergency",
         "Gas/electricity issue",
         "Shop closing unexpectedly",
+        "Payment incomplete / wrong amount paid",
         "Other operational issue"
     )
 
@@ -1425,7 +1449,7 @@ private fun CancelOrderDialog(
         text = {
             Column {
                 Text(
-                    text = "Select payment status before cancelling",
+                    text = "How much payment did you receive?",
                     fontWeight = FontWeight.SemiBold
                 )
 
@@ -1438,6 +1462,7 @@ private fun CancelOrderDialog(
                             .clickable {
                                 selectedPaymentType = type
                                 selectedReason = ""
+                                partialAmountText = ""
                                 localError = null
                             }
                             .padding(vertical = 4.dp),
@@ -1448,6 +1473,7 @@ private fun CancelOrderDialog(
                             onClick = {
                                 selectedPaymentType = type
                                 selectedReason = ""
+                                partialAmountText = ""
                                 localError = null
                             }
                         )
@@ -1456,21 +1482,67 @@ private fun CancelOrderDialog(
                     }
                 }
 
-                if (selectedPaymentType == PaymentReceivedType.NONE) {
-                    Spacer(modifier = Modifier.height(8.dp))
+                when (selectedPaymentType) {
+                    PaymentReceivedType.NONE -> {
+                        Spacer(modifier = Modifier.height(8.dp))
 
-                    Text(
-                        text = "This will cancel the order as payment not received. No refund will be marked.",
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                        Text(
+                            text = "This will cancel the order as payment not received. No refund will be marked.",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    PaymentReceivedType.FULL -> {
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        Text(
+                            text = "Refund amount: ₹${orderTotalPrice.toInt()}",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
+
+                    PaymentReceivedType.PARTIAL -> {
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        OutlinedTextField(
+                            value = partialAmountText,
+                            onValueChange = { value ->
+                                partialAmountText = value
+                                    .filter { it.isDigit() }
+                                    .take(5)
+                                localError = null
+                            },
+                            label = {
+                                Text("Amount received")
+                            },
+                            prefix = {
+                                Text("₹")
+                            },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(
+                                keyboardType = KeyboardType.Number
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        Text(
+                            text = "Only this received amount will be marked as Refund Pending.",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
                 }
 
                 if (paymentReceived) {
                     Spacer(modifier = Modifier.height(12.dp))
 
                     Text(
-                        text = "Select cancellation reason",
+                        text = "Why are you cancelling this order?",
                         fontWeight = FontWeight.SemiBold
                     )
 
@@ -1516,9 +1588,23 @@ private fun CancelOrderDialog(
         confirmButton = {
             TextButton(
                 onClick = {
+                    val partialAmount = partialAmountText.toDoubleOrNull() ?: 0.0
+
                     when {
                         selectedPaymentType.isBlank() -> {
                             localError = "Please select payment status"
+                            return@TextButton
+                        }
+
+                        selectedPaymentType == PaymentReceivedType.PARTIAL &&
+                                partialAmount <= 0.0 -> {
+                            localError = "Enter the amount received"
+                            return@TextButton
+                        }
+
+                        selectedPaymentType == PaymentReceivedType.PARTIAL &&
+                                partialAmount >= orderTotalPrice -> {
+                            localError = "For full amount, select Full payment received"
                             return@TextButton
                         }
 
@@ -1528,13 +1614,20 @@ private fun CancelOrderDialog(
                         }
                     }
 
+                    val finalReceivedAmount = when (selectedPaymentType) {
+                        PaymentReceivedType.FULL -> orderTotalPrice
+                        PaymentReceivedType.PARTIAL -> partialAmount
+                        else -> 0.0
+                    }
+
                     onConfirm(
                         selectedPaymentType,
                         if (paymentReceived) {
                             selectedReason
                         } else {
                             "Payment not received"
-                        }
+                        },
+                        finalReceivedAmount
                     )
                 }
             ) {
