@@ -149,7 +149,18 @@ class OrderViewModel @Inject constructor(
                         val shop = buildShopFromSnapshot(snapshot)
                         _selectedShop.value = shop
 
-                        if (!shop.isOpen || shop.isBlocked || shop.isDeleted) {
+                        if (!isShopAcceptingOrders(snapshot, shop)) {
+                            Log.w(
+                                "OrderVM",
+                                "Shop not accepting orders: docId=${snapshot.id}, " +
+                                        "fieldShopId=${snapshot.getString("shopId")}, " +
+                                        "isOpen=${shop.isOpen}, " +
+                                        "isApproved=${shop.isApproved}, " +
+                                        "isBlocked=${shop.isBlocked}, " +
+                                        "isDeleted=${shop.isDeleted}, " +
+                                        "isVisible=${snapshot.getBoolean("isVisible")}"
+                            )
+
                             _slotUiState.value = SlotUiState(
                                 message = "This shop is currently not accepting orders."
                             )
@@ -191,13 +202,29 @@ class OrderViewModel @Inject constructor(
                 val shopDoc = getShopDocumentByIdOrField(order.shopId)
 
                 if (shopDoc == null || !shopDoc.exists()) {
+                    Log.e("OrderVM", "Shop not found for shopId=${order.shopId}")
                     _orderState.value = OrderState.Error("Shop not found.")
                     return@launch
                 }
 
                 val shop = buildShopFromSnapshot(shopDoc)
+                val canonicalShopId = shopDoc.id
+                val maxOrdersPerSlot = getMaxOrdersPerSlot(shopDoc)
+                val closedSlots = getClosedSlots(shopDoc)
 
-                if (!shop.isOpen || shop.isBlocked || shop.isDeleted) {
+                Log.d(
+                    "OrderVM",
+                    "placeOrder shop check: incomingShopId=${order.shopId}, " +
+                            "canonicalShopId=$canonicalShopId, " +
+                            "fieldShopId=${shopDoc.getString("shopId")}, " +
+                            "isOpen=${shop.isOpen}, " +
+                            "isApproved=${shop.isApproved}, " +
+                            "isBlocked=${shop.isBlocked}, " +
+                            "isDeleted=${shop.isDeleted}, " +
+                            "isVisible=${shopDoc.getBoolean("isVisible")}"
+                )
+
+                if (!isShopAcceptingOrders(shopDoc, shop)) {
                     _orderState.value = OrderState.Error("This shop is currently not accepting orders.")
                     return@launch
                 }
@@ -207,15 +234,30 @@ class OrderViewModel @Inject constructor(
                     return@launch
                 }
 
-                val slotAvailability = slotAvailabilityRepository.getSlotAvailability(
-                    shopId = order.shopId,
-                    date = order.pickupDate,
-                    slot = order.pickupSlot,
-                    maxOrders = shop.maxOrdersPerSlot
-                )
+                Log.d("OrderVM_DEBUG", "STEP 1: Checking slot availability started")
 
-                val isSlotClosed = slotAvailability.isClosed || shop.closedSlots.contains(order.pickupSlot)
-                val isSlotFull = slotAvailability.orderCount >= slotAvailability.maxOrders
+                val slotAvailability = try {
+                    slotAvailabilityRepository.getSlotAvailability(
+                        shopId = canonicalShopId,
+                        date = order.pickupDate,
+                        slot = order.pickupSlot,
+                        maxOrders = maxOrdersPerSlot
+                    )
+                } catch (e: Exception) {
+                    Log.e("OrderVM_DEBUG", "STEP 1 FAILED: slotAvailability permission/error", e)
+                    _orderState.value = OrderState.Error(
+                        "Slot check failed: ${e.message}"
+                    )
+                    return@launch
+                }
+
+                Log.d("OrderVM_DEBUG", "STEP 1 PASSED: Slot check success")
+
+                val isSlotClosed =
+                    slotAvailability.isClosed || closedSlots.contains(order.pickupSlot)
+
+                val isSlotFull =
+                    slotAvailability.orderCount >= slotAvailability.maxOrders
 
                 if (isSlotClosed || isSlotFull) {
                     _orderState.value = OrderState.Error(
@@ -224,7 +266,32 @@ class OrderViewModel @Inject constructor(
                     return@launch
                 }
 
-                val result = orderRepository.placeOrder(order)
+                val normalizedItems = order.items.map { item ->
+                    item.copy(shopId = canonicalShopId)
+                }
+
+                val finalOrder = order.copy(
+                    shopId = canonicalShopId,
+                    items = normalizedItems
+                )
+
+                Log.d(
+                    "OrderVM",
+                    "Writing order: orderShopId=${finalOrder.shopId}, " +
+                            "itemShopIds=${finalOrder.items.map { it.shopId }.distinct()}"
+                )
+                Log.d("OrderVM_DEBUG", "STEP 2: Order write started")
+
+                val result = orderRepository.placeOrder(finalOrder)
+                if (result.isSuccess) {
+                    Log.d("OrderVM_DEBUG", "STEP 2 PASSED: Order write success")
+                } else {
+                    Log.e(
+                        "OrderVM_DEBUG",
+                        "STEP 2 FAILED: Order write failed",
+                        result.exceptionOrNull()
+                    )
+                }
 
                 if (result.isSuccess) {
                     val orderId = result.getOrNull().orEmpty()
@@ -616,9 +683,24 @@ class OrderViewModel @Inject constructor(
                 }
 
                 val shop = buildShopFromSnapshot(shopDoc)
+                val canonicalShopId = shopDoc.id
+                val maxOrdersPerSlot = getMaxOrdersPerSlot(shopDoc)
+                val closedSlots = getClosedSlots(shopDoc)
+
                 _selectedShop.value = shop
 
-                if (!shop.isOpen || shop.isBlocked || shop.isDeleted) {
+                if (!isShopAcceptingOrders(shopDoc, shop)) {
+                    Log.w(
+                        "OrderVM",
+                        "Cannot load slots. Shop not accepting orders: docId=${shopDoc.id}, " +
+                                "fieldShopId=${shopDoc.getString("shopId")}, " +
+                                "isOpen=${shop.isOpen}, " +
+                                "isApproved=${shop.isApproved}, " +
+                                "isBlocked=${shop.isBlocked}, " +
+                                "isDeleted=${shop.isDeleted}, " +
+                                "isVisible=${shopDoc.getBoolean("isVisible")}"
+                    )
+
                     _slotUiState.value = SlotUiState(
                         message = "This shop is currently not accepting orders."
                     )
@@ -674,13 +756,13 @@ class OrderViewModel @Inject constructor(
 
                 for (slotText in generatedSlots) {
                     val availability = slotAvailabilityRepository.getSlotAvailability(
-                        shopId = shop.shopId,
+                        shopId = canonicalShopId,
                         date = today,
                         slot = slotText,
-                        maxOrders = shop.maxOrdersPerSlot
+                        maxOrders = maxOrdersPerSlot
                     )
 
-                    val closed = shop.closedSlots.contains(slotText) || availability.isClosed
+                    val closed = closedSlots.contains(slotText) || availability.isClosed
                     val hasCapacity = availability.orderCount < availability.maxOrders
 
                     if (!closed && hasCapacity) {
@@ -732,7 +814,7 @@ class OrderViewModel @Inject constructor(
 
     private fun buildShopFromSnapshot(snapshot: DocumentSnapshot): Shop {
         return Shop(
-            shopId = snapshot.getString("shopId") ?: snapshot.id,
+            shopId = snapshot.id,
             name = snapshot.getString("name") ?: "",
             description = snapshot.getString("description") ?: "",
             imageUrl = snapshot.getString("imageUrl") ?: "",
@@ -742,21 +824,35 @@ class OrderViewModel @Inject constructor(
             isDeleted = snapshot.getBoolean("isDeleted") ?: false,
             openingTime = snapshot.getString("openingTime") ?: "08:00",
             closingTime = snapshot.getString("closingTime") ?: "21:00",
-            maxOrdersPerSlot = snapshot.getLong("maxOrdersPerSlot")?.toInt() ?: 5,
-            closedSlots = (snapshot.get("closedSlots") as? List<*>)
-                ?.filterIsInstance<String>()
-                ?: emptyList(),
             upiId = snapshot.getString("upiId") ?: "",
             phone = snapshot.getString("phone")
                 ?: snapshot.getString("ownerPhone")
-                ?: "",
-            ownerUid = snapshot.getString("ownerUid") ?: "",
-            ownerEmail = snapshot.getString("ownerEmail") ?: "",
-            ownerPhone = snapshot.getString("ownerPhone") ?: "",
-            createdAt = snapshot.getLong("createdAt") ?: 0L
+                ?: ""
         )
     }
+    private fun isShopAcceptingOrders(
+        snapshot: DocumentSnapshot,
+        shop: Shop
+    ): Boolean {
+        val isVisible = snapshot.getBoolean("isVisible") ?: true
 
+        return shop.isApproved &&
+                shop.isOpen &&
+                !shop.isBlocked &&
+                !shop.isDeleted &&
+                isVisible
+    }
+
+    private fun getMaxOrdersPerSlot(snapshot: DocumentSnapshot): Int {
+        val value = snapshot.getLong("maxOrdersPerSlot")?.toInt()
+        return if (value != null && value > 0) value else 5
+    }
+
+    private fun getClosedSlots(snapshot: DocumentSnapshot): List<String> {
+        return (snapshot.get("closedSlots") as? List<*>)
+            ?.filterIsInstance<String>()
+            ?: emptyList()
+    }
     private fun getOrderStateKey(order: Order): String {
         return "${order.status.lowercase()}|${order.refundStatus.lowercase()}"
     }

@@ -267,9 +267,7 @@ class HomeViewModel @Inject constructor(
             val shop = toObject(Shop::class.java) ?: return null
 
             shop.copy(
-                shopId = shop.shopId.ifBlank {
-                    getString("shopId") ?: id
-                },
+                shopId = id,
                 name = shop.name.ifBlank {
                     getString("name") ?: "Shop"
                 },
@@ -277,8 +275,7 @@ class HomeViewModel @Inject constructor(
                 isApproved = getBoolean("isApproved") ?: true,
                 isBlocked = getBoolean("isBlocked") ?: false,
                 isDeleted = getBoolean("isDeleted") ?: false,
-                displayOrder = getLong("displayOrder")?.toInt()
-                    ?: shop.displayOrder
+                displayOrder = getLong("displayOrder") ?: 1000L
             )
         } catch (e: Exception) {
             e.printStackTrace()

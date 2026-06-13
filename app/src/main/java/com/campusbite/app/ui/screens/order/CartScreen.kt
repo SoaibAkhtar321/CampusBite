@@ -129,13 +129,16 @@ fun CartScreen(
     val focusManager = LocalFocusManager.current
 
     val shopLoaded = selectedShop != null
+    val finalShopId = selectedShop?.shopId ?: currentShopId.orEmpty()
 
-    val isShopAcceptingOrders =
-        selectedShop?.let { shop ->
-            shop.isOpen &&
-                    !shop.isBlocked &&
-                    !shop.isDeleted
-        } ?: false
+    val isShopAcceptingOrders = selectedShop?.let { shop ->
+        shop.isApproved &&
+                shop.isOpen &&
+                !shop.isBlocked &&
+                !shop.isDeleted
+    } ?: false
+
+
 
     val shopUpiId = selectedShop?.upiId.orEmpty()
     val shopName = selectedShop?.name ?: "CampusBite"
@@ -153,7 +156,7 @@ fun CartScreen(
                 availableSlots.isNotEmpty() &&
                 selectedSlot.isNotBlank() &&
                 cartItems.isNotEmpty() &&
-                shopId.isNotBlank() &&
+                finalShopId.isNotBlank() &&
                 shopUpiId.isNotBlank()
 
     val canOrder =
@@ -201,14 +204,8 @@ fun CartScreen(
         }
     }
 
-    LaunchedEffect(shopId) {
-        if (shopId.isNotBlank()) {
-            orderViewModel.listenToShopAvailability(shopId)
-        }
-    }
-
     LaunchedEffect(
-        shopId,
+        finalShopId,
         cartPrepTime,
         cartItems.size,
         isShopAcceptingOrders
@@ -217,14 +214,17 @@ fun CartScreen(
         paymentDone = false
 
         if (
-            shopId.isNotBlank() &&
-            cartItems.isNotEmpty() &&
-            isShopAcceptingOrders
+            finalShopId.isNotBlank() &&
+            cartItems.isNotEmpty()
         ) {
-            orderViewModel.loadAvailableSlots(
-                shopId = shopId,
-                cartPrepTimeMinutes = cartPrepTime
-            )
+            orderViewModel.listenToShopAvailability(finalShopId)
+
+            if (isShopAcceptingOrders) {
+                orderViewModel.loadAvailableSlots(
+                    shopId = finalShopId,
+                    cartPrepTimeMinutes = cartPrepTime
+                )
+            }
         }
     }
 
@@ -611,18 +611,26 @@ fun CartScreen(
                         )
                         return@Button
                     }
+                    val totalPrice = cartItems.sumOf { item ->
+                        item.price * item.quantity
+                    }
+
+                    val normalizedItems = cartItems.map { item ->
+                        item.copy(shopId = finalShopId)
+                    }
 
                     val order = Order(
-                        shopId = shopId,
-                        items = cartItems,
-                        totalPrice = cartViewModel.totalPrice,
+                        shopId = finalShopId,
+                        shopName = selectedShop?.name.orEmpty(),
+                        items = normalizedItems,
+                        totalPrice = totalPrice,
                         status = "pending",
                         pickupSlot = selectedSlot,
                         pickupDate = LocalDate.now().toString(),
                         paymentMethod = "UPI_QR",
                         paymentStatus = "pending_verification",
                         upiPayerName = upiPayerName.trim(),
-                        shopkeeperPhone = selectedShop?.phone ?: ""
+                        shopkeeperPhone = selectedShop?.phone.orEmpty()
                     )
 
                     orderViewModel.placeOrder(order)
@@ -655,7 +663,7 @@ fun CartScreen(
                 } else {
                     Text(
                         text = when {
-                            shopId.isBlank() ->
+                            finalShopId.isBlank() ->
                                 "Shop not found"
 
                             cartItems.isEmpty() ->
