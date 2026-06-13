@@ -4,23 +4,25 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.campusbite.app.data.model.MenuItem
 import com.campusbite.app.data.model.Shop
-import com.campusbite.app.data.repository.ShopRepository
+import com.google.firebase.firestore.DocumentSnapshot
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.Query
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.async
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import kotlin.ranges.ClosedFloatingPointRange
+import kotlinx.coroutines.tasks.await
 import javax.inject.Inject
-import kotlinx.coroutines.flow.map
+import kotlin.ranges.ClosedFloatingPointRange
+
 @HiltViewModel
 class HomeViewModel @Inject constructor(
-    private val shopRepository: ShopRepository
+    private val firestore: FirebaseFirestore
 ) : ViewModel() {
 
     private val _shops = MutableStateFlow<List<Shop>>(emptyList())
@@ -32,6 +34,12 @@ class HomeViewModel @Inject constructor(
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
+    private val _isLoadingMore = MutableStateFlow(false)
+    val isLoadingMore: StateFlow<Boolean> = _isLoadingMore.asStateFlow()
+
+    private val _canLoadMore = MutableStateFlow(true)
+    val canLoadMore: StateFlow<Boolean> = _canLoadMore.asStateFlow()
+
     private val _selectedCategory = MutableStateFlow("All")
     val selectedCategory: StateFlow<String> = _selectedCategory.asStateFlow()
 
@@ -39,11 +47,18 @@ class HomeViewModel @Inject constructor(
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
 
     private val _priceRange = MutableStateFlow(0f..500f)
-    val priceRange: StateFlow<ClosedFloatingPointRange<Float>> = _priceRange.asStateFlow()
+    val priceRange: StateFlow<ClosedFloatingPointRange<Float>> =
+        _priceRange.asStateFlow()
 
     val categories = listOf("All", "Snacks", "Meals", "Drinks")
     val priceSteps = listOf(0f, 20f, 50f, 100f, 200f, 500f)
     val defaultPriceRange = 0f..500f
+
+    private var lastVisibleShopDocument: DocumentSnapshot? = null
+    private var isPageRequestRunning = false
+    private var reachedEndOfShopCollection = false
+
+    private val pendingShopBuffer = mutableListOf<Shop>()
 
     val isDataReady: StateFlow<Boolean> = _isLoading
         .map { loading -> !loading }
@@ -52,6 +67,7 @@ class HomeViewModel @Inject constructor(
             started = SharingStarted.WhileSubscribed(),
             initialValue = false
         )
+
     val filteredItems: StateFlow<List<MenuItem>> = combine(
         _menuItems,
         _selectedCategory,
@@ -71,60 +87,217 @@ class HomeViewModel @Inject constructor(
     )
 
     init {
-        loadData()
+        refreshData()
     }
 
     fun refreshData() {
-        loadData()
+        viewModelScope.launch {
+            loadFirstPage()
+        }
     }
 
-    private fun loadData() {
+    private suspend fun loadFirstPage() {
+        if (isPageRequestRunning) return
+
+        isPageRequestRunning = true
+        _isLoading.value = true
+        _isLoadingMore.value = false
+
+        try {
+            lastVisibleShopDocument = null
+            reachedEndOfShopCollection = false
+            pendingShopBuffer.clear()
+
+            _canLoadMore.value = true
+            _shops.value = emptyList()
+            _menuItems.value = emptyList()
+
+            loadShopPage(reset = true)
+        } catch (e: Exception) {
+            e.printStackTrace()
+            _shops.value = emptyList()
+            _menuItems.value = emptyList()
+            _canLoadMore.value = false
+        } finally {
+            _isLoading.value = false
+            isPageRequestRunning = false
+        }
+    }
+
+    fun loadMoreShops() {
         viewModelScope.launch {
-            _isLoading.value = true
+            if (isPageRequestRunning) return@launch
+            if (!_canLoadMore.value) return@launch
+            if (_isLoading.value) return@launch
+
+            isPageRequestRunning = true
+            _isLoadingMore.value = true
 
             try {
-                coroutineScope {
-                    val shopsDeferred = async {
-                        shopRepository.getAllShops()
-                    }
-
-                    val itemsDeferred = async {
-                        shopRepository.getAllMenuItems()
-                    }
-
-                    val shopsResult = shopsDeferred.await()
-                    val itemsResult = itemsDeferred.await()
-
-                    val visibleShops = shopsResult.getOrNull()
-                        .orEmpty()
-                        .filter { shop ->
-                            !shop.isBlocked &&
-                                    !shop.isDeleted
-                        }
-                        .sortedWith(
-                            compareBy<Shop> { it.displayOrder }
-                                .thenBy { it.name.lowercase() }
-                        )
-
-                    _shops.value = visibleShops
-
-                    val visibleShopIds = visibleShops
-                        .map { it.shopId }
-                        .toSet()
-
-                    _menuItems.value = itemsResult.getOrNull()
-                        .orEmpty()
-                        .filter { item ->
-                            item.shopId in visibleShopIds
-                        }
-                }
-
+                loadShopPage(reset = false)
             } catch (e: Exception) {
-                _shops.value = emptyList()
-                _menuItems.value = emptyList()
+                e.printStackTrace()
             } finally {
-                _isLoading.value = false
+                _isLoadingMore.value = false
+                isPageRequestRunning = false
             }
+        }
+    }
+
+    private suspend fun loadShopPage(reset: Boolean) {
+        val pageShops = mutableListOf<Shop>()
+
+        while (pageShops.size < SHOP_PAGE_SIZE && pendingShopBuffer.isNotEmpty()) {
+            pageShops.add(pendingShopBuffer.removeAt(0))
+        }
+
+        val alreadyKnownShopIds = mutableSetOf<String>()
+        alreadyKnownShopIds.addAll(_shops.value.map { it.shopId })
+        alreadyKnownShopIds.addAll(pageShops.map { it.shopId })
+        alreadyKnownShopIds.addAll(pendingShopBuffer.map { it.shopId })
+
+        while (pageShops.size < SHOP_PAGE_SIZE && !reachedEndOfShopCollection) {
+            var query: Query = firestore.collection("shops")
+                .orderBy("displayOrder", Query.Direction.ASCENDING)
+                .limit(SHOP_FETCH_LIMIT)
+
+            if (lastVisibleShopDocument != null) {
+                query = query.startAfter(lastVisibleShopDocument!!)
+            }
+
+            val snapshot = query.get().await()
+            val docs = snapshot.documents
+
+            if (docs.isEmpty()) {
+                reachedEndOfShopCollection = true
+                break
+            }
+
+            lastVisibleShopDocument = docs.lastOrNull()
+
+            if (docs.size < SHOP_FETCH_LIMIT.toInt()) {
+                reachedEndOfShopCollection = true
+            }
+
+            val visibleShops = docs
+                .filter { doc -> doc.shouldShowOnHome() }
+                .mapNotNull { doc -> doc.toShopOrNull() }
+
+            visibleShops.forEach { shop ->
+                if (shop.shopId.isNotBlank() && alreadyKnownShopIds.add(shop.shopId)) {
+                    if (pageShops.size < SHOP_PAGE_SIZE) {
+                        pageShops.add(shop)
+                    } else {
+                        pendingShopBuffer.add(shop)
+                    }
+                }
+            }
+        }
+
+        val newShopIds = pageShops
+            .map { it.shopId }
+            .filter { it.isNotBlank() }
+
+        val newMenuItems = loadMenuItemsForShopIds(newShopIds)
+
+        _shops.value = if (reset) {
+            pageShops
+        } else {
+            (_shops.value + pageShops)
+                .distinctBy { it.shopId }
+                .sortedWith(
+                    compareBy<Shop> { it.displayOrder }
+                        .thenBy { it.name.lowercase() }
+                )
+        }
+
+        _menuItems.value = if (reset) {
+            newMenuItems
+        } else {
+            (_menuItems.value + newMenuItems)
+                .distinctBy { item ->
+                    item.itemId.ifBlank {
+                        "${item.shopId}_${item.name}_${item.price}"
+                    }
+                }
+        }
+
+        _canLoadMore.value =
+            pendingShopBuffer.isNotEmpty() || !reachedEndOfShopCollection
+    }
+
+    private fun DocumentSnapshot.shouldShowOnHome(): Boolean {
+        val isApproved = getBoolean("isApproved") ?: true
+        val isBlocked = getBoolean("isBlocked") ?: false
+        val isDeleted = getBoolean("isDeleted") ?: false
+        val isVisible = getBoolean("isVisible") ?: true
+
+        return isApproved && !isBlocked && !isDeleted && isVisible
+    }
+
+    private suspend fun loadMenuItemsForShopIds(
+        shopIds: List<String>
+    ): List<MenuItem> {
+        if (shopIds.isEmpty()) return emptyList()
+
+        val allItems = mutableListOf<MenuItem>()
+
+        shopIds.chunked(10).forEach { shopIdChunk ->
+            val snapshot = firestore.collection("menuItems")
+                .whereIn("shopId", shopIdChunk)
+                .get()
+                .await()
+
+            val items = snapshot.documents.mapNotNull { doc ->
+                doc.toMenuItemOrNull()
+            }
+
+            allItems.addAll(items)
+        }
+
+        return allItems.sortedWith(
+            compareBy<MenuItem> { it.shopId }
+                .thenBy { it.category.lowercase() }
+                .thenBy { it.name.lowercase() }
+        )
+    }
+
+    private fun DocumentSnapshot.toShopOrNull(): Shop? {
+        return try {
+            val shop = toObject(Shop::class.java) ?: return null
+
+            shop.copy(
+                shopId = shop.shopId.ifBlank {
+                    getString("shopId") ?: id
+                },
+                name = shop.name.ifBlank {
+                    getString("name") ?: "Shop"
+                },
+                isOpen = getBoolean("isOpen") ?: false,
+                isApproved = getBoolean("isApproved") ?: true,
+                isBlocked = getBoolean("isBlocked") ?: false,
+                isDeleted = getBoolean("isDeleted") ?: false,
+                displayOrder = getLong("displayOrder")?.toInt()
+                    ?: shop.displayOrder
+            )
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        }
+    }
+
+    private fun DocumentSnapshot.toMenuItemOrNull(): MenuItem? {
+        return try {
+            val item = toObject(MenuItem::class.java) ?: return null
+
+            item.copy(
+                itemId = item.itemId.ifBlank {
+                    getString("itemId") ?: id
+                }
+            )
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
         }
     }
 
@@ -210,5 +383,10 @@ class HomeViewModel @Inject constructor(
 
     fun getFilteredItemsByShopId(shopId: String): List<MenuItem> {
         return getFilteredItems().filter { it.shopId == shopId }
+    }
+
+    companion object {
+        private const val SHOP_PAGE_SIZE = 4
+        private const val SHOP_FETCH_LIMIT = 8L
     }
 }

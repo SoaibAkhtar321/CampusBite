@@ -49,16 +49,15 @@ class OrderActionRepository @Inject constructor(
     suspend fun cancelOrderByShopkeeper(
         orderId: String,
         paymentReceivedType: String,
-        cancelReason: String
+        cancelReason: String,
+        paymentReceivedAmount: Double = 0.0
     ): Result<Unit> {
         return callFunction(
             functionName = CANCEL_ORDER_BY_SHOPKEEPER,
             data = mapOf(
                 "orderId" to orderId,
                 "paymentReceivedType" to paymentReceivedType,
-
-                // IMPORTANT:
-                // Backend function expects "reason", not "cancelReason".
+                "paymentReceivedAmount" to paymentReceivedAmount,
                 "reason" to cancelReason
             )
         )

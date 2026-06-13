@@ -589,6 +589,8 @@ fun CartScreen(
 
             Button(
                 onClick = {
+                    orderViewModel.resetState()
+
                     if (!isShopAcceptingOrders) {
                         orderViewModel.setError(
                             "This shop is currently not accepting orders."

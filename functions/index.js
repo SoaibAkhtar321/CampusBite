@@ -165,32 +165,69 @@ async function getAdminOrShopkeeperOrThrow(uid) {
   );
 }
 
-function buildCancelPaymentFields(paymentReceivedType) {
+function buildCancelPaymentFields(
+  paymentReceivedType,
+  paymentReceivedAmount,
+  totalPrice
+) {
   const cleanType = cleanString(paymentReceivedType).toLowerCase();
+  const cleanTotalPrice = Number(totalPrice || 0);
+  const cleanReceivedAmount = Number(paymentReceivedAmount || 0);
 
   if (cleanType === "full") {
+    if (cleanTotalPrice <= 0) {
+      throw new HttpsError(
+        "failed-precondition",
+        "Order total amount is missing."
+      );
+    }
+
     return {
       paymentReceivedType: "full",
       paymentReceivedByShopkeeper: true,
+      paymentReceivedAmount: cleanTotalPrice,
       paymentStatus: "refund_pending",
       refundStatus: "pending",
-      refundAmount: null,
+      refundAmount: cleanTotalPrice,
     };
   }
 
   if (cleanType === "partial") {
+    if (cleanTotalPrice <= 0) {
+      throw new HttpsError(
+        "failed-precondition",
+        "Order total amount is missing."
+      );
+    }
+
+    if (cleanReceivedAmount <= 0) {
+      throw new HttpsError(
+        "invalid-argument",
+        "Enter the amount received."
+      );
+    }
+
+    if (cleanReceivedAmount >= cleanTotalPrice) {
+      throw new HttpsError(
+        "invalid-argument",
+        "For full amount, select Full payment received."
+      );
+    }
+
     return {
       paymentReceivedType: "partial",
       paymentReceivedByShopkeeper: true,
+      paymentReceivedAmount: cleanReceivedAmount,
       paymentStatus: "refund_pending",
       refundStatus: "pending",
-      refundAmount: null,
+      refundAmount: cleanReceivedAmount,
     };
   }
 
   return {
     paymentReceivedType: "none",
     paymentReceivedByShopkeeper: false,
+    paymentReceivedAmount: 0,
     paymentStatus: "payment_not_received",
     refundStatus: "none",
     refundAmount: 0,
@@ -270,6 +307,7 @@ async function sendMulticastNotification({
 
   return admin.messaging().sendEachForMulticast(message);
 }
+
 exports.updateOrderStatus = onCall(
   {
     region: REGION,
@@ -377,6 +415,7 @@ exports.cancelOrderByShopkeeper = onCall(
     const uid = requireAuth(request);
 
     const orderId = cleanString(request.data?.orderId);
+
     const reason =
       cleanString(request.data?.reason) ||
       cleanString(request.data?.cancelReason);
@@ -385,8 +424,16 @@ exports.cancelOrderByShopkeeper = onCall(
       request.data?.paymentReceivedType || "none"
     ).toLowerCase();
 
+    const paymentReceivedAmount = Number(
+      request.data?.paymentReceivedAmount || 0
+    );
+
     if (!orderId) {
       throw new HttpsError("invalid-argument", "orderId is required.");
+    }
+
+    if (!["none", "full", "partial"].includes(paymentReceivedType)) {
+      throw new HttpsError("invalid-argument", "Invalid payment status.");
     }
 
     if (!reason) {
@@ -425,8 +472,13 @@ exports.cancelOrderByShopkeeper = onCall(
         );
       }
 
+      const paymentFields = buildCancelPaymentFields(
+        paymentReceivedType,
+        paymentReceivedAmount,
+        order.totalPrice
+      );
+
       const now = Date.now();
-      const paymentFields = buildCancelPaymentFields(paymentReceivedType);
 
       const updates = {
         status: "cancelled",
@@ -441,9 +493,11 @@ exports.cancelOrderByShopkeeper = onCall(
         paymentReceivedByShopkeeper:
           paymentFields.paymentReceivedByShopkeeper,
         paymentReceivedType: paymentFields.paymentReceivedType,
+        paymentReceivedAmount: paymentFields.paymentReceivedAmount,
 
         paymentStatus: paymentFields.paymentStatus,
         refundStatus: paymentFields.refundStatus,
+        refundAmount: paymentFields.refundAmount,
 
         refundReferenceId: "",
         refundSettledAt: 0,
@@ -452,12 +506,6 @@ exports.cancelOrderByShopkeeper = onCall(
         updatedAt: now,
         updatedBy: uid,
       };
-
-      if (paymentFields.refundAmount === 0) {
-        updates.refundAmount = 0;
-      } else {
-        updates.refundAmount = Number(order.totalPrice || 0);
-      }
 
       tx.update(orderRef, updates);
     });

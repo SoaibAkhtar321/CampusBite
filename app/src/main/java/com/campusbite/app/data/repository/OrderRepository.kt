@@ -40,26 +40,90 @@ class OrderRepository @Inject constructor(
                 .get()
                 .await()
 
-            val studentName  = userDoc.getString("name")  ?: "Student"
+            if (!userDoc.exists()) {
+                throw Exception("User profile not found")
+            }
+
+            val role = userDoc.getString("role") ?: ""
+            val isUserBlocked = userDoc.getBoolean("isBlocked") ?: false
+            val isUserDeleted = userDoc.getBoolean("isDeleted") ?: false
+
+            if (role !in listOf("student", "user")) {
+                throw Exception("Only users can place orders. Current role: $role")
+            }
+
+            if (isUserBlocked || isUserDeleted) {
+                throw Exception("Your account is blocked or deleted")
+            }
+
+            val shopDoc = firestore.collection("shops")
+                .document(order.shopId)
+                .get()
+                .await()
+
+            if (!shopDoc.exists()) {
+                throw Exception(
+                    "Shop document not found for shopId=${order.shopId}. Check if shops document ID matches shopId."
+                )
+            }
+
+            val isShopApproved = shopDoc.getBoolean("isApproved") ?: false
+            val isShopBlocked = shopDoc.getBoolean("isBlocked") ?: false
+            val isShopDeleted = shopDoc.getBoolean("isDeleted") ?: false
+            val isShopVisible = shopDoc.getBoolean("isVisible") ?: true
+            val isShopOpen = shopDoc.getBoolean("isOpen") ?: false
+
+            if (!isShopApproved) {
+                throw Exception("Shop is not approved")
+            }
+
+            if (isShopBlocked) {
+                throw Exception("Shop is blocked")
+            }
+
+            if (isShopDeleted) {
+                throw Exception("Shop is deleted")
+            }
+
+            if (!isShopVisible) {
+                throw Exception("Shop is hidden by admin")
+            }
+
+            if (!isShopOpen) {
+                throw Exception("Shop is currently closed")
+            }
+
+            val studentName = userDoc.getString("name") ?: "Student"
             val studentEmail = userDoc.getString("email") ?: currentUser.email.orEmpty()
             val studentPhone = userDoc.getString("phone") ?: currentUser.phoneNumber.orEmpty()
 
-            val docRef  = firestore.collection("orders").document()
+            val docRef = firestore.collection("orders").document()
             val orderId = docRef.id
 
+            val now = System.currentTimeMillis()
+
             val finalOrder = order.copy(
-                orderId      = orderId,
-                studentId    = studentId,
-                studentName  = studentName,
+                orderId = orderId,
+                studentId = studentId,
+                studentName = studentName,
                 studentEmail = studentEmail,
                 studentPhone = studentPhone,
-                status        = OrderStatusValue.PENDING,
+                status = OrderStatusValue.PENDING,
                 paymentStatus = PaymentStatusValue.PENDING_VERIFICATION,
-                createdAt     = System.currentTimeMillis()
+                createdAt = now,
+                updatedAt = now
             )
 
-            Log.d("OrderRepository", "Placing order: $orderId | shop=${finalOrder.shopId} | items=${finalOrder.items.size}")
+            Log.d(
+                "OrderRepository",
+                "Placing order=$orderId | uid=$studentId | role=$role | shopId=${finalOrder.shopId} | " +
+                        "shopOpen=$isShopOpen | shopApproved=$isShopApproved | shopBlocked=$isShopBlocked | " +
+                        "shopDeleted=$isShopDeleted | shopVisible=$isShopVisible | status=${finalOrder.status} | " +
+                        "paymentStatus=${finalOrder.paymentStatus} | total=${finalOrder.totalPrice}"
+            )
+
             docRef.set(finalOrder).await()
+
             Log.d("OrderRepository", "Order placed successfully: $orderId")
 
             Result.success(orderId)
@@ -68,7 +132,6 @@ class OrderRepository @Inject constructor(
             Result.failure(e)
         }
     }
-
     // ─────────────────────────────────────────────────────────────
     //  One-shot fetch — uses Order.from() to handle Timestamps
     // ─────────────────────────────────────────────────────────────

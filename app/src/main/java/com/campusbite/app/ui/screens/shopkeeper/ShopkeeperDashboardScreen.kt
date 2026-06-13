@@ -1427,18 +1427,12 @@ private fun CancelOrderDialog(
         PaymentReceivedType.PARTIAL to "Partial payment received"
     )
 
-    val cancellationReasons = listOf(
+    val fullPaymentCancellationReasons = listOf(
         "Item/menu unavailable",
         "Shop emergency",
         "Gas/electricity issue",
         "Shop closing unexpectedly",
-        "Payment incomplete / wrong amount paid",
         "Other operational issue"
-    )
-
-    val paymentReceived = selectedPaymentType in listOf(
-        PaymentReceivedType.PARTIAL,
-        PaymentReceivedType.FULL
     )
 
     AlertDialog(
@@ -1487,14 +1481,40 @@ private fun CancelOrderDialog(
                         Spacer(modifier = Modifier.height(8.dp))
 
                         Text(
-                            text = "This will cancel the order as payment not received. No refund will be marked.",
+                            text = "Order will be cancelled because payment was not received. No refund required.",
                             fontSize = 12.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
 
                     PaymentReceivedType.FULL -> {
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        Text(
+                            text = "Why are you cancelling this order?",
+                            fontWeight = FontWeight.SemiBold
+                        )
+
                         Spacer(modifier = Modifier.height(8.dp))
+
+                        fullPaymentCancellationReasons.forEach { reason ->
+                            FilterChip(
+                                selected = selectedReason == reason,
+                                onClick = {
+                                    selectedReason = reason
+                                    localError = null
+                                },
+                                label = {
+                                    Text(reason)
+                                },
+                                modifier = Modifier.padding(
+                                    end = 6.dp,
+                                    bottom = 6.dp
+                                )
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(6.dp))
 
                         Text(
                             text = "Refund amount: ₹${orderTotalPrice.toInt()}",
@@ -1531,47 +1551,19 @@ private fun CancelOrderDialog(
                         Spacer(modifier = Modifier.height(6.dp))
 
                         Text(
-                            text = "Only this received amount will be marked as Refund Pending.",
+                            text = "Reason will be saved as: Payment incomplete / wrong amount paid.",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+
+                        Spacer(modifier = Modifier.height(4.dp))
+
+                        Text(
+                            text = "Only the received amount will be marked as Refund Pending.",
                             fontSize = 12.sp,
                             color = MaterialTheme.colorScheme.error
                         )
                     }
-                }
-
-                if (paymentReceived) {
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    Text(
-                        text = "Why are you cancelling this order?",
-                        fontWeight = FontWeight.SemiBold
-                    )
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    cancellationReasons.forEach { reason ->
-                        FilterChip(
-                            selected = selectedReason == reason,
-                            onClick = {
-                                selectedReason = reason
-                                localError = null
-                            },
-                            label = {
-                                Text(reason)
-                            },
-                            modifier = Modifier.padding(
-                                end = 6.dp,
-                                bottom = 6.dp
-                            )
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(6.dp))
-
-                    Text(
-                        text = "Because payment was received, this order will be marked as Refund Pending.",
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.error
-                    )
                 }
 
                 localError?.let {
@@ -1596,6 +1588,12 @@ private fun CancelOrderDialog(
                             return@TextButton
                         }
 
+                        selectedPaymentType == PaymentReceivedType.FULL &&
+                                selectedReason.isBlank() -> {
+                            localError = "Please select cancellation reason"
+                            return@TextButton
+                        }
+
                         selectedPaymentType == PaymentReceivedType.PARTIAL &&
                                 partialAmount <= 0.0 -> {
                             localError = "Enter the amount received"
@@ -1607,11 +1605,6 @@ private fun CancelOrderDialog(
                             localError = "For full amount, select Full payment received"
                             return@TextButton
                         }
-
-                        paymentReceived && selectedReason.isBlank() -> {
-                            localError = "Please select cancellation reason"
-                            return@TextButton
-                        }
                     }
 
                     val finalReceivedAmount = when (selectedPaymentType) {
@@ -1620,13 +1613,16 @@ private fun CancelOrderDialog(
                         else -> 0.0
                     }
 
+                    val finalCancelReason = when (selectedPaymentType) {
+                        PaymentReceivedType.NONE -> "Payment not received"
+                        PaymentReceivedType.PARTIAL -> "Payment incomplete / wrong amount paid"
+                        PaymentReceivedType.FULL -> selectedReason
+                        else -> "Order cancelled"
+                    }
+
                     onConfirm(
                         selectedPaymentType,
-                        if (paymentReceived) {
-                            selectedReason
-                        } else {
-                            "Payment not received"
-                        },
+                        finalCancelReason,
                         finalReceivedAmount
                     )
                 }
@@ -1645,7 +1641,7 @@ private fun CancelOrderDialog(
             }
         }
     )
-}
+} 
 
 
 @Composable

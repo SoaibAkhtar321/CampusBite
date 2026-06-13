@@ -106,6 +106,12 @@ import com.campusbite.app.ui.viewmodel.HomeViewModel
 import com.campusbite.app.ui.viewmodel.OrderViewModel
 import kotlinx.coroutines.launch
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.runtime.DisposableEffect
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 
 // ─────────────────────────────────────────────
 // Shimmer
@@ -154,6 +160,8 @@ fun HomeScreen(
     val shops by viewModel.shops.collectAsState()
     val isDataReady by viewModel.isDataReady.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
+    val isLoadingMore by viewModel.isLoadingMore.collectAsState()
+    val canLoadMore by viewModel.canLoadMore.collectAsState()
     val selectedCategory by viewModel.selectedCategory.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
     val priceRange by viewModel.priceRange.collectAsState()
@@ -172,6 +180,22 @@ fun HomeScreen(
     val bannerPrefs = remember { OrderBannerPrefs(context) }
     val dismissedIds by bannerPrefs.dismissedIds.collectAsState(initial = emptySet())
     val scope = rememberCoroutineScope()
+
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                viewModel.refreshData()
+            }
+        }
+
+        lifecycleOwner.lifecycle.addObserver(observer)
+
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
 
     val order = activeOrder
     val shouldShowBanner = order != null &&
@@ -224,6 +248,9 @@ fun HomeScreen(
                     cartItems = cartItems,
                     isFilterActive = viewModel.isFilterActive(),
                     bottomContentPadding = bottomContentPadding,
+                    isLoadingMore = isLoadingMore,
+                    canLoadMore = canLoadMore,
+                    onLoadMore = { viewModel.loadMoreShops() },
                     viewModel = viewModel,
                     cartViewModel = cartViewModel,
                     onNavigateToShopDetail = onNavigateToShopDetail
@@ -407,6 +434,9 @@ private fun HomeContentList(
     cartItems: List<OrderItem>,
     isFilterActive: Boolean,
     bottomContentPadding: Dp,
+    isLoadingMore: Boolean,
+    canLoadMore: Boolean,
+    onLoadMore: () -> Unit,
     viewModel: HomeViewModel,
     cartViewModel: CartViewModel,
     onNavigateToShopDetail: (String) -> Unit
@@ -416,39 +446,66 @@ private fun HomeContentList(
         contentPadding = PaddingValues(bottom = bottomContentPadding)
     ) {
         item {
-            SectionHeader(title = "Shops", modifier = Modifier.padding(horizontal = 16.dp))
+            SectionHeader(
+                title = "Shops",
+                modifier = Modifier.padding(horizontal = 16.dp)
+            )
+
             Spacer(modifier = Modifier.height(10.dp))
+
             LazyRow(
                 contentPadding = PaddingValues(horizontal = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                items(items = shops, key = { it.shopId }) { shop ->
-                    ShopCard(shop = shop, onClick = { onNavigateToShopDetail(shop.shopId) })
+                items(
+                    items = shops,
+                    key = { it.shopId }
+                ) { shop ->
+                    ShopCard(
+                        shop = shop,
+                        onClick = {
+                            onNavigateToShopDetail(shop.shopId)
+                        }
+                    )
                 }
             }
+
             Spacer(modifier = Modifier.height(20.dp))
         }
 
         item {
-            SectionHeader(title = "Menu", modifier = Modifier.padding(horizontal = 16.dp))
+            SectionHeader(
+                title = "Menu",
+                modifier = Modifier.padding(horizontal = 16.dp)
+            )
+
             Spacer(modifier = Modifier.height(10.dp))
+
             LazyRow(
                 contentPadding = PaddingValues(horizontal = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                items(items = viewModel.categories, key = { it }) { category ->
+                items(
+                    items = viewModel.categories,
+                    key = { it }
+                ) { category ->
                     CategoryChip(
                         category = category,
                         isSelected = category == selectedCategory,
-                        onClick = { viewModel.selectCategory(category) }
+                        onClick = {
+                            viewModel.selectCategory(category)
+                        }
                     )
                 }
             }
 
             if (isFilterActive) {
                 Spacer(modifier = Modifier.height(6.dp))
+
                 TextButton(
-                    onClick = { viewModel.resetFilters() },
+                    onClick = {
+                        viewModel.resetFilters()
+                    },
                     modifier = Modifier.padding(horizontal = 10.dp)
                 ) {
                     Icon(
@@ -457,7 +514,9 @@ private fun HomeContentList(
                         modifier = Modifier.size(14.dp),
                         tint = Orange
                     )
+
                     Spacer(modifier = Modifier.width(4.dp))
+
                     Text(
                         text = "Clear All Filters",
                         color = Orange,
@@ -466,29 +525,130 @@ private fun HomeContentList(
                     )
                 }
             }
+
             Spacer(modifier = Modifier.height(12.dp))
         }
 
         if (filteredItems.isEmpty()) {
-            item { EmptyMenuState(hasFilters = isFilterActive) }
+            item {
+                EmptyMenuState(hasFilters = isFilterActive)
+            }
         } else {
-            val groupedItems = filteredItems.groupBy { it.shopId }
-            groupedItems.forEach { (shopId, itemsList) ->
-                item { ShopNameHeader(shopName = viewModel.getShopName(shopId)) }
-                items(items = itemsList, key = { it.itemId }) { menuItem ->
-                    val matchingCartItem = cartItems.firstOrNull { it.itemId == menuItem.itemId }
-                    MenuItemCard(
-                        menuItem = menuItem,
-                        quantity = matchingCartItem?.quantity ?: 0,
-                        onAddClick = { cartViewModel.addItem(menuItem) },
-                        onRemoveClick = { cartViewModel.removeItem(menuItem.itemId) }
+            val orderedShops = shops.sortedWith(
+                compareBy<Shop> { it.displayOrder }
+                    .thenBy { it.name.lowercase() }
+            )
+
+            val itemsByShopId = filteredItems.groupBy { it.shopId }
+
+            orderedShops.forEach { shop ->
+                val shopItems = itemsByShopId[shop.shopId].orEmpty()
+
+                if (shopItems.isNotEmpty()) {
+                    item(
+                        key = "shop_header_${shop.shopId}"
+                    ) {
+                        ShopNameHeader(shopName = shop.name)
+                    }
+
+                    items(
+                        items = shopItems,
+                        key = { it.itemId }
+                    ) { menuItem ->
+                        val matchingCartItem = cartItems.firstOrNull {
+                            it.itemId == menuItem.itemId
+                        }
+
+                        MenuItemCard(
+                            menuItem = menuItem,
+                            quantity = matchingCartItem?.quantity ?: 0,
+                            onAddClick = {
+                                cartViewModel.addItem(menuItem)
+                            },
+                            onRemoveClick = {
+                                cartViewModel.removeItem(menuItem.itemId)
+                            }
+                        )
+                    }
+                }
+            }
+        }
+
+        item(
+            key = "home_pagination_footer"
+        ) {
+            PaginationFooter(
+                isLoadingMore = isLoadingMore,
+                canLoadMore = canLoadMore,
+                onLoadMore = onLoadMore
+            )
+        }
+    }
+}
+@Composable
+private fun PaginationFooter(
+    isLoadingMore: Boolean,
+    canLoadMore: Boolean,
+    onLoadMore: () -> Unit
+) {
+    when {
+        isLoadingMore -> {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 20.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.dp,
+                        color = Orange
+                    )
+
+                    Spacer(modifier = Modifier.width(10.dp))
+
+                    Text(
+                        text = "Loading more shops...",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
         }
+
+        canLoadMore -> {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 20.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                OutlinedButton(
+                    onClick = onLoadMore,
+                    shape = RoundedCornerShape(14.dp),
+                    border = BorderStroke(1.2.dp, Orange),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = Orange
+                    )
+                ) {
+                    Text(
+                        text = "Load more shops",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
+        }
+
+        else -> {
+            Spacer(modifier = Modifier.height(12.dp))
+        }
     }
 }
-
 // ─────────────────────────────────────────────
 // Shop Name Header
 // ─────────────────────────────────────────────
@@ -1151,10 +1311,11 @@ fun CategoryChip(
 fun MenuItemCard(
     menuItem: MenuItem,
     quantity: Int = 0,
+    shopIsOpen: Boolean = true,
     onAddClick: () -> Unit = {},
     onRemoveClick: () -> Unit = {}
-) {
-    val canOrder = menuItem.isAvailable
+){
+    val canOrder = menuItem.isAvailable && shopIsOpen
 
     Card(
         modifier = Modifier
@@ -1223,7 +1384,11 @@ fun MenuItemCard(
                                 .padding(horizontal = 8.dp, vertical = 4.dp)
                         ) {
                             Text(
-                                text = "Not available right now",
+                                text = if (!shopIsOpen) {
+                                    "Shop is closed right now"
+                                } else {
+                                    "Not available right now"
+                                },
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Medium,
                                 color = MaterialTheme.colorScheme.error
@@ -1243,7 +1408,11 @@ fun MenuItemCard(
                     contentPadding = PaddingValues(horizontal = 12.dp),
                     shape = RoundedCornerShape(12.dp)
                 ) {
-                    Text(text = "Unavailable", fontSize = 11.sp, fontWeight = FontWeight.Normal)
+                    Text(
+                        text = if (!shopIsOpen) "Closed" else "Unavailable",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Normal
+                    )
                 }
             } else {
                 AnimatedContent(

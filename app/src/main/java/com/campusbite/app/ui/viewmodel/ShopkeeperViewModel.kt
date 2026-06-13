@@ -566,156 +566,41 @@ class ShopkeeperViewModel @Inject constructor(
         if (orderId.isBlank()) return
 
         viewModelScope.launch {
-            try {
-                val cleanPaymentType = paymentReceivedType
-                    .trim()
-                    .lowercase()
+            val cleanPaymentType = paymentReceivedType.trim().lowercase()
+            val cleanReason = cancelReason.trim()
 
-                val cleanReason = cancelReason.trim()
+            val result = orderActionRepository.cancelOrderByShopkeeper(
+                orderId = orderId,
+                paymentReceivedType = cleanPaymentType,
+                cancelReason = cleanReason,
+                paymentReceivedAmount = paymentReceivedAmount
+            )
 
-                val validPaymentTypes = listOf(
-                    PaymentReceivedType.NONE,
-                    PaymentReceivedType.PARTIAL,
-                    PaymentReceivedType.FULL
-                )
-
-                if (cleanPaymentType !in validPaymentTypes) {
-                    throw IllegalStateException("Please select payment status.")
-                }
-
-                val orderRef = firestore.collection("orders")
-                    .document(orderId)
-
-                firestore.runTransaction { transaction ->
-                    val orderDoc = transaction.get(orderRef)
-
-                    if (!orderDoc.exists()) {
-                        throw IllegalStateException("Order not found.")
-                    }
-
-                    val orderShopId = orderDoc.getString("shopId").orEmpty()
-
-                    if (orderShopId != shopId) {
-                        throw IllegalStateException("You cannot cancel this order.")
-                    }
-
-                    val currentStatus = orderDoc.getString("status")
-                        ?.lowercase()
-                        .orEmpty()
-
-                    if (currentStatus == OrderStatusValue.CANCELLED) {
-                        throw IllegalStateException("This order is already cancelled.")
-                    }
-
-                    if (currentStatus == OrderStatusValue.PICKED_UP) {
-                        throw IllegalStateException("Picked up order cannot be cancelled.")
-                    }
-
-                    val totalPrice = orderDoc.getDouble("totalPrice")
-                        ?: orderDoc.getLong("totalPrice")?.toDouble()
-                        ?: 0.0
-
-                    val finalPaymentReceivedAmount = when (cleanPaymentType) {
-                        PaymentReceivedType.FULL -> {
-                            totalPrice
+            result.fold(
+                onSuccess = {
+                    _message.value = when (cleanPaymentType) {
+                        PaymentReceivedType.NONE -> {
+                            "Order cancelled. No refund required."
                         }
 
                         PaymentReceivedType.PARTIAL -> {
-                            if (paymentReceivedAmount <= 0.0) {
-                                throw IllegalStateException("Enter the amount received.")
-                            }
-
-                            if (paymentReceivedAmount >= totalPrice) {
-                                throw IllegalStateException("For full amount, select Full payment received.")
-                            }
-
-                            paymentReceivedAmount
+                            "Order cancelled. Refund pending for ₹${paymentReceivedAmount.toInt()}."
                         }
 
-                        else -> {
-                            0.0
-                        }
-                    }
-
-                    val paymentReceivedByShopkeeper = finalPaymentReceivedAmount > 0.0
-
-                    if (paymentReceivedByShopkeeper && cleanReason.isBlank()) {
-                        throw IllegalStateException("Please select a cancellation reason.")
-                    }
-
-                    val paymentStatus = when (cleanPaymentType) {
                         PaymentReceivedType.FULL -> {
-                            PaymentStatusValue.PAID
-                        }
-
-                        PaymentReceivedType.PARTIAL -> {
-                            PaymentStatusValue.PARTIAL_PAYMENT_RECEIVED
+                            "Order cancelled. Refund pending."
                         }
 
                         else -> {
-                            PaymentStatusValue.PAYMENT_NOT_RECEIVED
+                            "Order cancelled successfully."
                         }
                     }
-
-                    val refundStatus = if (paymentReceivedByShopkeeper) {
-                        RefundStatusValue.REFUND_PENDING
-                    } else {
-                        RefundStatusValue.NONE
-                    }
-
-                    val finalCancelReason = if (paymentReceivedByShopkeeper) {
-                        cleanReason
-                    } else {
-                        "Payment not received"
-                    }
-
-                    val now = System.currentTimeMillis()
-
-                    transaction.update(
-                        orderRef,
-                        mapOf(
-                            "status" to OrderStatusValue.CANCELLED,
-                            "paymentStatus" to paymentStatus,
-                            "paymentReceivedByShopkeeper" to paymentReceivedByShopkeeper,
-                            "paymentReceivedType" to cleanPaymentType,
-                            "paymentReceivedAmount" to finalPaymentReceivedAmount,
-                            "cancelReason" to finalCancelReason,
-                            "cancelledBy" to "shopkeeper",
-                            "cancelledAt" to now,
-                            "refundStatus" to refundStatus,
-                            "refundAmount" to finalPaymentReceivedAmount,
-                            "refundReferenceId" to "",
-                            "refundSettledAt" to 0L,
-                            "refundNote" to "",
-                            "updatedAt" to now
-                        )
-                    )
-
-                    val pickupDate = orderDoc.getString("pickupDate")
-                        ?.takeIf { it.isNotBlank() }
-                        ?: LocalDate.now().toString()
-
-                    val month = pickupDate.take(7)
-
-                    incrementCancelledAnalytics(
-                        transaction = transaction,
-                        shopId = shopId,
-                        pickupDate = pickupDate,
-                        month = month
-                    )
-
-                    null
-                }.await()
-
-                _message.value = if (paymentReceivedAmount > 0.0 || cleanPaymentType == PaymentReceivedType.FULL) {
-                    "Order cancelled. Refund is now pending."
-                } else {
-                    "Order cancelled because payment was not received."
+                },
+                onFailure = { error ->
+                    error.printStackTrace()
+                    _message.value = error.message ?: "Failed to cancel order."
                 }
-            } catch (e: Exception) {
-                e.printStackTrace()
-                _message.value = e.message ?: "Failed to cancel order."
-            }
+            )
         }
     }
 
