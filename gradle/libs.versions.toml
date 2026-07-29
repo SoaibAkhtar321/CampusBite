@@ -7,6 +7,8 @@ googleServices = "4.4.2"
 hilt = "2.51.1"
 firebaseBom = "33.6.0"
 firebaseCrashlyticsGradle = "3.0.7"
+appCheckPlayIntegrity = "18.0.0"
+appCheckDebug = "18.0.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -21,6 +23,8 @@ androidx-ui-tooling-preview = { group = "androidx.compose.ui", name = "ui-toolin
 androidx-material3 = { group = "androidx.compose.material3", name = "material3" }
 
 firebase-bom = { group = "com.google.firebase", name = "firebase-bom", version.ref = "firebaseBom" }
+firebase-appcheck-playintegrity = { group = "com.google.firebase", name = "firebase-appcheck-playintegrity", version.ref = "appCheckPlayIntegrity" }
+firebase-appcheck-debug = { group = "com.google.firebase", name = "firebase-appcheck-debug", version.ref = "appCheckDebug" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
