@@ -1,6 +1,7 @@
 [versions]
 agp = "8.7.2"
 kotlin = "2.0.21"
+ksp = "2.0.21-1.0.28"
 coreKtx = "1.15.0"
 composeBom = "2024.11.00"
 googleServices = "4.4.2"
@@ -33,3 +34,4 @@ kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "ko
 google-services = { id = "com.google.gms.google-services", version.ref = "googleServices" }
 hilt-android = { id = "com.google.dagger.hilt.android", version.ref = "hilt" }
 firebase-crashlytics = { id = "com.google.firebase.crashlytics", version.ref = "firebaseCrashlyticsGradle" }
+ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }

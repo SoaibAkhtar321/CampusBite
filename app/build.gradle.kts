@@ -8,8 +8,7 @@ plugins {
     alias(libs.plugins.google.services)
     alias(libs.plugins.hilt.android)
     alias(libs.plugins.firebase.crashlytics)
-
-    kotlin("kapt")
+    alias(libs.plugins.ksp)
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -173,7 +172,7 @@ dependencies {
 
     // Hilt
     implementation("com.google.dagger:hilt-android:2.51.1")
-    kapt("com.google.dagger:hilt-compiler:2.51.1")
+    ksp("com.google.dagger:hilt-compiler:2.51.1")
     implementation("androidx.hilt:hilt-navigation-compose:1.2.0")
 
     // Navigation
