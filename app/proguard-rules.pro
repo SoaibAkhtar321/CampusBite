@@ -92,3 +92,14 @@
     public *;
 }
 -keep class com.campusbite.app.data.model.SlotAvailability { <init>(); }
+
+# ─────────────────────────────────────────────────────────────────
+#  Diagnostic only — Task 7.2.2
+#  Dumps the FULL merged rule set (this file + AGP defaults + every
+#  library's bundled consumer-rules.pro, e.g. Firebase, Hilt, Play
+#  Services) to a plain file, so we can confirm/deny whether a
+#  package-wide keep on com.campusbite.app.data.model.** is really
+#  being contributed by something outside this file.
+#  Remove this line once Task 7.2.2 is closed.
+# ─────────────────────────────────────────────────────────────────
+-printconfiguration build/outputs/mapping/release/full-configuration.txt
