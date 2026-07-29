@@ -4,12 +4,8 @@ import android.app.Application
 import android.util.Log
 import dagger.hilt.android.HiltAndroidApp
 
-import com.campusbite.app.BuildConfig
-
 import com.google.firebase.Firebase
 import com.google.firebase.appcheck.appCheck
-import com.google.firebase.appcheck.debug.DebugAppCheckProviderFactory
-import com.google.firebase.appcheck.playintegrity.PlayIntegrityAppCheckProviderFactory
 
 @HiltAndroidApp
 class CampusBiteApp : Application() {
@@ -20,20 +16,16 @@ class CampusBiteApp : Application() {
     }
 
     private fun initializeAppCheck() {
-
-        Log.d("CampusBiteAppCheck", "BuildConfig.DEBUG = ${BuildConfig.DEBUG}")
-
-        val provider =
-            if (BuildConfig.DEBUG) {
-                Log.d("CampusBiteAppCheck","Installing DEBUG provider")
-                DebugAppCheckProviderFactory.getInstance()
-            } else {
-                Log.d("CampusBiteAppCheck","Installing PLAY INTEGRITY provider")
-                PlayIntegrityAppCheckProviderFactory.getInstance()
-            }
+        // provideAppCheckFactory() is variant-specific: the debug
+        // implementation lives in src/debug/, the release
+        // implementation in src/release/. Exactly one is compiled
+        // into any given build, so this file never needs to import
+        // DebugAppCheckProviderFactory directly (that class does
+        // not exist on the release compile classpath).
+        val provider = provideAppCheckFactory()
 
         Firebase.appCheck.installAppCheckProviderFactory(provider)
 
-        Log.d("CampusBiteAppCheck","App Check installed")
+        Log.d("CampusBiteAppCheck", "App Check installed")
     }
 }

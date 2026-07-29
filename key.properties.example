@@ -1,0 +1,27 @@
+# ─────────────────────────────────────────────────────────────────
+#  CampusBite — Release signing configuration template
+#
+#  1. Copy this file to "key.properties" in the project root
+#     (same folder as settings.gradle.kts).
+#  2. Fill in your real values below.
+#  3. NEVER commit "key.properties" — it is already listed in
+#     .gitignore.
+#
+#  storeFile may be an absolute path or a path relative to the
+#  project root.
+#
+#  Alternative for CI/CD (GitHub Actions, etc.): skip this file
+#  entirely and instead set these environment variables on the
+#  build runner —
+#    RELEASE_STORE_FILE
+#    RELEASE_STORE_PASSWORD
+#    RELEASE_KEY_ALIAS
+#    RELEASE_KEY_PASSWORD
+#  app/build.gradle.kts checks key.properties first, then falls
+#  back to these environment variables.
+# ─────────────────────────────────────────────────────────────────
+
+storeFile=campusbite-release.jks
+storePassword=REPLACE_WITH_YOUR_KEYSTORE_PASSWORD
+keyAlias=campusbite
+keyPassword=REPLACE_WITH_YOUR_KEY_PASSWORD

@@ -1,3 +1,6 @@
+import java.util.Properties
+import java.io.FileInputStream
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -7,6 +10,65 @@ plugins {
     alias(libs.plugins.firebase.crashlytics)
 
     kotlin("kapt")
+}
+
+// ─────────────────────────────────────────────────────────────────
+//  Release signing configuration
+//
+//  Secrets are NEVER hardcoded here. They are loaded from either:
+//   1) A local, git-ignored `key.properties` file at the project
+//      root (developer machines), or
+//   2) Environment variables (CI/CD pipelines):
+//        RELEASE_STORE_FILE, RELEASE_STORE_PASSWORD,
+//        RELEASE_KEY_ALIAS, RELEASE_KEY_PASSWORD
+//
+//  If neither source provides complete values, the release
+//  signingConfig block below intentionally throws — this fails the
+//  Gradle build loudly instead of silently producing an unsigned
+//  or debug-signed release artifact.
+// ─────────────────────────────────────────────────────────────────
+val keystorePropertiesFile = rootProject.file("key.properties")
+val keystoreProperties = Properties()
+val hasKeystorePropertiesFile = keystorePropertiesFile.exists()
+if (hasKeystorePropertiesFile) {
+    keystoreProperties.load(FileInputStream(keystorePropertiesFile))
+}
+
+fun releaseConfigValue(propertyKey: String, envKey: String): String? {
+    return keystoreProperties.getProperty(propertyKey)?.takeIf { it.isNotBlank() }
+        ?: System.getenv(envKey)?.takeIf { it.isNotBlank() }
+}
+
+val releaseStoreFilePath = releaseConfigValue("storeFile", "RELEASE_STORE_FILE")
+val releaseStorePassword = releaseConfigValue("storePassword", "RELEASE_STORE_PASSWORD")
+val releaseKeyAlias = releaseConfigValue("keyAlias", "RELEASE_KEY_ALIAS")
+val releaseKeyPassword = releaseConfigValue("keyPassword", "RELEASE_KEY_PASSWORD")
+
+val isReleaseSigningConfigured = listOf(
+    releaseStoreFilePath,
+    releaseStorePassword,
+    releaseKeyAlias,
+    releaseKeyPassword
+).all { !it.isNullOrBlank() }
+
+// Only invoked by Gradle when a release variant is actually being
+// assembled/bundled, so `assembleDebug` / unit tests never require
+// signing secrets to be present.
+gradle.taskGraph.whenReady {
+    val buildingRelease = allTasks.any { task ->
+        task.name.contains("Release", ignoreCase = false) &&
+                (task.name.startsWith("assemble") || task.name.startsWith("bundle") || task.name.startsWith("package"))
+    }
+    if (buildingRelease && !isReleaseSigningConfigured) {
+        throw GradleException(
+            "Release signing is not configured.\n" +
+                    "Provide storeFile, storePassword, keyAlias, keyPassword either via:\n" +
+                    "  1) a git-ignored 'key.properties' file at the project root, or\n" +
+                    "  2) environment variables RELEASE_STORE_FILE, RELEASE_STORE_PASSWORD, " +
+                    "RELEASE_KEY_ALIAS, RELEASE_KEY_PASSWORD.\n" +
+                    "See key.properties.example for the expected format."
+        )
+    }
 }
 
 android {
@@ -23,6 +85,38 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        create("release") {
+            if (isReleaseSigningConfigured) {
+                storeFile = file(releaseStoreFilePath!!)
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            isMinifyEnabled = true
+            isShrinkResources = true
+            isDebuggable = false
+
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+
+            signingConfig = signingConfigs.getByName("release")
+        }
+
+        debug {
+            // Intentionally unchanged — debug App Check provider and
+            // debug workflow are out of scope for this task.
+            isMinifyEnabled = false
+        }
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -35,6 +129,13 @@ android {
     buildFeatures {
         compose = true
         buildConfig = true
+    }
+
+    packaging {
+        resources {
+            excludes += "/META-INF/{AL2.0,LGPL2.1}"
+            excludes += "/META-INF/DEPENDENCIES"
+        }
     }
 }
 
