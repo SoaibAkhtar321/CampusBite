@@ -71,11 +71,6 @@ fun ShopDetailScreen(
 
     var showExitDialog by remember { mutableStateOf(false) }
 
-    // ✅ Log only once, not on every recomposition
-    LaunchedEffect(shop, shops.size) {
-        android.util.Log.d("ShopDetail", "Shop found: ${shop?.name ?: "NULL"} | Total shops: ${shops.size}")
-    }
-
     // ✅ Show loading state
     if (isLoading || shops.isEmpty()) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {

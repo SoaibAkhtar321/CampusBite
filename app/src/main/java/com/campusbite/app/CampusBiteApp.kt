@@ -1,7 +1,6 @@
 package com.campusbite.app
 
 import android.app.Application
-import android.util.Log
 import dagger.hilt.android.HiltAndroidApp
 
 import com.google.firebase.Firebase
@@ -25,7 +24,5 @@ class CampusBiteApp : Application() {
         val provider = provideAppCheckFactory()
 
         Firebase.appCheck.installAppCheckProviderFactory(provider)
-
-        Log.d("CampusBiteAppCheck", "App Check installed")
     }
 }

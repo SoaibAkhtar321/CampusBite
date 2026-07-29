@@ -502,11 +502,6 @@ class OrderRepository @Inject constructor(
 
                 val order = Order.from(snapshot)
 
-                Log.d(
-                    "OrderRepository",
-                    "Order update: ${order.orderId} status=${order.status}"
-                )
-
                 onUpdate(order)
             }
     }
@@ -551,11 +546,6 @@ class OrderRepository @Inject constructor(
                         }
                     }
                     .maxByOrNull { it.createdAt }
-
-                Log.d(
-                    "OrderRepository",
-                    "Active order update: ${activeOrder?.orderId} status=${activeOrder?.status}"
-                )
 
                 onUpdate(activeOrder)
             }

@@ -15,8 +15,6 @@ class MenuRepositoryImpl @Inject constructor(
 ) : MenuRepository {
 
     override fun getMenuItemsByShopId(shopId: String): Flow<List<MenuItem>> = callbackFlow {
-        Log.d("MenuRepo", "Setting up listener for shopId: $shopId")
-
         val listener = firestore.collection("menuItems")
             .whereEqualTo("shopId", shopId)
             .addSnapshotListener { snapshot, error ->
@@ -35,15 +33,6 @@ class MenuRepositoryImpl @Inject constructor(
                             .thenBy { it.name.lowercase() }
                     )
                     ?: emptyList()
-
-                items.forEach { item ->
-                    Log.d(
-                        "MenuRepo",
-                        "Loaded item: ${item.name}, itemId=${item.itemId}, shopId=${item.shopId}, isAvailable=${item.isAvailable}"
-                    )
-                }
-
-                Log.d("MenuRepo", "Listener fired: ${items.size} items for shopId: $shopId")
 
                 trySend(items).isSuccess
             }
@@ -72,14 +61,7 @@ class MenuRepositoryImpl @Inject constructor(
                 "imageUrl" to menuItem.imageUrl
             )
 
-            Log.d("MenuRepo", "Adding item: ${menuItem.name}")
-            Log.d("MenuRepo", "itemId: ${docRef.id}")
-            Log.d("MenuRepo", "shopId: ${menuItem.shopId}")
-            Log.d("MenuRepo", "isAvailable: ${menuItem.isAvailable}")
-
             docRef.set(itemMap).await()
-
-            Log.d("MenuRepo", "Item added successfully")
 
             docRef.id
 
@@ -110,17 +92,10 @@ class MenuRepositoryImpl @Inject constructor(
                 "imageUrl" to menuItem.imageUrl
             )
 
-            Log.d("MenuRepo", "Updating item: ${menuItem.name}")
-            Log.d("MenuRepo", "itemId: ${menuItem.itemId}")
-            Log.d("MenuRepo", "shopId: ${menuItem.shopId}")
-            Log.d("MenuRepo", "isAvailable: ${menuItem.isAvailable}")
-
             firestore.collection("menuItems")
                 .document(menuItem.itemId)
                 .set(itemMap)
                 .await()
-
-            Log.d("MenuRepo", "Item updated successfully")
 
         } catch (exception: Exception) {
             Log.e("MenuRepo", "Failed to update menu item", exception)
@@ -163,8 +138,6 @@ class MenuRepositoryImpl @Inject constructor(
                 .delete()
                 .await()
 
-            Log.d("MenuRepo", "Item deleted successfully")
-
         } catch (exception: Exception) {
             Log.e("MenuRepo", "Failed to delete menu item", exception)
             throw Exception("Failed to delete menu item: ${exception.message}")
@@ -184,11 +157,6 @@ class MenuRepositoryImpl @Inject constructor(
             if (itemId.isBlank()) {
                 throw Exception("Cannot update availability without itemId!")
             }
-
-            Log.d("MenuRepo", "Updating availability")
-            Log.d("MenuRepo", "shopId: $shopId")
-            Log.d("MenuRepo", "itemId: $itemId")
-            Log.d("MenuRepo", "new isAvailable: $isAvailable")
 
             val itemDoc = firestore.collection("menuItems")
                 .document(itemId)
@@ -215,8 +183,6 @@ class MenuRepositoryImpl @Inject constructor(
                     )
                 )
                 .await()
-
-            Log.d("MenuRepo", "Availability updated successfully to: $isAvailable")
 
         } catch (exception: Exception) {
             Log.e("MenuRepo", "Failed to update availability", exception)

@@ -8,7 +8,6 @@ import com.campusbite.app.util.OrderStatusValue
 import com.campusbite.app.util.PaymentReceivedType
 import com.campusbite.app.util.PaymentStatusValue
 import com.campusbite.app.util.RefundStatusValue
-import com.google.firebase.FirebaseApp
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.DocumentReference
 import com.google.firebase.firestore.DocumentSnapshot
@@ -126,33 +125,8 @@ class AdminViewModel @Inject constructor(
     private var reportLifetimeAnalytics = AdminAnalyticsSnapshot()
 
     init {
-        logAdminIdentity()
         listenToShops()
         listenToUsers()
-    }
-
-    private fun logAdminIdentity() {
-        val user = FirebaseAuth.getInstance().currentUser
-
-        Log.d(
-            ADMIN_TAG,
-            "ADMIN DEBUG UID=${user?.uid}, email=${user?.email}"
-        )
-
-        try {
-            val projectId = FirebaseApp.getInstance().options.projectId
-
-            Log.d(
-                ADMIN_TAG,
-                "ADMIN DEBUG projectId=$projectId"
-            )
-        } catch (e: Exception) {
-            Log.e(
-                ADMIN_TAG,
-                "ADMIN DEBUG failed to read Firebase projectId",
-                e
-            )
-        }
     }
 
     private fun setAdminMessage(
@@ -253,11 +227,6 @@ class AdminViewModel @Inject constructor(
                 _shops.value = shopList
                 clearMessageIfSource("shops listener")
                 _isLoading.value = false
-
-                Log.d(
-                    ADMIN_TAG,
-                    "SUCCESS QUERY: shops listener | count=${shopList.size}"
-                )
             }
     }
 
@@ -325,11 +294,6 @@ class AdminViewModel @Inject constructor(
 
                 clearMessageIfSource("users listener")
                 _isLoading.value = false
-
-                Log.d(
-                    ADMIN_TAG,
-                    "SUCCESS QUERY: users listener | count=${userList.size}"
-                )
             }
     }
 
@@ -342,11 +306,6 @@ class AdminViewModel @Inject constructor(
             )
             return
         }
-
-        Log.d(
-            ADMIN_TAG,
-            "LOAD SHOP REPORT: shopId=$shopId"
-        )
 
         _shopReportState.value = AdminShopReportState(isLoading = true)
 

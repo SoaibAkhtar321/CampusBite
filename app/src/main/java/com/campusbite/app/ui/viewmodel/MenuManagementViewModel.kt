@@ -39,8 +39,6 @@ class MenuManagementViewModel @Inject constructor(
             try {
                 val currentUserId = userRepository.getCurrentUserId()
 
-                Log.d("MenuVM", "Current UID: $currentUserId")
-
                 if (currentUserId.isNullOrBlank()) {
                     _uiState.value = _uiState.value.copy(
                         isLoading = false,
@@ -50,8 +48,6 @@ class MenuManagementViewModel @Inject constructor(
                 }
 
                 val shopId = userRepository.getShopkeeperShopId(currentUserId)
-
-                Log.d("MenuVM", "Actual shopId from user document: $shopId")
 
                 if (shopId.isNullOrBlank()) {
                     _uiState.value = _uiState.value.copy(
@@ -118,10 +114,6 @@ class MenuManagementViewModel @Inject constructor(
                     isAvailable = menuItem.isAvailable
                 )
 
-                Log.d("MenuVM", "Adding item: ${fixedItem.name}")
-                Log.d("MenuVM", "Saving shopId: ${fixedItem.shopId}")
-                Log.d("MenuVM", "Saving isAvailable: ${fixedItem.isAvailable}")
-
                 menuRepository.addMenuItem(fixedItem)
 
                 _uiState.value = _uiState.value.copy(
@@ -161,10 +153,6 @@ class MenuManagementViewModel @Inject constructor(
                 val fixedItem = menuItem.copy(
                     shopId = currentShopId
                 )
-
-                Log.d("MenuVM", "Updating item: ${fixedItem.name}")
-                Log.d("MenuVM", "Updating itemId: ${fixedItem.itemId}")
-                Log.d("MenuVM", "Updating isAvailable: ${fixedItem.isAvailable}")
 
                 menuRepository.updateMenuItem(fixedItem)
 
@@ -243,11 +231,6 @@ class MenuManagementViewModel @Inject constructor(
                     )
                     return@launch
                 }
-
-                Log.d("MenuVM", "Updating availability")
-                Log.d("MenuVM", "itemId: $itemId")
-                Log.d("MenuVM", "shopId: $currentShopId")
-                Log.d("MenuVM", "new isAvailable: $isAvailable")
 
                 menuRepository.updateItemAvailability(
                     shopId = currentShopId,

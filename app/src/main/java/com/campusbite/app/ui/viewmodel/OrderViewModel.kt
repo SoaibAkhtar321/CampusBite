@@ -212,18 +212,6 @@ class OrderViewModel @Inject constructor(
                 val maxOrdersPerSlot = getMaxOrdersPerSlot(shopDoc)
                 val closedSlots = getClosedSlots(shopDoc)
 
-                Log.d(
-                    "OrderVM",
-                    "placeOrder shop check: incomingShopId=${order.shopId}, " +
-                            "canonicalShopId=$canonicalShopId, " +
-                            "fieldShopId=${shopDoc.getString("shopId")}, " +
-                            "isOpen=${shop.isOpen}, " +
-                            "isApproved=${shop.isApproved}, " +
-                            "isBlocked=${shop.isBlocked}, " +
-                            "isDeleted=${shop.isDeleted}, " +
-                            "isVisible=${shopDoc.getBoolean("isVisible")}"
-                )
-
                 if (!isShopAcceptingOrders(shopDoc, shop)) {
                     _orderState.value = OrderState.Error("This shop is currently not accepting orders.")
                     return@launch
@@ -233,8 +221,6 @@ class OrderViewModel @Inject constructor(
                     _orderState.value = OrderState.Error("This shop is currently closed.")
                     return@launch
                 }
-
-                Log.d("OrderVM_DEBUG", "STEP 1: Checking slot availability started")
 
                 val slotAvailability = try {
                     slotAvailabilityRepository.getSlotAvailability(
@@ -250,8 +236,6 @@ class OrderViewModel @Inject constructor(
                     )
                     return@launch
                 }
-
-                Log.d("OrderVM_DEBUG", "STEP 1 PASSED: Slot check success")
 
                 val isSlotClosed =
                     slotAvailability.isClosed || closedSlots.contains(order.pickupSlot)
@@ -275,17 +259,8 @@ class OrderViewModel @Inject constructor(
                     items = normalizedItems
                 )
 
-                Log.d(
-                    "OrderVM",
-                    "Writing order: orderShopId=${finalOrder.shopId}, " +
-                            "itemShopIds=${finalOrder.items.map { it.shopId }.distinct()}"
-                )
-                Log.d("OrderVM_DEBUG", "STEP 2: Order write started")
-
                 val result = orderRepository.placeOrder(finalOrder)
-                if (result.isSuccess) {
-                    Log.d("OrderVM_DEBUG", "STEP 2 PASSED: Order write success")
-                } else {
+                if (!result.isSuccess) {
                     Log.e(
                         "OrderVM_DEBUG",
                         "STEP 2 FAILED: Order write failed",
@@ -489,7 +464,6 @@ class OrderViewModel @Inject constructor(
                     }
                 }
 
-                Log.d("OrderVM", "User orders updated: ${orders.size}")
                 _userOrders.value = orders
             }
     }

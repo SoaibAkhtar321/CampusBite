@@ -142,7 +142,6 @@ class MainActivity : ComponentActivity() {
     private fun fetchAndSaveFcmToken(userId: String) {
         messaging.token
             .addOnSuccessListener { token ->
-                Log.d(TAG, "FCM token fetched: $token")
                 saveFcmTokenToFirestore(userId, token)
             }
             .addOnFailureListener { error ->
@@ -163,9 +162,6 @@ class MainActivity : ComponentActivity() {
                     "fcmTokenUpdatedAt" to FieldValue.serverTimestamp()
                 )
             )
-            .addOnSuccessListener {
-                Log.d(TAG, "FCM token saved successfully")
-            }
             .addOnFailureListener { error ->
                 Log.e(TAG, "Failed to save FCM token", error)
             }

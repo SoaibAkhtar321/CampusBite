@@ -12,9 +12,7 @@ class UserRepositoryImpl @Inject constructor(
 ) : UserRepository {
 
     override fun getCurrentUserId(): String? {
-        val uid = auth.currentUser?.uid
-        Log.d("UserRepository", "Current logged-in UID: $uid")
-        return uid
+        return auth.currentUser?.uid
     }
 
     override suspend fun getShopkeeperShopId(userId: String): String? {
@@ -35,9 +33,6 @@ class UserRepositoryImpl @Inject constructor(
             }
 
             val shopId = userDoc.getString("shopId")
-
-            Log.d("UserRepository", "Current UID: $userId")
-            Log.d("UserRepository", "Fetched shopId from users document: $shopId")
 
             if (shopId.isNullOrBlank()) {
                 Log.e("UserRepository", "shopId is missing or empty for UID: $userId")

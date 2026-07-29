@@ -6,7 +6,6 @@ import com.google.firebase.functions.FirebaseFunctionsException
 import kotlinx.coroutines.tasks.await
 import javax.inject.Inject
 import javax.inject.Singleton
-import android.util.Log
 
 @Singleton
 class OrderActionRepository @Inject constructor(
@@ -19,18 +18,11 @@ class OrderActionRepository @Inject constructor(
     private suspend fun ensureLoggedIn() {
         val user = auth.currentUser
 
-        Log.d("OrderActionRepo", "currentUser = ${user?.uid}")
-        Log.d("OrderActionRepo", "email = ${user?.email}")
-        Log.d("OrderActionRepo", "isAnonymous = ${user?.isAnonymous}")
-
         if (user == null) {
             throw Exception("User not logged in")
         }
 
-        val tokenResult = user.getIdToken(true).await()
-
-        Log.d("OrderActionRepo", "token exists = ${!tokenResult.token.isNullOrBlank()}")
-        Log.d("OrderActionRepo", "token first 20 = ${tokenResult.token?.take(20)}")
+        user.getIdToken(true).await()
     }
 
     suspend fun updateOrderStatus(
