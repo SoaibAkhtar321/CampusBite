@@ -812,7 +812,7 @@ private fun PriceFilterBottomSheet(
                 )
 
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(quickFilters.size) { index ->
+                    items(quickFilters.size, key = { index -> quickFilters[index].first }) { index ->
                         val (label, range) = quickFilters[index]
                         FilterChip(
                             selected = selectedRange == range,

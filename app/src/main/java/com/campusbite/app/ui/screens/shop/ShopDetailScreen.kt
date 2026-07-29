@@ -193,7 +193,7 @@ fun ShopDetailScreen(
                     if (shopMenuItems.isEmpty()) {
                         item { ShopEmptyState() }
                     } else {
-                        items(shopMenuItems) { item ->
+                        items(shopMenuItems, key = { it.itemId }) { item ->
                             ShopMenuItemCard(
                                 menuItem = item,
                                 quantity = cartItems.find { it.itemId == item.itemId }?.quantity ?: 0,

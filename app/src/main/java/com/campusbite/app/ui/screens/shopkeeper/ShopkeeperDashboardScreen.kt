@@ -1807,7 +1807,7 @@ private fun SlotControlCard(
             LazyRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                items(dynamicSlots) { slot ->
+                items(dynamicSlots, key = { it }) { slot ->
                     val isClosed = closedSlots.contains(slot)
 
                     val bgColor by animateColorAsState(
