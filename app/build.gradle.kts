@@ -179,9 +179,6 @@ dependencies {
     // Navigation
     implementation("androidx.navigation:navigation-compose:2.8.3")
 
-    // Network
-    implementation("com.squareup.okhttp3:okhttp:4.12.0")
-
     // DataStore
     implementation("androidx.datastore:datastore-preferences:1.0.0")
 
