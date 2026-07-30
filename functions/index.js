@@ -311,6 +311,7 @@ async function sendMulticastNotification({
 exports.updateOrderStatus = onCall(
   {
     region: REGION,
+    enforceAppCheck: true,
   },
   async (request) => {
     const uid = requireAuth(request);
@@ -410,6 +411,7 @@ exports.updateOrderStatus = onCall(
 exports.cancelOrderByShopkeeper = onCall(
   {
     region: REGION,
+    enforceAppCheck: true,
   },
   async (request) => {
     const uid = requireAuth(request);
@@ -520,6 +522,7 @@ exports.cancelOrderByShopkeeper = onCall(
 exports.markRefundSettled = onCall(
   {
     region: REGION,
+    enforceAppCheck: true,
   },
   async (request) => {
     const uid = requireAuth(request);
