@@ -1,3 +1,4 @@
+const crypto = require("crypto");
 const admin = require("firebase-admin");
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const {
@@ -13,6 +14,7 @@ const FieldValue = admin.firestore.FieldValue;
 
 const REGION = "us-central1";
 const ORDER_NOTIFICATION_CHANNEL_ID = "campusbite_order_alerts_v2";
+const MAX_CART_ITEMS = 30;
 
 const ORDER_STATUSES = [
   "pending",
@@ -232,6 +234,109 @@ function buildCancelPaymentFields(
     refundStatus: "none",
     refundAmount: 0,
   };
+}
+
+function validateCreateOrderRequest(data) {
+  const clientRequestId = cleanString(data?.clientRequestId);
+  const shopId = cleanString(data?.shopId);
+  const pickupSlot = cleanString(data?.pickupSlot);
+  const pickupDate = cleanString(data?.pickupDate);
+  const paymentMethod = cleanString(data?.paymentMethod);
+  const upiPayerName = cleanString(data?.upiPayerName);
+  const items = Array.isArray(data?.items) ? data.items : null;
+
+  if (!clientRequestId) {
+    throw new HttpsError(
+      "invalid-argument",
+      "clientRequestId is required."
+    );
+  }
+
+  if (!shopId) {
+    throw new HttpsError("invalid-argument", "shopId is required.");
+  }
+
+  if (!pickupSlot) {
+    throw new HttpsError("invalid-argument", "pickupSlot is required.");
+  }
+
+  if (!pickupDate) {
+    throw new HttpsError("invalid-argument", "pickupDate is required.");
+  }
+
+  if (!paymentMethod) {
+    throw new HttpsError("invalid-argument", "paymentMethod is required.");
+  }
+
+  if (!upiPayerName) {
+    throw new HttpsError("invalid-argument", "upiPayerName is required.");
+  }
+
+  if (!items || items.length === 0) {
+    throw new HttpsError(
+      "invalid-argument",
+      "items must be a non-empty array."
+    );
+  }
+
+  if (items.length > MAX_CART_ITEMS) {
+    throw new HttpsError(
+      "invalid-argument",
+      `Cart cannot contain more than ${MAX_CART_ITEMS} items.`
+    );
+  }
+
+  const seenItemIds = new Set();
+
+  const cleanedItems = items.map((item, index) => {
+    const itemId = cleanString(item?.itemId);
+    const quantity = Number(item?.quantity);
+
+    if (!itemId) {
+      throw new HttpsError(
+        "invalid-argument",
+        `items[${index}].itemId is required.`
+      );
+    }
+
+    if (seenItemIds.has(itemId)) {
+      throw new HttpsError(
+        "invalid-argument",
+        `Duplicate itemId in cart: ${itemId}.`
+      );
+    }
+
+    seenItemIds.add(itemId);
+
+    if (!Number.isInteger(quantity) || quantity <= 0) {
+      throw new HttpsError(
+        "invalid-argument",
+        `items[${index}].quantity must be a positive integer.`
+      );
+    }
+
+    return { itemId, quantity };
+  });
+
+  return {
+    clientRequestId,
+    shopId,
+    pickupSlot,
+    pickupDate,
+    paymentMethod,
+    upiPayerName,
+    items: cleanedItems,
+  };
+}
+
+function computeCartHash(shopId, items) {
+  const sortedItems = [...items]
+    .map((item) => ({ itemId: item.itemId, quantity: item.quantity }))
+    .sort((a, b) => a.itemId.localeCompare(b.itemId));
+
+  const payload = JSON.stringify({ shopId, items: sortedItems });
+
+  return crypto.createHash("sha256").update(payload).digest("hex");
 }
 
 function getStudentNotificationContent(status, order) {
@@ -594,6 +699,209 @@ exports.markRefundSettled = onCall(
       success: true,
       message: "Refund marked as settled.",
     };
+  }
+);
+
+exports.createOrder = onCall(
+  {
+    region: REGION,
+    enforceAppCheck: true,
+  },
+  async (request) => {
+    const uid = requireAuth(request);
+
+    const {
+      clientRequestId,
+      shopId,
+      pickupSlot,
+      pickupDate,
+      paymentMethod,
+      upiPayerName,
+      items,
+    } = validateCreateOrderRequest(request.data);
+
+    const cartHash = computeCartHash(shopId, items);
+
+    const userRef = db.collection("users").doc(uid);
+    const orderRequestRef = db.collection("orderRequests").doc(clientRequestId);
+    const shopRef = db.collection("shops").doc(shopId);
+    const menuItemRefs = items.map((item) =>
+      db.collection("menuItems").doc(item.itemId)
+    );
+
+    const result = await db.runTransaction(async (tx) => {
+      const userSnap = await tx.get(userRef);
+
+      if (!userSnap.exists) {
+        throw new HttpsError("permission-denied", "User profile not found.");
+      }
+
+      const user = userSnap.data();
+
+      if (user.isBlocked === true) {
+        throw new HttpsError("permission-denied", "Your account is blocked.");
+      }
+
+      const orderRequestSnap = await tx.get(orderRequestRef);
+
+      if (orderRequestSnap.exists) {
+        const existingRequest = orderRequestSnap.data();
+
+        if (existingRequest.cartHash === cartHash) {
+          return {
+            success: true,
+            duplicate: true,
+            orderId: existingRequest.orderId,
+            message: "Order already created for this request.",
+          };
+        }
+
+        throw new HttpsError(
+          "already-exists",
+          "This request ID was already used with a different cart."
+        );
+      }
+
+      const shopSnap = await tx.get(shopRef);
+
+      if (!shopSnap.exists) {
+        throw new HttpsError("not-found", "Shop not found.");
+      }
+
+      const shop = shopSnap.data();
+
+      const menuItemSnaps = [];
+
+      for (const ref of menuItemRefs) {
+        menuItemSnaps.push(await tx.get(ref));
+      }
+
+      let totalPrice = 0;
+      const orderItems = [];
+
+      for (let i = 0; i < items.length; i++) {
+        const requestedItem = items[i];
+        const menuSnap = menuItemSnaps[i];
+
+        if (!menuSnap.exists) {
+          throw new HttpsError(
+            "not-found",
+            `Menu item not found: ${requestedItem.itemId}.`
+          );
+        }
+
+        const menuItem = menuSnap.data();
+
+        if (cleanString(menuItem.shopId) !== shopId) {
+          throw new HttpsError(
+            "failed-precondition",
+            `Menu item ${requestedItem.itemId} does not belong to shop ${shopId}.`
+          );
+        }
+
+        if (menuItem.isAvailable !== true) {
+          throw new HttpsError(
+            "failed-precondition",
+            `Menu item ${requestedItem.itemId} is not available.`
+          );
+        }
+
+        const unitPrice = Number(menuItem.price);
+
+        if (!Number.isFinite(unitPrice) || unitPrice < 0) {
+          throw new HttpsError(
+            "failed-precondition",
+            `Menu item ${requestedItem.itemId} has an invalid price.`
+          );
+        }
+
+        const lineTotal = unitPrice * requestedItem.quantity;
+        totalPrice += lineTotal;
+
+        orderItems.push({
+          itemId: requestedItem.itemId,
+          name: cleanString(menuItem.name),
+          price: unitPrice,
+          quantity: requestedItem.quantity,
+          prepTimeMinutes: Number(menuItem.prepTimeMinutes || 0),
+          shopId,
+          cookingNote: "",
+        });
+      }
+
+      totalPrice = Math.round(totalPrice * 100) / 100;
+
+      const orderRef = db.collection("orders").doc();
+      const now = Date.now();
+
+      const orderData = {
+        orderId: orderRef.id,
+
+        shopId,
+        shopName: cleanString(shop.name),
+        shopkeeperPhone: cleanString(shop.phone),
+
+        studentId: uid,
+        studentName: cleanString(user.name),
+        studentEmail: cleanString(user.email),
+        studentPhone: cleanString(user.phone),
+
+        items: orderItems,
+        totalPrice,
+
+        status: "pending",
+        pickupSlot,
+        pickupDate,
+
+        paymentMethod,
+        paymentStatus: "pending_verification",
+        upiPayerName,
+
+        cancelReason: "",
+        cancelledBy: "",
+        cancelledAt: 0,
+
+        paymentReceivedByShopkeeper: false,
+        paymentReceivedType: "none",
+
+        refundStatus: "none",
+        refundAmount: 0,
+        refundReferenceId: "",
+        refundSettledAt: 0,
+        refundNote: "",
+
+        clientRequestId,
+
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      tx.set(orderRef, orderData);
+
+      tx.set(orderRequestRef, {
+        uid,
+        orderId: orderRef.id,
+        cartHash,
+        createdAt: now,
+      });
+
+      return {
+        success: true,
+        duplicate: false,
+        orderId: orderRef.id,
+        message: "Order created successfully.",
+      };
+    });
+
+    logger.info("createOrder completed", {
+      uid,
+      shopId,
+      clientRequestId,
+      orderId: result.orderId,
+      duplicate: result.duplicate,
+    });
+
+    return result;
   }
 );
 
