@@ -11,235 +11,112 @@ import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.Query
+import com.google.firebase.functions.FirebaseFunctions
+import com.google.firebase.functions.FirebaseFunctionsException
 import kotlinx.coroutines.tasks.await
+import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
 class OrderRepository @Inject constructor(
     private val firestore: FirebaseFirestore,
-    private val auth: FirebaseAuth
+    private val auth: FirebaseAuth,
+    private val functions: FirebaseFunctions
 ) {
 
+    /**
+     * Creates an order exclusively through the `createOrder` Cloud Function.
+     * The function performs a server-side transaction (auth/role/shop/menu
+     * validation, pricing, and idempotency via clientRequestId) — the client
+     * never writes to the `orders` collection directly.
+     */
     suspend fun placeOrder(order: Order): Result<String> {
         return try {
             val user = auth.currentUser
                 ?: return Result.failure(Exception("User not logged in"))
 
-            val studentId = user.uid
-
-            val userDoc = firestore.collection("users")
-                .document(studentId)
-                .get()
-                .await()
-
-            if (!userDoc.exists()) {
-                return Result.failure(Exception("User profile not found"))
-            }
-
-            val studentName = userDoc.getString("name") ?: ""
-            val studentEmail = userDoc.getString("email") ?: user.email.orEmpty()
-            val studentPhone = userDoc.getString("phone") ?: ""
-
             if (order.shopId.isBlank()) {
                 return Result.failure(Exception("Shop ID is missing"))
             }
 
-            val shopDoc = firestore.collection("shops")
-                .document(order.shopId)
-                .get()
+            if (order.items.isEmpty()) {
+                return Result.failure(Exception("Cart is empty"))
+            }
+
+            // Force-refresh the ID token so the callable's App Check /
+            // auth checks see the latest claims.
+            user.getIdToken(true).await()
+
+            val clientRequestId = UUID.randomUUID().toString()
+
+            val requestData = mapOf(
+                "clientRequestId" to clientRequestId,
+                "shopId" to order.shopId,
+                "pickupDate" to order.pickupDate,
+                "pickupSlot" to order.pickupSlot,
+                "paymentMethod" to order.paymentMethod,
+                "upiPayerName" to order.upiPayerName,
+                "items" to order.items.map { item ->
+                    mapOf(
+                        "itemId" to item.itemId,
+                        "quantity" to item.quantity,
+                        "cookingNote" to item.cookingNote
+                    )
+                }
+            )
+
+            val callableResult = functions
+                .getHttpsCallable(CREATE_ORDER_FUNCTION)
+                .call(requestData)
                 .await()
 
-            if (!shopDoc.exists()) {
-                return Result.failure(
-                    Exception("Shop not found. Please clear cart and try again.")
+            @Suppress("UNCHECKED_CAST")
+            val response = callableResult.getData() as? Map<String, Any?>
+                ?: return Result.failure(Exception("Malformed response from server"))
+
+            val orderId = (response["orderId"] as? String).orEmpty()
+
+            if (orderId.isBlank()) {
+                return Result.failure(Exception("Order creation did not return an order ID"))
+            }
+
+            if (response["duplicate"] as? Boolean == true) {
+                Log.w(
+                    "OrderRepository",
+                    "createOrder resolved a duplicate clientRequestId=$clientRequestId " +
+                            "to existing orderId=$orderId"
                 )
             }
-
-            val isOrderable =
-                shopDoc.getBoolean("isApproved") == true &&
-                        shopDoc.getBoolean("isOpen") == true &&
-                        shopDoc.getBoolean("isBlocked") != true &&
-                        shopDoc.getBoolean("isDeleted") != true &&
-                        shopDoc.getBoolean("isVisible") != false
-
-            if (!isOrderable) {
-                return Result.failure(
-                    Exception("This shop is currently not accepting orders.")
-                )
-            }
-
-            val docRef = firestore.collection("orders").document()
-            val orderId = docRef.id
-            val now = System.currentTimeMillis()
-
-            val normalizedItems = order.items.map { item ->
-                item.copy(shopId = order.shopId)
-            }
-
-            val finalOrder = order.copy(
-                orderId = orderId,
-                shopId = order.shopId,
-                studentId = studentId,
-                studentName = studentName,
-                studentEmail = studentEmail,
-                studentPhone = studentPhone,
-                items = normalizedItems,
-                status = OrderStatusValue.PENDING,
-                paymentStatus = PaymentStatusValue.PENDING_VERIFICATION,
-                refundStatus = RefundStatusValue.NONE,
-                createdAt = now,
-                updatedAt = now
-            )
-
-            val orderData = buildOrderData(finalOrder)
-
-            logOrderCreateDebug(
-                studentId = studentId,
-                orderId = orderId,
-                finalOrder = finalOrder,
-                orderData = orderData,
-                userDoc = userDoc,
-                shopDoc = shopDoc
-            )
-
-            docRef.set(orderData).await()
-
-            Log.e(
-                "ORDER_RULE_DEBUG",
-                "ORDER WRITE SUCCESS: orderId=$orderId shopId=${finalOrder.shopId}"
-            )
 
             Result.success(orderId)
+        } catch (e: FirebaseFunctionsException) {
+            Log.e("OrderRepository", "createOrder call failed: ${e.code}", e)
+            Result.failure(Exception(describeFunctionError(e), e))
         } catch (e: Exception) {
-            Log.e("ORDER_RULE_DEBUG", "ORDER WRITE FAILED", e)
+            Log.e("OrderRepository", "Failed to place order", e)
             Result.failure(e)
         }
     }
 
-    private fun buildOrderData(order: Order): Map<String, Any> {
-        return mapOf(
-            "orderId" to order.orderId,
+    private fun describeFunctionError(e: FirebaseFunctionsException): String {
+        return when (e.code) {
+            FirebaseFunctionsException.Code.UNAUTHENTICATED ->
+                "User not logged in"
 
-            "shopId" to order.shopId,
-            "shopName" to order.shopName,
-            "shopkeeperPhone" to order.shopkeeperPhone,
+            FirebaseFunctionsException.Code.ALREADY_EXISTS ->
+                "This order request was already used with a different cart. " +
+                        "Please clear cart and try again."
 
-            "studentId" to order.studentId,
-            "studentName" to order.studentName,
-            "studentEmail" to order.studentEmail,
-            "studentPhone" to order.studentPhone,
+            FirebaseFunctionsException.Code.PERMISSION_DENIED,
+            FirebaseFunctionsException.Code.NOT_FOUND,
+            FirebaseFunctionsException.Code.FAILED_PRECONDITION,
+            FirebaseFunctionsException.Code.INVALID_ARGUMENT ->
+                e.message ?: "Failed to place order"
 
-            "items" to order.items.map { item ->
-                mapOf(
-                    "itemId" to item.itemId,
-                    "name" to item.name,
-                    "price" to item.price,
-                    "quantity" to item.quantity,
-                    "prepTimeMinutes" to item.prepTimeMinutes,
-                    "shopId" to item.shopId,
-                    "cookingNote" to item.cookingNote
-                )
-            },
-
-            "totalPrice" to order.totalPrice,
-            "status" to OrderStatusValue.PENDING,
-
-            "pickupSlot" to order.pickupSlot,
-            "pickupDate" to order.pickupDate,
-
-            "paymentMethod" to order.paymentMethod,
-            "paymentStatus" to PaymentStatusValue.PENDING_VERIFICATION,
-            "upiPayerName" to order.upiPayerName,
-
-            "cancelReason" to "",
-            "cancelledBy" to "",
-            "cancelledAt" to 0L,
-
-            "paymentReceivedByShopkeeper" to false,
-            "paymentReceivedType" to PaymentReceivedType.NONE,
-
-            "refundStatus" to RefundStatusValue.NONE,
-            "refundAmount" to 0.0,
-            "refundReferenceId" to "",
-            "refundSettledAt" to 0L,
-            "refundNote" to "",
-
-            "createdAt" to order.createdAt,
-            "updatedAt" to order.updatedAt
-        )
-    }
-
-    private fun logOrderCreateDebug(
-        studentId: String,
-        orderId: String,
-        finalOrder: Order,
-        orderData: Map<String, Any>,
-        userDoc: DocumentSnapshot,
-        shopDoc: DocumentSnapshot
-    ) {
-        val localRuleCheck =
-            userDoc.exists() &&
-                    userDoc.getString("role") in listOf("student", "user", "Student", "User") &&
-                    userDoc.getBoolean("isBlocked") != true &&
-                    userDoc.getBoolean("isDeleted") != true &&
-                    finalOrder.orderId == orderId &&
-                    finalOrder.studentId == studentId &&
-                    finalOrder.shopId.isNotBlank() &&
-                    shopDoc.exists() &&
-                    shopDoc.getBoolean("isApproved") == true &&
-                    shopDoc.getBoolean("isOpen") == true &&
-                    shopDoc.getBoolean("isBlocked") != true &&
-                    shopDoc.getBoolean("isDeleted") != true &&
-                    shopDoc.getBoolean("isVisible") != false &&
-                    finalOrder.items.isNotEmpty() &&
-                    finalOrder.totalPrice > 0 &&
-                    finalOrder.status == OrderStatusValue.PENDING &&
-                    finalOrder.paymentStatus == PaymentStatusValue.PENDING_VERIFICATION
-
-        Log.e(
-            "ORDER_RULE_DEBUG",
-            """
-            -------- ORDER CREATE DEBUG --------
-            LOCAL_RULE_CHECK_SHOULD_PASS=$localRuleCheck
-
-            authUid=$studentId
-            orderDocId=$orderId
-
-            orderData.orderId=${orderData["orderId"]}
-            orderIdMatches=${orderData["orderId"] == orderId}
-
-            orderData.studentId=${orderData["studentId"]}
-            studentMatchesAuth=${orderData["studentId"] == studentId}
-
-            userExists=${userDoc.exists()}
-            userRole=${userDoc.getString("role")}
-            userIsBlocked=${userDoc.getBoolean("isBlocked")}
-            userIsDeleted=${userDoc.getBoolean("isDeleted")}
-
-            orderData.shopId=${orderData["shopId"]}
-            shopPath=shops/${orderData["shopId"]}
-            shopExists=${shopDoc.exists()}
-            shopFieldShopId=${shopDoc.getString("shopId")}
-            shopIsOpen=${shopDoc.getBoolean("isOpen")}
-            shopIsApproved=${shopDoc.getBoolean("isApproved")}
-            shopIsBlocked=${shopDoc.getBoolean("isBlocked")}
-            shopIsDeleted=${shopDoc.getBoolean("isDeleted")}
-            shopIsVisible=${shopDoc.getBoolean("isVisible")}
-
-            itemsSize=${finalOrder.items.size}
-            itemShopIds=${finalOrder.items.map { it.shopId }.distinct()}
-            totalPrice=${orderData["totalPrice"]}
-            status=${orderData["status"]}
-            paymentStatus=${orderData["paymentStatus"]}
-            pickupSlot=${orderData["pickupSlot"]}
-            pickupDate=${orderData["pickupDate"]}
-            paymentMethod=${orderData["paymentMethod"]}
-
-            orderDataKeys=${orderData.keys}
-            ------------------------------------
-            """.trimIndent()
-        )
+            else ->
+                e.message ?: "Failed to place order"
+        }
     }
 
     suspend fun getOrderById(orderId: String): Result<Order> {
@@ -553,6 +430,7 @@ class OrderRepository @Inject constructor(
 
     companion object {
         const val PAGE_SIZE = 10L
+        private const val CREATE_ORDER_FUNCTION = "createOrder"
 
         val TERMINAL_STATUSES = listOf(
             OrderStatusValue.PICKED_UP,
