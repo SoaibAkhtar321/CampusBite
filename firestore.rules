@@ -144,17 +144,13 @@ service cloud.firestore {
     // ── orders ────────────────────────────────────────────────────────────────
 
     match /orders/{orderId} {
-  allow create: if isStudent()
-    && request.resource.data.orderId == orderId
-    && request.resource.data.studentId == request.auth.uid
-    && request.resource.data.shopId is string
-    && shopIsOrderable(request.resource.data.shopId)
-    && request.resource.data.items is list
-    && request.resource.data.items.size() > 0
-    && request.resource.data.totalPrice is number
-    && request.resource.data.totalPrice > 0
-    && request.resource.data.status == "pending"
-    && request.resource.data.paymentStatus == "pending_verification";
+  // Order creation is server-only: the createOrder Cloud Function validates
+  // price, shop/menu state, and slot capacity inside a transaction (using
+  // the Admin SDK, which bypasses these rules) before writing the order and
+  // incrementing slotAvailability atomically. Allowing any client-side
+  // create here would let a client set its own totalPrice/status and skip
+  // slot-capacity enforcement entirely, so it is denied unconditionally.
+  allow create: if false;
 
   allow read: if isAdmin()
     || (isStudent() && resource.data.studentId == request.auth.uid)
@@ -166,19 +162,19 @@ service cloud.firestore {
 }
 
     // ── slotAvailability ──────────────────────────────────────────────────────
+    //
+    // Slot counters are only ever mutated inside the createOrder transaction
+    // via the Admin SDK (which bypasses these rules), so every counter
+    // increment is paired with the order that consumed the slot. Any
+    // client-side write path here (including shopkeeper/admin) would let a
+    // client alter counts without a corresponding order, defeating the
+    // atomic slot-locking guarantee. Writes are therefore Cloud
+    // Functions/Admin SDK only; reads remain open to signed-in users so the
+    // app can display live slot availability.
 
     match /slotAvailability/{slotId} {
       allow read: if isSignedIn();
-      allow create: if isAdmin()
-        || (isShopkeeper() && request.resource.data.shopId == userShopId());
-      allow update: if isAdmin()
-        || (
-          isShopkeeper()
-          && resource.data.shopId == userShopId()
-          && request.resource.data.shopId == resource.data.shopId
-        );
-      allow delete: if isAdmin()
-        || (isShopkeeper() && resource.data.shopId == userShopId());
+      allow write: if false;
     }
 
     // ── shopAnalytics ─────────────────────────────────────────────────────────
