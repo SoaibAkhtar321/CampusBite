@@ -15,6 +15,13 @@ const FieldValue = admin.firestore.FieldValue;
 const REGION = "us-central1";
 const ORDER_NOTIFICATION_CHANNEL_ID = "campusbite_order_alerts_v2";
 const MAX_CART_ITEMS = 30;
+const MAX_ITEM_QUANTITY = 20;
+const MAX_COOKING_NOTE_LENGTH = 300;
+const MAX_UPI_PAYER_NAME_LENGTH = 80;
+const VALID_PAYMENT_METHODS = ["UPI_QR"];
+const CLIENT_REQUEST_ID_REGEX = /^[A-Za-z0-9_-]{1,64}$/;
+const PICKUP_DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
+const PICKUP_SLOT_REGEX = /^(0[1-9]|1[0-2]):[0-5]\d (AM|PM)$/;
 
 const ORDER_STATUSES = [
   "pending",
@@ -46,6 +53,16 @@ function requireAuth(request) {
 
 function cleanString(value) {
   return String(value || "").trim();
+}
+function isValidCalendarDate(dateStr) {
+  const [year, month, day] = dateStr.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+
+  return (
+    date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day
+  );
 }
 
 function getUniqueTokens(user) {
