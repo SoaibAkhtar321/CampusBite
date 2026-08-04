@@ -42,6 +42,31 @@ const VALID_TRANSITIONS = {
   cancelled: [],
 };
 
+// Payment statuses written only by Cloud Functions.
+const PAYMENT_STATUS = {
+  PENDING_VERIFICATION: "pending_verification",
+  PAID: "paid",
+  PAYMENT_NOT_RECEIVED: "payment_not_received",
+  REFUND_PENDING: "refund_pending",
+  REFUNDED: "refunded",
+};
+
+const REFUND_STATUS = {
+  NONE: "none",
+  PENDING: "pending",
+  SETTLED: "settled",
+};
+
+const PAYMENT_VERIFIABLE = new Set([
+  PAYMENT_STATUS.PENDING_VERIFICATION,
+]);
+
+const PAYMENT_TERMINAL = new Set([
+  PAYMENT_STATUS.PAYMENT_NOT_RECEIVED,
+  PAYMENT_STATUS.REFUND_PENDING,
+  PAYMENT_STATUS.REFUNDED,
+]);
+
 function requireAuth(request) {
   const uid = request.auth?.uid;
 
@@ -55,6 +80,7 @@ function requireAuth(request) {
 function cleanString(value) {
   return String(value || "").trim();
 }
+
 function isValidCalendarDate(dateStr) {
   const [year, month, day] = dateStr.split("-").map(Number);
   const date = new Date(Date.UTC(year, month - 1, day));
@@ -333,7 +359,10 @@ function validateCreateOrderRequest(data) {
       );
     }
 
-    return { itemId, quantity };
+    return {
+      itemId,
+      quantity,
+    };
   });
 
   return {
@@ -370,10 +399,16 @@ function isSlotClosed(shop, slotData, pickupSlot) {
 
 function computeCartHash(shopId, items) {
   const sortedItems = [...items]
-    .map((item) => ({ itemId: item.itemId, quantity: item.quantity }))
+    .map((item) => ({
+      itemId: item.itemId,
+      quantity: item.quantity,
+    }))
     .sort((a, b) => a.itemId.localeCompare(b.itemId));
 
-  const payload = JSON.stringify({ shopId, items: sortedItems });
+  const payload = JSON.stringify({
+    shopId,
+    items: sortedItems,
+  });
 
   return crypto.createHash("sha256").update(payload).digest("hex");
 }
@@ -428,14 +463,11 @@ async function sendMulticastNotification({
 }) {
   const message = {
     tokens,
-
     notification: {
       title,
       body,
     },
-
     data,
-
     android: {
       priority: "high",
       ttl: 60 * 60 * 1000,
@@ -525,13 +557,32 @@ exports.updateOrderStatus = onCall(
         updatedBy: uid,
       };
 
+      // One-way, idempotent payment verification on start-preparing.
       if (
         (currentStatus === "pending" || currentStatus === "accepted") &&
         newStatus === "preparing"
       ) {
-        updates.paymentStatus = "paid";
-        updates.paymentVerifiedAt = now;
-        updates.paymentVerifiedBy = uid;
+        const currentPaymentStatus = cleanString(order.paymentStatus).toLowerCase();
+
+        if (PAYMENT_TERMINAL.has(currentPaymentStatus)) {
+          throw new HttpsError(
+            "failed-precondition",
+            `Cannot mark order preparing: payment is in '${currentPaymentStatus}' state.`
+          );
+        }
+
+        if (currentPaymentStatus === PAYMENT_STATUS.PAID) {
+          // Already verified — keep existing verification metadata.
+        } else if (PAYMENT_VERIFIABLE.has(currentPaymentStatus)) {
+          updates.paymentStatus = PAYMENT_STATUS.PAID;
+          updates.paymentVerifiedAt = now;
+          updates.paymentVerifiedBy = uid;
+        } else {
+          throw new HttpsError(
+            "failed-precondition",
+            `Cannot verify payment from status '${currentPaymentStatus || "unknown"}'.`
+          );
+        }
       }
 
       if (newStatus === "ready") {
@@ -609,6 +660,13 @@ exports.cancelOrderByShopkeeper = onCall(
         );
       }
 
+      if (currentStatus === "cancelled") {
+        throw new HttpsError(
+          "failed-precondition",
+          "Order is already cancelled."
+        );
+      }
+
       if (
         !["pending", "accepted", "preparing", "ready"].includes(currentStatus)
       ) {
@@ -618,8 +676,40 @@ exports.cancelOrderByShopkeeper = onCall(
         );
       }
 
+      const currentPaymentStatus = cleanString(order.paymentStatus).toLowerCase();
+      const currentRefundStatus = cleanString(order.refundStatus).toLowerCase();
+
+      if (
+        currentPaymentStatus === PAYMENT_STATUS.REFUNDED ||
+        currentRefundStatus === REFUND_STATUS.SETTLED
+      ) {
+        throw new HttpsError(
+          "failed-precondition",
+          "Payment/refund is already settled; cannot cancel again."
+        );
+      }
+
+      if (currentPaymentStatus === PAYMENT_STATUS.REFUND_PENDING) {
+        throw new HttpsError(
+          "failed-precondition",
+          "Order already cancelled with refund pending."
+        );
+      }
+
+      // Unverified orders may only be cancelled as payment not received.
+      let effectivePaymentReceivedType = paymentReceivedType;
+      if (currentPaymentStatus === PAYMENT_STATUS.PENDING_VERIFICATION) {
+        if (paymentReceivedType !== "none") {
+          throw new HttpsError(
+            "failed-precondition",
+            "Payment was never verified; cancel as payment not received."
+          );
+        }
+        effectivePaymentReceivedType = "none";
+      }
+
       const paymentFields = buildCancelPaymentFields(
-        paymentReceivedType,
+        effectivePaymentReceivedType,
         paymentReceivedAmount,
         order.totalPrice
       );
@@ -713,18 +803,44 @@ exports.markRefundSettled = onCall(
         );
       }
 
-      if (order.refundStatus !== "pending") {
+      const currentPaymentStatus = cleanString(order.paymentStatus).toLowerCase();
+      const currentRefundStatus = cleanString(order.refundStatus).toLowerCase();
+
+      // Idempotent: same reference already settled → success no-op.
+      if (
+        currentRefundStatus === REFUND_STATUS.SETTLED &&
+        currentPaymentStatus === PAYMENT_STATUS.REFUNDED
+      ) {
+        const existingRef = cleanString(order.refundReferenceId);
+        if (existingRef && existingRef === refundReferenceId) {
+          logger.info("markRefundSettled idempotent hit", { orderId });
+          return;
+        }
+        throw new HttpsError(
+          "failed-precondition",
+          "Refund is already settled with a different reference."
+        );
+      }
+
+      if (currentRefundStatus !== REFUND_STATUS.PENDING) {
         throw new HttpsError(
           "failed-precondition",
           "This order is not in refund pending state."
         );
       }
 
+      if (currentPaymentStatus !== PAYMENT_STATUS.REFUND_PENDING) {
+        throw new HttpsError(
+          "failed-precondition",
+          `Cannot settle refund from payment status '${currentPaymentStatus}'.`
+        );
+      }
+
       const now = Date.now();
 
       tx.update(orderRef, {
-        paymentStatus: "refunded",
-        refundStatus: "settled",
+        paymentStatus: PAYMENT_STATUS.REFUNDED,
+        refundStatus: REFUND_STATUS.SETTLED,
         refundReferenceId,
         refundNote,
         refundSettledAt: now,
@@ -897,7 +1013,6 @@ exports.createOrder = onCall(
 
       const orderData = {
         orderId: orderRef.id,
-
         shopId,
         shopName: cleanString(shop.name),
         shopkeeperPhone: cleanString(shop.phone),
@@ -932,7 +1047,6 @@ exports.createOrder = onCall(
         refundNote: "",
 
         clientRequestId,
-
         createdAt: now,
         updatedAt: now,
       };
@@ -1068,7 +1182,6 @@ exports.sendOrderStatusNotificationToStudent = onDocumentUpdated(
     });
 
     const invalidTokens = getInvalidTokens(response, tokens);
-
     await removeInvalidTokensFromUser(studentId, student, invalidTokens);
   }
 );
@@ -1144,6 +1257,7 @@ exports.sendNewOrderNotificationToShopkeeper = onDocumentCreated(
 
     const customerName = cleanString(order.studentName) || "A student";
     const totalPrice = Number(order.totalPrice || 0);
+
     const title = "New Order Received";
     const body = `${customerName} placed a new order of ₹${totalPrice}.`;
 
