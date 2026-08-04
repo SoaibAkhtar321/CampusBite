@@ -22,6 +22,7 @@ const VALID_PAYMENT_METHODS = ["UPI_QR"];
 const CLIENT_REQUEST_ID_REGEX = /^[A-Za-z0-9_-]{1,64}$/;
 const PICKUP_DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 const PICKUP_SLOT_REGEX = /^(0[1-9]|1[0-2]):[0-5]\d (AM|PM)$/;
+const DEFAULT_MAX_ORDERS_PER_SLOT = 5;
 
 const ORDER_STATUSES = [
   "pending",
@@ -344,6 +345,27 @@ function validateCreateOrderRequest(data) {
     upiPayerName,
     items: cleanedItems,
   };
+}
+
+function buildSlotId(shopId, date, slot) {
+  return `${shopId}_${date}_${slot}`
+    .replace(/ /g, "_")
+    .replace(/:/g, "_")
+    .replace(/\//g, "_");
+}
+
+function getMaxOrdersPerSlot(shop) {
+  const value = Number(shop?.maxOrdersPerSlot);
+
+  return Number.isInteger(value) && value > 0
+    ? value
+    : DEFAULT_MAX_ORDERS_PER_SLOT;
+}
+
+function isSlotClosed(shop, slotData, pickupSlot) {
+  const closedSlots = Array.isArray(shop?.closedSlots) ? shop.closedSlots : [];
+
+  return closedSlots.includes(pickupSlot) || slotData?.isClosed === true;
 }
 
 function computeCartHash(shopId, items) {
@@ -742,6 +764,9 @@ exports.createOrder = onCall(
     const userRef = db.collection("users").doc(uid);
     const orderRequestRef = db.collection("orderRequests").doc(clientRequestId);
     const shopRef = db.collection("shops").doc(shopId);
+    const slotRef = db
+      .collection("slotAvailability")
+      .doc(buildSlotId(shopId, pickupDate, pickupSlot));
     const menuItemRefs = items.map((item) =>
       db.collection("menuItems").doc(item.itemId)
     );
@@ -786,6 +811,25 @@ exports.createOrder = onCall(
       }
 
       const shop = shopSnap.data();
+      const maxOrdersPerSlot = getMaxOrdersPerSlot(shop);
+
+      const slotSnap = await tx.get(slotRef);
+      const slotData = slotSnap.exists ? slotSnap.data() : null;
+      const currentSlotOrderCount = Number(slotData?.orderCount || 0);
+
+      if (isSlotClosed(shop, slotData, pickupSlot)) {
+        throw new HttpsError(
+          "failed-precondition",
+          "This pickup slot is no longer available. Please select another slot."
+        );
+      }
+
+      if (currentSlotOrderCount >= maxOrdersPerSlot) {
+        throw new HttpsError(
+          "failed-precondition",
+          "This pickup slot is full. Please select another slot."
+        );
+      }
 
       const menuItemSnaps = [];
 
@@ -901,6 +945,20 @@ exports.createOrder = onCall(
         cartHash,
         createdAt: now,
       });
+
+      tx.set(
+        slotRef,
+        {
+          slotId: slotRef.id,
+          shopId,
+          date: pickupDate,
+          slot: pickupSlot,
+          maxOrders: maxOrdersPerSlot,
+          orderCount: FieldValue.increment(1),
+          updatedAt: now,
+        },
+        { merge: true }
+      );
 
       return {
         success: true,
