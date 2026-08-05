@@ -4,6 +4,7 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.campusbite.app.data.model.Order
+import com.campusbite.app.data.repository.OrderActionRepository
 import com.campusbite.app.util.OrderStatusValue
 import com.campusbite.app.util.PaymentReceivedType
 import com.campusbite.app.util.PaymentStatusValue
@@ -83,7 +84,8 @@ private data class AdminAnalyticsSnapshot(
 
 @HiltViewModel
 class AdminViewModel @Inject constructor(
-    private val firestore: FirebaseFirestore
+    private val firestore: FirebaseFirestore,
+    private val orderActionRepository: OrderActionRepository
 ) : ViewModel() {
 
     private val _shops = MutableStateFlow<List<AdminShop>>(emptyList())
@@ -1654,62 +1656,35 @@ class AdminViewModel @Inject constructor(
         }
 
         viewModelScope.launch {
-            try {
-                val cleanRefundReferenceId = refundReferenceId.trim()
-                val cleanRefundNote = refundNote.trim()
+            val cleanRefundReferenceId = refundReferenceId.trim()
+            val cleanRefundNote = refundNote.trim()
 
-                if (cleanRefundReferenceId.isBlank()) {
-                    throw IllegalStateException("Refund reference ID is required.")
-                }
-
-                val orderRef = firestore.collection("orders")
-                    .document(orderId)
-
-                firestore.runTransaction { transaction ->
-                    val orderDoc = transaction.get(orderRef)
-
-                    if (!orderDoc.exists()) {
-                        throw IllegalStateException("Order not found.")
-                    }
-
-                    val refundStatus = orderDoc.getString("refundStatus")
-                        ?.lowercase()
-                        .orEmpty()
-
-                    if (refundStatus != RefundStatusValue.REFUND_PENDING) {
-                        throw IllegalStateException("This order is not pending refund.")
-                    }
-
-                    val now = System.currentTimeMillis()
-
-                    transaction.update(
-                        orderRef,
-                        mapOf(
-                            "paymentStatus" to PaymentStatusValue.REFUNDED,
-                            "refundStatus" to RefundStatusValue.REFUNDED,
-                            "refundReferenceId" to cleanRefundReferenceId,
-                            "refundNote" to cleanRefundNote,
-                            "refundSettledAt" to now,
-                            "refundSettledBy" to "admin",
-                            "updatedAt" to now
-                        )
-                    )
-
-                    null
-                }.await()
-
-                _message.value = "Refund marked as settled by admin."
-            } catch (e: Exception) {
-                val readableError = e.readableAdminError()
-
-                Log.e(
-                    ADMIN_TAG,
-                    "FAILED WRITE: markRefundSettledByAdmin | orderId=$orderId | $readableError",
-                    e
-                )
-
-                _message.value = "Failed to mark refund settled: $readableError"
+            if (cleanRefundReferenceId.isBlank()) {
+                _message.value = "Refund reference ID is required."
+                return@launch
             }
+
+            // markRefundSettled Cloud Function accepts admin or shopkeeper.
+            val result = orderActionRepository.markRefundSettled(
+                orderId = orderId,
+                refundReferenceId = cleanRefundReferenceId,
+                refundNote = cleanRefundNote
+            )
+
+            result.fold(
+                onSuccess = {
+                    _message.value = "Refund marked as settled by admin."
+                },
+                onFailure = { error ->
+                    val readableError = error.readableAdminError()
+                    Log.e(
+                        ADMIN_TAG,
+                        "FAILED WRITE: markRefundSettledByAdmin | orderId=$orderId | $readableError",
+                        error
+                    )
+                    _message.value = "Failed to mark refund settled: $readableError"
+                }
+            )
         }
     }
 

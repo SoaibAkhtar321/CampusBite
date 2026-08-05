@@ -3,9 +3,6 @@ package com.campusbite.app.data.repository
 import android.util.Log
 import com.campusbite.app.data.model.Order
 import com.campusbite.app.util.OrderStatusValue
-import com.campusbite.app.util.PaymentReceivedType
-import com.campusbite.app.util.PaymentStatusValue
-import com.campusbite.app.util.RefundStatusValue
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
@@ -228,130 +225,85 @@ class OrderRepository @Inject constructor(
         }
     }
 
+    /**
+     * Cancels an order exclusively through the `cancelOrderByShopkeeper`
+     * Cloud Function. Clients must not write payment/status fields directly.
+     */
     suspend fun cancelOrderByShopkeeper(
         orderId: String,
         paymentReceivedType: String,
         cancelReason: String
     ): Result<Unit> {
         return try {
+            val user = auth.currentUser
+                ?: return Result.failure(Exception("User not logged in"))
+
             if (orderId.isBlank()) {
                 return Result.failure(Exception("Order ID is missing"))
             }
 
-            val cleanPaymentType = paymentReceivedType.trim().lowercase()
-            val cleanReason = cancelReason.trim()
+            user.getIdToken(true).await()
 
-            if (
-                cleanPaymentType !in listOf(
-                    PaymentReceivedType.NONE,
-                    PaymentReceivedType.PARTIAL,
-                    PaymentReceivedType.FULL
-                )
-            ) {
-                return Result.failure(Exception("Invalid payment received type"))
-            }
-
-            val paymentReceivedByShopkeeper =
-                cleanPaymentType in listOf(
-                    PaymentReceivedType.PARTIAL,
-                    PaymentReceivedType.FULL
-                )
-
-            if (paymentReceivedByShopkeeper && cleanReason.isBlank()) {
-                return Result.failure(Exception("Please select a cancellation reason"))
-            }
-
-            val paymentStatus = when (cleanPaymentType) {
-                PaymentReceivedType.PARTIAL ->
-                    PaymentStatusValue.PARTIAL_PAYMENT_RECEIVED
-
-                PaymentReceivedType.FULL ->
-                    PaymentStatusValue.PAID
-
-                else ->
-                    PaymentStatusValue.PAYMENT_NOT_RECEIVED
-            }
-
-            val refundStatus = if (paymentReceivedByShopkeeper) {
-                RefundStatusValue.REFUND_PENDING
-            } else {
-                RefundStatusValue.NONE
-            }
-
-            val finalCancelReason = when {
-                cleanReason.isNotBlank() ->
-                    cleanReason
-
-                cleanPaymentType == PaymentReceivedType.NONE ->
-                    "Payment not received"
-
-                else ->
-                    "Order cancelled after payment received"
-            }
-
-            val now = System.currentTimeMillis()
-
-            firestore.collection("orders")
-                .document(orderId)
-                .update(
+            functions
+                .getHttpsCallable(CANCEL_ORDER_BY_SHOPKEEPER_FUNCTION)
+                .call(
                     mapOf(
-                        "status" to OrderStatusValue.CANCELLED,
-                        "paymentStatus" to paymentStatus,
-                        "cancelReason" to finalCancelReason,
-                        "cancelledBy" to "shopkeeper",
-                        "cancelledAt" to now,
-                        "paymentReceivedByShopkeeper" to paymentReceivedByShopkeeper,
-                        "paymentReceivedType" to cleanPaymentType,
-                        "refundStatus" to refundStatus,
-                        "refundReferenceId" to "",
-                        "refundSettledAt" to 0L,
-                        "refundNote" to "",
-                        "updatedAt" to now
+                        "orderId" to orderId,
+                        "paymentReceivedType" to paymentReceivedType,
+                        "paymentReceivedAmount" to 0.0,
+                        "reason" to cancelReason
                     )
                 )
                 .await()
 
             Result.success(Unit)
+        } catch (e: FirebaseFunctionsException) {
+            Log.e("OrderRepository", "cancelOrderByShopkeeper failed: ${e.code}", e)
+            Result.failure(Exception(e.message ?: "Failed to cancel order", e))
         } catch (e: Exception) {
             Log.e("OrderRepository", "Failed to cancel order: $orderId", e)
             Result.failure(e)
         }
     }
 
+    /**
+     * Settles a refund exclusively through the `markRefundSettled`
+     * Cloud Function so payment/refund transitions stay server-validated.
+     */
     suspend fun markRefundSettled(
         orderId: String,
         refundReferenceId: String,
         refundNote: String
     ): Result<Unit> {
         return try {
+            val user = auth.currentUser
+                ?: return Result.failure(Exception("User not logged in"))
+
             if (orderId.isBlank()) {
                 return Result.failure(Exception("Order ID is missing"))
             }
 
-            val cleanRefId = refundReferenceId.trim()
-            val cleanNote = refundNote.trim()
-
-            if (cleanRefId.isBlank()) {
+            if (refundReferenceId.isBlank()) {
                 return Result.failure(Exception("Refund reference ID is required"))
             }
 
-            val now = System.currentTimeMillis()
+            user.getIdToken(true).await()
 
-            firestore.collection("orders")
-                .document(orderId)
-                .update(
+            functions
+                .getHttpsCallable(MARK_REFUND_SETTLED_FUNCTION)
+                .call(
                     mapOf(
-                        "paymentStatus" to PaymentStatusValue.REFUNDED,
-                        "refundStatus" to RefundStatusValue.REFUNDED,
-                        "refundReferenceId" to cleanRefId,
-                        "refundNote" to cleanNote,
-                        "refundSettledAt" to now,
-                        "updatedAt" to now
+                        "orderId" to orderId,
+                        "refundReferenceId" to refundReferenceId,
+                        "refundNote" to refundNote
                     )
                 )
                 .await()
 
             Result.success(Unit)
+        } catch (e: FirebaseFunctionsException) {
+            Log.e("OrderRepository", "markRefundSettled failed: ${e.code}", e)
+            Result.failure(Exception(e.message ?: "Failed to mark refund settled", e))
         } catch (e: Exception) {
             Log.e("OrderRepository", "Failed to mark refund settled: $orderId", e)
             Result.failure(e)
@@ -431,6 +383,8 @@ class OrderRepository @Inject constructor(
     companion object {
         const val PAGE_SIZE = 10L
         private const val CREATE_ORDER_FUNCTION = "createOrder"
+        private const val CANCEL_ORDER_BY_SHOPKEEPER_FUNCTION = "cancelOrderByShopkeeper"
+        private const val MARK_REFUND_SETTLED_FUNCTION = "markRefundSettled"
 
         val TERMINAL_STATUSES = listOf(
             OrderStatusValue.PICKED_UP,
