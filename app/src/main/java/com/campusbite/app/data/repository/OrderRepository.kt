@@ -99,7 +99,10 @@ class OrderRepository @Inject constructor(
     private fun describeFunctionError(e: FirebaseFunctionsException): String {
         return when (e.code) {
             FirebaseFunctionsException.Code.UNAUTHENTICATED ->
-                "User not logged in"
+                // Firebase maps BOTH "invalid/missing ID token" and
+                // "App Check enforcement failure" to UNAUTHENTICATED,
+                // so this message must not assume it's a login problem.
+                "Could not verify your session or device. Please check your connection and try again."
 
             FirebaseFunctionsException.Code.ALREADY_EXISTS ->
                 "This order request was already used with a different cart. " +
