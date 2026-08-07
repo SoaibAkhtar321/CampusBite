@@ -23,6 +23,8 @@ const CLIENT_REQUEST_ID_REGEX = /^[A-Za-z0-9_-]{1,64}$/;
 const PICKUP_DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 const PICKUP_SLOT_REGEX = /^(0[1-9]|1[0-2]):[0-5]\d (AM|PM)$/;
 const DEFAULT_MAX_ORDERS_PER_SLOT = 5;
+const CREATE_ORDER_RATE_LIMIT_MAX_ATTEMPTS = 5;
+const CREATE_ORDER_RATE_LIMIT_WINDOW_MS = 60 * 1000;
 
 const ORDER_STATUSES = [
   "pending",
@@ -75,6 +77,18 @@ function requireAuth(request) {
   }
 
   return uid;
+}
+
+function logIfUnexpected(functionName, context, err) {
+  if (err instanceof HttpsError) {
+    return;
+  }
+
+  logger.error(`${functionName} failed unexpectedly`, {
+    ...context,
+    code: err.code || "unknown",
+    message: err.message,
+  });
 }
 
 function cleanString(value) {
@@ -495,111 +509,116 @@ exports.updateOrderStatus = onCall(
     const orderId = cleanString(request.data?.orderId);
     const newStatus = cleanString(request.data?.newStatus).toLowerCase();
 
-    if (!orderId) {
-      throw new HttpsError("invalid-argument", "orderId is required.");
-    }
-
-    if (!ORDER_STATUSES.includes(newStatus)) {
-      throw new HttpsError("invalid-argument", "Invalid order status.");
-    }
-
-    const shopkeeper = await getApprovedShopkeeperOrThrow(uid);
-    const orderRef = db.collection("orders").doc(orderId);
-
-    await db.runTransaction(async (tx) => {
-      const orderSnap = await tx.get(orderRef);
-
-      if (!orderSnap.exists) {
-        throw new HttpsError("not-found", "Order not found.");
+    try {
+      if (!orderId) {
+        throw new HttpsError("invalid-argument", "orderId is required.");
       }
 
-      const order = orderSnap.data();
-      const currentStatus = cleanString(order.status).toLowerCase();
-
-      if (!currentStatus) {
-        throw new HttpsError(
-          "failed-precondition",
-          "Order current status is missing."
-        );
+      if (!ORDER_STATUSES.includes(newStatus)) {
+        throw new HttpsError("invalid-argument", "Invalid order status.");
       }
 
-      if (order.shopId !== shopkeeper.shopId) {
-        throw new HttpsError(
-          "permission-denied",
-          "This order does not belong to your shop."
-        );
-      }
+      const shopkeeper = await getApprovedShopkeeperOrThrow(uid);
+      const orderRef = db.collection("orders").doc(orderId);
 
-      if (currentStatus === newStatus) {
-        logger.info("Same status update ignored", {
-          orderId,
-          currentStatus,
-          newStatus,
-        });
+      await db.runTransaction(async (tx) => {
+        const orderSnap = await tx.get(orderRef);
 
-        return;
-      }
+        if (!orderSnap.exists) {
+          throw new HttpsError("not-found", "Order not found.");
+        }
 
-      const allowedNextStatuses = VALID_TRANSITIONS[currentStatus] || [];
+        const order = orderSnap.data();
+        const currentStatus = cleanString(order.status).toLowerCase();
 
-      if (!allowedNextStatuses.includes(newStatus)) {
-        throw new HttpsError(
-          "failed-precondition",
-          `Invalid order transition: ${currentStatus} to ${newStatus}.`
-        );
-      }
+        if (!currentStatus) {
+          throw new HttpsError(
+            "failed-precondition",
+            "Order current status is missing."
+          );
+        }
 
-      const now = Date.now();
+        if (order.shopId !== shopkeeper.shopId) {
+          throw new HttpsError(
+            "permission-denied",
+            "This order does not belong to your shop."
+          );
+        }
 
-      const updates = {
-        status: newStatus,
-        updatedAt: now,
-        updatedBy: uid,
+        if (currentStatus === newStatus) {
+          logger.info("Same status update ignored", {
+            orderId,
+            currentStatus,
+            newStatus,
+          });
+
+          return;
+        }
+
+        const allowedNextStatuses = VALID_TRANSITIONS[currentStatus] || [];
+
+        if (!allowedNextStatuses.includes(newStatus)) {
+          throw new HttpsError(
+            "failed-precondition",
+            `Invalid order transition: ${currentStatus} to ${newStatus}.`
+          );
+        }
+
+        const now = Date.now();
+
+        const updates = {
+          status: newStatus,
+          updatedAt: now,
+          updatedBy: uid,
+        };
+
+        // One-way, idempotent payment verification on start-preparing.
+        if (
+          (currentStatus === "pending" || currentStatus === "accepted") &&
+          newStatus === "preparing"
+        ) {
+          const currentPaymentStatus = cleanString(order.paymentStatus).toLowerCase();
+
+          if (PAYMENT_TERMINAL.has(currentPaymentStatus)) {
+            throw new HttpsError(
+              "failed-precondition",
+              `Cannot mark order preparing: payment is in '${currentPaymentStatus}' state.`
+            );
+          }
+
+          if (currentPaymentStatus === PAYMENT_STATUS.PAID) {
+            // Already verified — keep existing verification metadata.
+          } else if (PAYMENT_VERIFIABLE.has(currentPaymentStatus)) {
+            updates.paymentStatus = PAYMENT_STATUS.PAID;
+            updates.paymentVerifiedAt = now;
+            updates.paymentVerifiedBy = uid;
+          } else {
+            throw new HttpsError(
+              "failed-precondition",
+              `Cannot verify payment from status '${currentPaymentStatus || "unknown"}'.`
+            );
+          }
+        }
+
+        if (newStatus === "ready") {
+          updates.readyAt = now;
+        }
+
+        if (newStatus === "picked_up") {
+          updates.pickedUpAt = now;
+        }
+
+        tx.update(orderRef, updates);
+      });
+
+      return {
+        success: true,
+        message: "Order status updated successfully.",
       };
-
-      // One-way, idempotent payment verification on start-preparing.
-      if (
-        (currentStatus === "pending" || currentStatus === "accepted") &&
-        newStatus === "preparing"
-      ) {
-        const currentPaymentStatus = cleanString(order.paymentStatus).toLowerCase();
-
-        if (PAYMENT_TERMINAL.has(currentPaymentStatus)) {
-          throw new HttpsError(
-            "failed-precondition",
-            `Cannot mark order preparing: payment is in '${currentPaymentStatus}' state.`
-          );
-        }
-
-        if (currentPaymentStatus === PAYMENT_STATUS.PAID) {
-          // Already verified — keep existing verification metadata.
-        } else if (PAYMENT_VERIFIABLE.has(currentPaymentStatus)) {
-          updates.paymentStatus = PAYMENT_STATUS.PAID;
-          updates.paymentVerifiedAt = now;
-          updates.paymentVerifiedBy = uid;
-        } else {
-          throw new HttpsError(
-            "failed-precondition",
-            `Cannot verify payment from status '${currentPaymentStatus || "unknown"}'.`
-          );
-        }
-      }
-
-      if (newStatus === "ready") {
-        updates.readyAt = now;
-      }
-
-      if (newStatus === "picked_up") {
-        updates.pickedUpAt = now;
-      }
-
-      tx.update(orderRef, updates);
-    });
-
-    return {
-      success: true,
-      message: "Order status updated successfully.",
-    };
+    } catch (err) {
+      logIfUnexpected("updateOrderStatus", { uid, orderId }, err);
+      throw err;
+    }
   }
 );
 
@@ -640,116 +659,121 @@ exports.cancelOrderByShopkeeper = onCall(
       );
     }
 
-    const shopkeeper = await getApprovedShopkeeperOrThrow(uid);
-    const orderRef = db.collection("orders").doc(orderId);
+    try {
+      const shopkeeper = await getApprovedShopkeeperOrThrow(uid);
+      const orderRef = db.collection("orders").doc(orderId);
 
-    await db.runTransaction(async (tx) => {
-      const orderSnap = await tx.get(orderRef);
+      await db.runTransaction(async (tx) => {
+        const orderSnap = await tx.get(orderRef);
 
-      if (!orderSnap.exists) {
-        throw new HttpsError("not-found", "Order not found.");
-      }
+        if (!orderSnap.exists) {
+          throw new HttpsError("not-found", "Order not found.");
+        }
 
-      const order = orderSnap.data();
-      const currentStatus = cleanString(order.status).toLowerCase();
+        const order = orderSnap.data();
+        const currentStatus = cleanString(order.status).toLowerCase();
 
-      if (order.shopId !== shopkeeper.shopId) {
-        throw new HttpsError(
-          "permission-denied",
-          "This order does not belong to your shop."
-        );
-      }
-
-      if (currentStatus === "cancelled") {
-        throw new HttpsError(
-          "failed-precondition",
-          "Order is already cancelled."
-        );
-      }
-
-      if (
-        !["pending", "accepted", "preparing", "ready"].includes(currentStatus)
-      ) {
-        throw new HttpsError(
-          "failed-precondition",
-          `Order cannot be cancelled from status: ${currentStatus}.`
-        );
-      }
-
-      const currentPaymentStatus = cleanString(order.paymentStatus).toLowerCase();
-      const currentRefundStatus = cleanString(order.refundStatus).toLowerCase();
-
-      if (
-        currentPaymentStatus === PAYMENT_STATUS.REFUNDED ||
-        currentRefundStatus === REFUND_STATUS.SETTLED
-      ) {
-        throw new HttpsError(
-          "failed-precondition",
-          "Payment/refund is already settled; cannot cancel again."
-        );
-      }
-
-      if (currentPaymentStatus === PAYMENT_STATUS.REFUND_PENDING) {
-        throw new HttpsError(
-          "failed-precondition",
-          "Order already cancelled with refund pending."
-        );
-      }
-
-      // Unverified orders may only be cancelled as payment not received.
-      let effectivePaymentReceivedType = paymentReceivedType;
-      if (currentPaymentStatus === PAYMENT_STATUS.PENDING_VERIFICATION) {
-        if (paymentReceivedType !== "none") {
+        if (order.shopId !== shopkeeper.shopId) {
           throw new HttpsError(
-            "failed-precondition",
-            "Payment was never verified; cancel as payment not received."
+            "permission-denied",
+            "This order does not belong to your shop."
           );
         }
-        effectivePaymentReceivedType = "none";
-      }
 
-      const paymentFields = buildCancelPaymentFields(
-        effectivePaymentReceivedType,
-        paymentReceivedAmount,
-        order.totalPrice
-      );
+        if (currentStatus === "cancelled") {
+          throw new HttpsError(
+            "failed-precondition",
+            "Order is already cancelled."
+          );
+        }
 
-      const now = Date.now();
+        if (
+          !["pending", "accepted", "preparing", "ready"].includes(currentStatus)
+        ) {
+          throw new HttpsError(
+            "failed-precondition",
+            `Order cannot be cancelled from status: ${currentStatus}.`
+          );
+        }
 
-      const updates = {
-        status: "cancelled",
+        const currentPaymentStatus = cleanString(order.paymentStatus).toLowerCase();
+        const currentRefundStatus = cleanString(order.refundStatus).toLowerCase();
 
-        cancelReason: reason,
-        cancellationReason: reason,
+        if (
+          currentPaymentStatus === PAYMENT_STATUS.REFUNDED ||
+          currentRefundStatus === REFUND_STATUS.SETTLED
+        ) {
+          throw new HttpsError(
+            "failed-precondition",
+            "Payment/refund is already settled; cannot cancel again."
+          );
+        }
 
-        cancelledBy: uid,
-        cancelledByRole: "shopkeeper",
-        cancelledAt: now,
+        if (currentPaymentStatus === PAYMENT_STATUS.REFUND_PENDING) {
+          throw new HttpsError(
+            "failed-precondition",
+            "Order already cancelled with refund pending."
+          );
+        }
 
-        paymentReceivedByShopkeeper:
-          paymentFields.paymentReceivedByShopkeeper,
-        paymentReceivedType: paymentFields.paymentReceivedType,
-        paymentReceivedAmount: paymentFields.paymentReceivedAmount,
+        // Unverified orders may only be cancelled as payment not received.
+        let effectivePaymentReceivedType = paymentReceivedType;
+        if (currentPaymentStatus === PAYMENT_STATUS.PENDING_VERIFICATION) {
+          if (paymentReceivedType !== "none") {
+            throw new HttpsError(
+              "failed-precondition",
+              "Payment was never verified; cancel as payment not received."
+            );
+          }
+          effectivePaymentReceivedType = "none";
+        }
 
-        paymentStatus: paymentFields.paymentStatus,
-        refundStatus: paymentFields.refundStatus,
-        refundAmount: paymentFields.refundAmount,
+        const paymentFields = buildCancelPaymentFields(
+          effectivePaymentReceivedType,
+          paymentReceivedAmount,
+          order.totalPrice
+        );
 
-        refundReferenceId: "",
-        refundSettledAt: 0,
-        refundNote: "",
+        const now = Date.now();
 
-        updatedAt: now,
-        updatedBy: uid,
+        const updates = {
+          status: "cancelled",
+
+          cancelReason: reason,
+          cancellationReason: reason,
+
+          cancelledBy: uid,
+          cancelledByRole: "shopkeeper",
+          cancelledAt: now,
+
+          paymentReceivedByShopkeeper:
+            paymentFields.paymentReceivedByShopkeeper,
+          paymentReceivedType: paymentFields.paymentReceivedType,
+          paymentReceivedAmount: paymentFields.paymentReceivedAmount,
+
+          paymentStatus: paymentFields.paymentStatus,
+          refundStatus: paymentFields.refundStatus,
+          refundAmount: paymentFields.refundAmount,
+
+          refundReferenceId: "",
+          refundSettledAt: 0,
+          refundNote: "",
+
+          updatedAt: now,
+          updatedBy: uid,
+        };
+
+        tx.update(orderRef, updates);
+      });
+
+      return {
+        success: true,
+        message: "Order cancelled successfully.",
       };
-
-      tx.update(orderRef, updates);
-    });
-
-    return {
-      success: true,
-      message: "Order cancelled successfully.",
-    };
+    } catch (err) {
+      logIfUnexpected("cancelOrderByShopkeeper", { uid, orderId }, err);
+      throw err;
+    }
   }
 );
 
@@ -778,82 +802,87 @@ exports.markRefundSettled = onCall(
       );
     }
 
-    const orderRef = db.collection("orders").doc(orderId);
+    try {
+      const orderRef = db.collection("orders").doc(orderId);
 
-    await db.runTransaction(async (tx) => {
-      const orderSnap = await tx.get(orderRef);
+      await db.runTransaction(async (tx) => {
+        const orderSnap = await tx.get(orderRef);
 
-      if (!orderSnap.exists) {
-        throw new HttpsError("not-found", "Order not found.");
-      }
-
-      const order = orderSnap.data();
-
-      if (actor.role === "shopkeeper" && order.shopId !== actor.shopId) {
-        throw new HttpsError(
-          "permission-denied",
-          "This order does not belong to your shop."
-        );
-      }
-
-      if (order.status !== "cancelled") {
-        throw new HttpsError(
-          "failed-precondition",
-          "Refund can be settled only for cancelled orders."
-        );
-      }
-
-      const currentPaymentStatus = cleanString(order.paymentStatus).toLowerCase();
-      const currentRefundStatus = cleanString(order.refundStatus).toLowerCase();
-
-      // Idempotent: same reference already settled → success no-op.
-      if (
-        currentRefundStatus === REFUND_STATUS.SETTLED &&
-        currentPaymentStatus === PAYMENT_STATUS.REFUNDED
-      ) {
-        const existingRef = cleanString(order.refundReferenceId);
-        if (existingRef && existingRef === refundReferenceId) {
-          logger.info("markRefundSettled idempotent hit", { orderId });
-          return;
+        if (!orderSnap.exists) {
+          throw new HttpsError("not-found", "Order not found.");
         }
-        throw new HttpsError(
-          "failed-precondition",
-          "Refund is already settled with a different reference."
-        );
-      }
 
-      if (currentRefundStatus !== REFUND_STATUS.PENDING) {
-        throw new HttpsError(
-          "failed-precondition",
-          "This order is not in refund pending state."
-        );
-      }
+        const order = orderSnap.data();
 
-      if (currentPaymentStatus !== PAYMENT_STATUS.REFUND_PENDING) {
-        throw new HttpsError(
-          "failed-precondition",
-          `Cannot settle refund from payment status '${currentPaymentStatus}'.`
-        );
-      }
+        if (actor.role === "shopkeeper" && order.shopId !== actor.shopId) {
+          throw new HttpsError(
+            "permission-denied",
+            "This order does not belong to your shop."
+          );
+        }
 
-      const now = Date.now();
+        if (order.status !== "cancelled") {
+          throw new HttpsError(
+            "failed-precondition",
+            "Refund can be settled only for cancelled orders."
+          );
+        }
 
-      tx.update(orderRef, {
-        paymentStatus: PAYMENT_STATUS.REFUNDED,
-        refundStatus: REFUND_STATUS.SETTLED,
-        refundReferenceId,
-        refundNote,
-        refundSettledAt: now,
-        refundSettledBy: uid,
-        updatedAt: now,
-        updatedBy: uid,
+        const currentPaymentStatus = cleanString(order.paymentStatus).toLowerCase();
+        const currentRefundStatus = cleanString(order.refundStatus).toLowerCase();
+
+        // Idempotent: same reference already settled → success no-op.
+        if (
+          currentRefundStatus === REFUND_STATUS.SETTLED &&
+          currentPaymentStatus === PAYMENT_STATUS.REFUNDED
+        ) {
+          const existingRef = cleanString(order.refundReferenceId);
+          if (existingRef && existingRef === refundReferenceId) {
+            logger.info("markRefundSettled idempotent hit", { orderId });
+            return;
+          }
+          throw new HttpsError(
+            "failed-precondition",
+            "Refund is already settled with a different reference."
+          );
+        }
+
+        if (currentRefundStatus !== REFUND_STATUS.PENDING) {
+          throw new HttpsError(
+            "failed-precondition",
+            "This order is not in refund pending state."
+          );
+        }
+
+        if (currentPaymentStatus !== PAYMENT_STATUS.REFUND_PENDING) {
+          throw new HttpsError(
+            "failed-precondition",
+            `Cannot settle refund from payment status '${currentPaymentStatus}'.`
+          );
+        }
+
+        const now = Date.now();
+
+        tx.update(orderRef, {
+          paymentStatus: PAYMENT_STATUS.REFUNDED,
+          refundStatus: REFUND_STATUS.SETTLED,
+          refundReferenceId,
+          refundNote,
+          refundSettledAt: now,
+          refundSettledBy: uid,
+          updatedAt: now,
+          updatedBy: uid,
+        });
       });
-    });
 
-    return {
-      success: true,
-      message: "Refund marked as settled.",
-    };
+      return {
+        success: true,
+        message: "Refund marked as settled.",
+      };
+    } catch (err) {
+      logIfUnexpected("markRefundSettled", { uid, orderId }, err);
+      throw err;
+    }
   }
 );
 
@@ -878,6 +907,7 @@ exports.createOrder = onCall(
     const cartHash = computeCartHash(shopId, items);
 
     const userRef = db.collection("users").doc(uid);
+    const rateLimitRef = db.collection("rateLimits").doc(`createOrder_${uid}`);
     const orderRequestRef = db.collection("orderRequests").doc(clientRequestId);
     const shopRef = db.collection("shops").doc(shopId);
     const slotRef = db
@@ -887,210 +917,254 @@ exports.createOrder = onCall(
       db.collection("menuItems").doc(item.itemId)
     );
 
-    const result = await db.runTransaction(async (tx) => {
-      const userSnap = await tx.get(userRef);
+    try {
+      await db.runTransaction(async (rateTx) => {
+        const rateLimitSnap = await rateTx.get(rateLimitRef);
+        const rateLimitData = rateLimitSnap.exists ? rateLimitSnap.data() : null;
+        const rateNow = Date.now();
 
-      if (!userSnap.exists) {
-        throw new HttpsError("permission-denied", "User profile not found.");
-      }
+        let windowStart = rateNow;
+        let count = 1;
 
-      const user = userSnap.data();
+        if (
+          rateLimitData &&
+          rateNow - Number(rateLimitData.windowStart || 0) <
+            CREATE_ORDER_RATE_LIMIT_WINDOW_MS
+        ) {
+          windowStart = Number(rateLimitData.windowStart);
+          count = Number(rateLimitData.count || 0) + 1;
 
-      if (user.isBlocked === true) {
-        throw new HttpsError("permission-denied", "Your account is blocked.");
-      }
-
-      const orderRequestSnap = await tx.get(orderRequestRef);
-
-      if (orderRequestSnap.exists) {
-        const existingRequest = orderRequestSnap.data();
-
-        if (existingRequest.cartHash === cartHash) {
-          return {
-            success: true,
-            duplicate: true,
-            orderId: existingRequest.orderId,
-            message: "Order already created for this request.",
-          };
+          if (count > CREATE_ORDER_RATE_LIMIT_MAX_ATTEMPTS) {
+            throw new HttpsError(
+              "resource-exhausted",
+              "Too many order attempts. Please wait a moment and try again."
+            );
+          }
         }
 
-        throw new HttpsError(
-          "already-exists",
-          "This request ID was already used with a different cart."
-        );
-      }
-
-      const shopSnap = await tx.get(shopRef);
-
-      if (!shopSnap.exists) {
-        throw new HttpsError("not-found", "Shop not found.");
-      }
-
-      const shop = shopSnap.data();
-      const maxOrdersPerSlot = getMaxOrdersPerSlot(shop);
-
-      const slotSnap = await tx.get(slotRef);
-      const slotData = slotSnap.exists ? slotSnap.data() : null;
-      const currentSlotOrderCount = Number(slotData?.orderCount || 0);
-
-      if (isSlotClosed(shop, slotData, pickupSlot)) {
-        throw new HttpsError(
-          "failed-precondition",
-          "This pickup slot is no longer available. Please select another slot."
-        );
-      }
-
-      if (currentSlotOrderCount >= maxOrdersPerSlot) {
-        throw new HttpsError(
-          "failed-precondition",
-          "This pickup slot is full. Please select another slot."
-        );
-      }
-
-      const menuItemSnaps = [];
-
-      for (const ref of menuItemRefs) {
-        menuItemSnaps.push(await tx.get(ref));
-      }
-
-      let totalPrice = 0;
-      const orderItems = [];
-
-      for (let i = 0; i < items.length; i++) {
-        const requestedItem = items[i];
-        const menuSnap = menuItemSnaps[i];
-
-        if (!menuSnap.exists) {
-          throw new HttpsError(
-            "not-found",
-            `Menu item not found: ${requestedItem.itemId}.`
-          );
-        }
-
-        const menuItem = menuSnap.data();
-
-        if (cleanString(menuItem.shopId) !== shopId) {
-          throw new HttpsError(
-            "failed-precondition",
-            `Menu item ${requestedItem.itemId} does not belong to shop ${shopId}.`
-          );
-        }
-
-        if (menuItem.isAvailable !== true) {
-          throw new HttpsError(
-            "failed-precondition",
-            `Menu item ${requestedItem.itemId} is not available.`
-          );
-        }
-
-        const unitPrice = Number(menuItem.price);
-
-        if (!Number.isFinite(unitPrice) || unitPrice < 0) {
-          throw new HttpsError(
-            "failed-precondition",
-            `Menu item ${requestedItem.itemId} has an invalid price.`
-          );
-        }
-
-        const lineTotal = unitPrice * requestedItem.quantity;
-        totalPrice += lineTotal;
-
-        orderItems.push({
-          itemId: requestedItem.itemId,
-          name: cleanString(menuItem.name),
-          price: unitPrice,
-          quantity: requestedItem.quantity,
-          prepTimeMinutes: Number(menuItem.prepTimeMinutes || 0),
-          shopId,
-          cookingNote: "",
+        rateTx.set(rateLimitRef, {
+          windowStart,
+          count,
+          updatedAt: rateNow,
         });
-      }
-
-      totalPrice = Math.round(totalPrice * 100) / 100;
-
-      const orderRef = db.collection("orders").doc();
-      const now = Date.now();
-
-      const orderData = {
-        orderId: orderRef.id,
-        shopId,
-        shopName: cleanString(shop.name),
-        shopkeeperPhone: cleanString(shop.phone),
-
-        studentId: uid,
-        studentName: cleanString(user.name),
-        studentEmail: cleanString(user.email),
-        studentPhone: cleanString(user.phone),
-
-        items: orderItems,
-        totalPrice,
-
-        status: "pending",
-        pickupSlot,
-        pickupDate,
-
-        paymentMethod,
-        paymentStatus: "pending_verification",
-        upiPayerName,
-
-        cancelReason: "",
-        cancelledBy: "",
-        cancelledAt: 0,
-
-        paymentReceivedByShopkeeper: false,
-        paymentReceivedType: "none",
-
-        refundStatus: "none",
-        refundAmount: 0,
-        refundReferenceId: "",
-        refundSettledAt: 0,
-        refundNote: "",
-
-        clientRequestId,
-        createdAt: now,
-        updatedAt: now,
-      };
-
-      tx.set(orderRef, orderData);
-
-      tx.set(orderRequestRef, {
-        uid,
-        orderId: orderRef.id,
-        cartHash,
-        createdAt: now,
       });
 
-      tx.set(
-        slotRef,
-        {
-          slotId: slotRef.id,
+      const result = await db.runTransaction(async (tx) => {
+        const userSnap = await tx.get(userRef);
+
+        if (!userSnap.exists) {
+          throw new HttpsError("permission-denied", "User profile not found.");
+        }
+
+        const user = userSnap.data();
+
+        if (user.isBlocked === true) {
+          throw new HttpsError("permission-denied", "Your account is blocked.");
+        }
+
+        if (user.role !== "student") {
+          throw new HttpsError(
+            "permission-denied",
+            "Only students can place orders."
+          );
+        }
+
+        const now = Date.now();
+
+        const orderRequestSnap = await tx.get(orderRequestRef);
+
+        if (orderRequestSnap.exists) {
+          const existingRequest = orderRequestSnap.data();
+
+          if (existingRequest.cartHash === cartHash) {
+            return {
+              success: true,
+              duplicate: true,
+              orderId: existingRequest.orderId,
+              message: "Order already created for this request.",
+            };
+          }
+
+          throw new HttpsError(
+            "already-exists",
+            "This request ID was already used with a different cart."
+          );
+        }
+
+        const shopSnap = await tx.get(shopRef);
+
+        if (!shopSnap.exists) {
+          throw new HttpsError("not-found", "Shop not found.");
+        }
+
+        const shop = shopSnap.data();
+        const maxOrdersPerSlot = getMaxOrdersPerSlot(shop);
+
+        const slotSnap = await tx.get(slotRef);
+        const slotData = slotSnap.exists ? slotSnap.data() : null;
+        const currentSlotOrderCount = Number(slotData?.orderCount || 0);
+
+        if (isSlotClosed(shop, slotData, pickupSlot)) {
+          throw new HttpsError(
+            "failed-precondition",
+            "This pickup slot is no longer available. Please select another slot."
+          );
+        }
+
+        if (currentSlotOrderCount >= maxOrdersPerSlot) {
+          throw new HttpsError(
+            "failed-precondition",
+            "This pickup slot is full. Please select another slot."
+          );
+        }
+
+        const menuItemSnaps = [];
+
+        for (const ref of menuItemRefs) {
+          menuItemSnaps.push(await tx.get(ref));
+        }
+
+        let totalPrice = 0;
+        const orderItems = [];
+
+        for (let i = 0; i < items.length; i++) {
+          const requestedItem = items[i];
+          const menuSnap = menuItemSnaps[i];
+
+          if (!menuSnap.exists) {
+            throw new HttpsError(
+              "not-found",
+              `Menu item not found: ${requestedItem.itemId}.`
+            );
+          }
+
+          const menuItem = menuSnap.data();
+
+          if (cleanString(menuItem.shopId) !== shopId) {
+            throw new HttpsError(
+              "failed-precondition",
+              `Menu item ${requestedItem.itemId} does not belong to shop ${shopId}.`
+            );
+          }
+
+          if (menuItem.isAvailable !== true) {
+            throw new HttpsError(
+              "failed-precondition",
+              `Menu item ${requestedItem.itemId} is not available.`
+            );
+          }
+
+          const unitPrice = Number(menuItem.price);
+
+          if (!Number.isFinite(unitPrice) || unitPrice < 0) {
+            throw new HttpsError(
+              "failed-precondition",
+              `Menu item ${requestedItem.itemId} has an invalid price.`
+            );
+          }
+
+          const lineTotal = unitPrice * requestedItem.quantity;
+          totalPrice += lineTotal;
+
+          orderItems.push({
+            itemId: requestedItem.itemId,
+            name: cleanString(menuItem.name),
+            price: unitPrice,
+            quantity: requestedItem.quantity,
+            prepTimeMinutes: Number(menuItem.prepTimeMinutes || 0),
+            shopId,
+            cookingNote: "",
+          });
+        }
+
+        totalPrice = Math.round(totalPrice * 100) / 100;
+
+        const orderRef = db.collection("orders").doc();
+
+        const orderData = {
+          orderId: orderRef.id,
           shopId,
-          date: pickupDate,
-          slot: pickupSlot,
-          maxOrders: maxOrdersPerSlot,
-          orderCount: FieldValue.increment(1),
+          shopName: cleanString(shop.name),
+          shopkeeperPhone: cleanString(shop.phone),
+
+          studentId: uid,
+          studentName: cleanString(user.name),
+          studentEmail: cleanString(user.email),
+          studentPhone: cleanString(user.phone),
+
+          items: orderItems,
+          totalPrice,
+
+          status: "pending",
+          pickupSlot,
+          pickupDate,
+
+          paymentMethod,
+          paymentStatus: "pending_verification",
+          upiPayerName,
+
+          cancelReason: "",
+          cancelledBy: "",
+          cancelledAt: 0,
+
+          paymentReceivedByShopkeeper: false,
+          paymentReceivedType: "none",
+
+          refundStatus: "none",
+          refundAmount: 0,
+          refundReferenceId: "",
+          refundSettledAt: 0,
+          refundNote: "",
+
+          clientRequestId,
+          createdAt: now,
           updatedAt: now,
-        },
-        { merge: true }
-      );
+        };
 
-      return {
-        success: true,
-        duplicate: false,
-        orderId: orderRef.id,
-        message: "Order created successfully.",
-      };
-    });
+        tx.set(orderRef, orderData);
 
-    logger.info("createOrder completed", {
-      uid,
-      shopId,
-      clientRequestId,
-      orderId: result.orderId,
-      duplicate: result.duplicate,
-    });
+        tx.set(orderRequestRef, {
+          uid,
+          orderId: orderRef.id,
+          cartHash,
+          createdAt: now,
+        });
 
-    return result;
+        tx.set(
+          slotRef,
+          {
+            slotId: slotRef.id,
+            shopId,
+            date: pickupDate,
+            slot: pickupSlot,
+            maxOrders: maxOrdersPerSlot,
+            orderCount: FieldValue.increment(1),
+            updatedAt: now,
+          },
+          { merge: true }
+        );
+
+        return {
+          success: true,
+          duplicate: false,
+          orderId: orderRef.id,
+          message: "Order created successfully.",
+        };
+      });
+
+      logger.info("createOrder completed", {
+        uid,
+        shopId,
+        clientRequestId,
+        orderId: result.orderId,
+        duplicate: result.duplicate,
+      });
+
+      return result;
+    } catch (err) {
+      logIfUnexpected("createOrder", { uid, shopId, clientRequestId }, err);
+      throw err;
+    }
   }
 );
 

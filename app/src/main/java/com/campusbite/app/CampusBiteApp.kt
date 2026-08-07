@@ -5,6 +5,7 @@ import dagger.hilt.android.HiltAndroidApp
 
 import com.google.firebase.Firebase
 import com.google.firebase.appcheck.appCheck
+import com.google.firebase.crashlytics.crashlytics
 
 @HiltAndroidApp
 class CampusBiteApp : Application() {
@@ -12,6 +13,11 @@ class CampusBiteApp : Application() {
     override fun onCreate() {
         super.onCreate()
         initializeAppCheck()
+        initializeCrashlytics()
+    }
+
+    private fun initializeCrashlytics() {
+        Firebase.crashlytics.setCrashlyticsCollectionEnabled(true)
     }
 
     private fun initializeAppCheck() {
