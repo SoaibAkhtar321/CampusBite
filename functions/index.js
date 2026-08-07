@@ -644,22 +644,22 @@ exports.cancelOrderByShopkeeper = onCall(
       request.data?.paymentReceivedAmount || 0
     );
 
-    if (!orderId) {
-      throw new HttpsError("invalid-argument", "orderId is required.");
-    }
-
-    if (!["none", "full", "partial"].includes(paymentReceivedType)) {
-      throw new HttpsError("invalid-argument", "Invalid payment status.");
-    }
-
-    if (!reason) {
-      throw new HttpsError(
-        "invalid-argument",
-        "Cancellation reason is required."
-      );
-    }
-
     try {
+      if (!orderId) {
+        throw new HttpsError("invalid-argument", "orderId is required.");
+      }
+
+      if (!["none", "full", "partial"].includes(paymentReceivedType)) {
+        throw new HttpsError("invalid-argument", "Invalid payment status.");
+      }
+
+      if (!reason) {
+        throw new HttpsError(
+          "invalid-argument",
+          "Cancellation reason is required."
+        );
+      }
+
       const shopkeeper = await getApprovedShopkeeperOrThrow(uid);
       const orderRef = db.collection("orders").doc(orderId);
 
@@ -785,24 +785,24 @@ exports.markRefundSettled = onCall(
   async (request) => {
     const uid = requireAuth(request);
 
-    const actor = await getAdminOrShopkeeperOrThrow(uid);
-
     const orderId = cleanString(request.data?.orderId);
     const refundReferenceId = cleanString(request.data?.refundReferenceId);
     const refundNote = cleanString(request.data?.refundNote);
 
-    if (!orderId) {
-      throw new HttpsError("invalid-argument", "orderId is required.");
-    }
-
-    if (!refundReferenceId) {
-      throw new HttpsError(
-        "invalid-argument",
-        "Refund reference ID is required."
-      );
-    }
-
     try {
+      const actor = await getAdminOrShopkeeperOrThrow(uid);
+
+      if (!orderId) {
+        throw new HttpsError("invalid-argument", "orderId is required.");
+      }
+
+      if (!refundReferenceId) {
+        throw new HttpsError(
+          "invalid-argument",
+          "Refund reference ID is required."
+        );
+      }
+
       const orderRef = db.collection("orders").doc(orderId);
 
       await db.runTransaction(async (tx) => {
