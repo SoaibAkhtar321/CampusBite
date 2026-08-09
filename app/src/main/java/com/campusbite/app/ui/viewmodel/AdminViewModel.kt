@@ -9,7 +9,6 @@ import com.campusbite.app.util.OrderStatusValue
 import com.campusbite.app.util.PaymentReceivedType
 import com.campusbite.app.util.PaymentStatusValue
 import com.campusbite.app.util.RefundStatusValue
-import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.DocumentReference
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FieldValue
