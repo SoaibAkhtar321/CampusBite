@@ -1371,6 +1371,113 @@ exports.sendNewOrderNotificationToShopkeeper = onDocumentCreated(
   }
 );
 
+// Releases the slot-capacity slot held by a cancelled order, exactly once.
+//
+// This is the single point where slotAvailability.orderCount is decremented,
+// covering all 3 cancellation paths (cancelOrderByShopkeeper,
+// updateOrderStatus, cancelOrderByAdmin) because all 3 converge on the same
+// orders/{orderId} write, which this function is invoked in response to.
+//
+// Idempotency: correctness does not depend on Cloud Functions retry/redelivery
+// semantics. It depends only on the order document's own "slotReleased" flag,
+// which is read and written inside the SAME transaction as the decrement —
+// so a duplicate invocation (retry, redelivery, or a race with another
+// invocation for the same order) always observes either "not yet released"
+// or "already released" as a consistent snapshot, never something in
+// between. Firestore's optimistic-concurrency transaction retry handles the
+// case where a concurrent createOrder increment (or a concurrent release
+// attempt for a different order sharing the same slot) touches the same
+// slotAvailability doc mid-transaction.
+async function releaseSlotCapacityOnce(orderId) {
+  const orderRef = db.collection("orders").doc(orderId);
+
+  try {
+    await db.runTransaction(async (tx) => {
+      const orderSnap = await tx.get(orderRef);
+
+      if (!orderSnap.exists) {
+        return;
+      }
+
+      const order = orderSnap.data();
+
+      // Re-check status from a fresh transactional read rather than trusting
+      // the trigger's (possibly stale) event snapshot.
+      if (cleanString(order.status).toLowerCase() !== "cancelled") {
+        return;
+      }
+
+      if (order.slotReleased === true) {
+        // Already released by a previous invocation (retry/redelivery) of
+        // this trigger. No-op.
+        return;
+      }
+
+      const now = Date.now();
+      const shopId = cleanString(order.shopId);
+      const pickupDate = cleanString(order.pickupDate);
+      const pickupSlot = cleanString(order.pickupSlot);
+
+      if (!shopId || !pickupDate || !pickupSlot) {
+        logger.warn(
+          "Slot release skipped: order missing shopId/pickupDate/pickupSlot",
+          { orderId, shopId, pickupDate, pickupSlot }
+        );
+
+        // Nothing to release against, but mark released so this order is
+        // never re-evaluated on future retries/redeliveries.
+        tx.update(orderRef, {
+          slotReleased: true,
+          slotReleasedAt: now,
+        });
+
+        return;
+      }
+
+      const slotRef = db
+        .collection("slotAvailability")
+        .doc(buildSlotId(shopId, pickupDate, pickupSlot));
+
+      const slotSnap = await tx.get(slotRef);
+
+      if (slotSnap.exists) {
+        const currentOrderCount = Number(slotSnap.data()?.orderCount || 0);
+
+        // Never decrement below 0 (defensive floor — guards against any
+        // pre-existing data drift from before this fix shipped).
+        if (currentOrderCount > 0) {
+          tx.set(
+            slotRef,
+            {
+              orderCount: FieldValue.increment(-1),
+              updatedAt: now,
+            },
+            { merge: true }
+          );
+        }
+      }
+      // If the slot doc doesn't exist, there's nothing to release against —
+      // fall through and still mark the order released below.
+
+      tx.update(orderRef, {
+        slotReleased: true,
+        slotReleasedAt: now,
+      });
+    });
+  } catch (err) {
+    // Deliberately swallowed: do not throw out of this helper. Letting this
+    // propagate would fail the whole updateShopAnalyticsOnOrderChange
+    // invocation and trigger a Cloud Functions retry, which would re-run the
+    // (non-idempotent) analytics increments below and double-count them.
+    // A slot that fails to release here is caught by the separate
+    // orderCount reconciliation script, not by function-level retry.
+    logger.error(
+      "Slot release failed; leaving slotReleased unset for reconciliation",
+      { orderId, error: err?.message || String(err) }
+    );
+  }
+}
+
 exports.updateShopAnalyticsOnOrderChange = onDocumentUpdated(
   {
     region: REGION,
@@ -1400,6 +1507,14 @@ exports.updateShopAnalyticsOnOrderChange = onDocumentUpdated(
 
     if (!paymentBecamePaid && !orderBecameCancelled) {
       return;
+    }
+
+    if (orderBecameCancelled) {
+      // Independent of the analytics logic below (which requires shopId) —
+      // releaseSlotCapacityOnce re-reads the order itself and handles a
+      // missing shopId/pickupDate/pickupSlot on its own, so it must run
+      // even if the analytics section below is about to bail out.
+      await releaseSlotCapacityOnce(orderId);
     }
 
     const shopId = cleanString(after.shopId);
