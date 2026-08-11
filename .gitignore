@@ -44,3 +44,4 @@ yarn-debug.log*
 pnpm-debug.log*
 
 CaptainGame/
+ops/node_modules/
