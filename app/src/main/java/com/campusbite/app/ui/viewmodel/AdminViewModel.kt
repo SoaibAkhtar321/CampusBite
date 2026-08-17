@@ -109,8 +109,7 @@ class AdminViewModel @Inject constructor(
 
     private val _messageSource = MutableStateFlow<String?>(null)
 
-    private var shopsListener: ListenerRegistration? = null
-    private var usersListener: ListenerRegistration? = null
+    private var pendingShopkeepersListener: ListenerRegistration? = null
 
     private var shopReportRecentOrdersListener: ListenerRegistration? = null
     private var shopReportActiveOrdersListener: ListenerRegistration? = null
@@ -126,8 +125,12 @@ class AdminViewModel @Inject constructor(
     private var reportLifetimeAnalytics = AdminAnalyticsSnapshot()
 
     init {
-        listenToShops()
-        listenToUsers()
+        viewModelScope.launch {
+            loadShops()
+            loadUsers()
+            _isLoading.value = false
+        }
+        listenToPendingShopkeepers()
     }
 
     private fun setAdminMessage(
@@ -192,109 +195,142 @@ class AdminViewModel @Inject constructor(
         )
     }
 
-    private fun listenToShops() {
-        shopsListener?.remove()
+    private fun DocumentSnapshot.toAdminUser(): AdminUser {
+        val role = getString("role") ?: "student"
 
-        shopsListener = firestore.collection("shops")
-            .addSnapshotListener { snapshot, error ->
-                if (error != null) {
-                    val readableError = error.readableAdminError()
+        val isApproved = getBoolean("isApproved")
+            ?: (role != "shopkeeper")
 
-                    Log.e(
-                        ADMIN_TAG,
-                        "FAILED QUERY: shops listener | $readableError",
-                        error
-                    )
-
-                    setAdminMessage(
-                        source = "shops listener",
-                        text = readableError
-                    )
-
-                    _isLoading.value = false
-                    return@addSnapshotListener
-                }
-
-                val shopList = snapshot?.documents
-                    ?.map { doc ->
-                        doc.toAdminShop()
-                    }
-                    ?.sortedWith(
-                        compareBy<AdminShop> { it.displayOrder }
-                            .thenBy { it.name.lowercase() }
-                    )
-                    ?: emptyList()
-
-                _shops.value = shopList
-                clearMessageIfSource("shops listener")
-                _isLoading.value = false
-            }
+        return AdminUser(
+            docId = id,
+            uid = getString("uid") ?: id,
+            name = getString("name") ?: "",
+            email = getString("email") ?: "",
+            phone = getString("phone")
+                ?: getString("phoneNumber")
+                ?: "",
+            role = role,
+            shopId = getString("shopId") ?: "",
+            isApproved = isApproved,
+            isBlocked = getBoolean("isBlocked") ?: false,
+            isDeleted = getBoolean("isDeleted") ?: false,
+            createdAt = getLong("createdAt") ?: 0L
+        )
     }
 
-    private fun listenToUsers() {
-        usersListener?.remove()
+    private suspend fun loadShops() {
+        try {
+            val snapshot = firestore.collection("shops")
+                .get()
+                .await()
 
-        usersListener = firestore.collection("users")
-            .addSnapshotListener { snapshot, error ->
-                if (error != null) {
-                    val readableError = error.readableAdminError()
-
-                    Log.e(
-                        ADMIN_TAG,
-                        "FAILED QUERY: users listener | $readableError",
-                        error
-                    )
-
-                    setAdminMessage(
-                        source = "users listener",
-                        text = readableError
-                    )
-
-                    _isLoading.value = false
-                    return@addSnapshotListener
+            val shopList = snapshot.documents
+                .map { doc ->
+                    doc.toAdminShop()
                 }
-
-                val userList = snapshot?.documents
-                    ?.map { doc ->
-                        val role = doc.getString("role") ?: "student"
-
-                        val isApproved = doc.getBoolean("isApproved")
-                            ?: (role != "shopkeeper")
-
-                        AdminUser(
-                            docId = doc.id,
-                            uid = doc.getString("uid") ?: doc.id,
-                            name = doc.getString("name") ?: "",
-                            email = doc.getString("email") ?: "",
-                            phone = doc.getString("phone")
-                                ?: doc.getString("phoneNumber")
-                                ?: "",
-                            role = role,
-                            shopId = doc.getString("shopId") ?: "",
-                            isApproved = isApproved,
-                            isBlocked = doc.getBoolean("isBlocked") ?: false,
-                            isDeleted = doc.getBoolean("isDeleted") ?: false,
-                            createdAt = doc.getLong("createdAt") ?: 0L
-                        )
-                    }
-                    ?: emptyList()
-
-                _users.value = userList.sortedWith(
-                    compareBy<AdminUser> { it.role }
+                .sortedWith(
+                    compareBy<AdminShop> { it.displayOrder }
                         .thenBy { it.name.lowercase() }
                 )
 
-                _pendingShopkeepers.value = userList
-                    .filter { user ->
-                        user.role == "shopkeeper" &&
-                                !user.isApproved &&
-                                !user.isBlocked &&
-                                !user.isDeleted
-                    }
-                    .sortedByDescending { it.createdAt }
+            _shops.value = shopList
+            clearMessageIfSource("shops load")
+        } catch (e: Exception) {
+            val readableError = e.readableAdminError()
 
-                clearMessageIfSource("users listener")
-                _isLoading.value = false
+            Log.e(
+                ADMIN_TAG,
+                "FAILED QUERY: shops load | $readableError",
+                e
+            )
+
+            setAdminMessage(
+                source = "shops load",
+                text = readableError
+            )
+        }
+    }
+
+    private suspend fun loadUsers() {
+        try {
+            val snapshot = firestore.collection("users")
+                .get()
+                .await()
+
+            val userList = snapshot.documents
+                .map { doc ->
+                    doc.toAdminUser()
+                }
+
+            _users.value = userList.sortedWith(
+                compareBy<AdminUser> { it.role }
+                    .thenBy { it.name.lowercase() }
+            )
+
+            clearMessageIfSource("users load")
+        } catch (e: Exception) {
+            val readableError = e.readableAdminError()
+
+            Log.e(
+                ADMIN_TAG,
+                "FAILED QUERY: users load | $readableError",
+                e
+            )
+
+            setAdminMessage(
+                source = "users load",
+                text = readableError
+            )
+        }
+    }
+
+    private fun refreshShops() {
+        viewModelScope.launch {
+            loadShops()
+        }
+    }
+
+    private fun refreshUsers() {
+        viewModelScope.launch {
+            loadUsers()
+        }
+    }
+
+    private fun listenToPendingShopkeepers() {
+        pendingShopkeepersListener?.remove()
+
+        pendingShopkeepersListener = firestore.collection("users")
+            .whereEqualTo("role", "shopkeeper")
+            .whereEqualTo("isApproved", false)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    val readableError = error.readableAdminError()
+
+                    Log.e(
+                        ADMIN_TAG,
+                        "FAILED QUERY: pending shopkeepers listener | $readableError",
+                        error
+                    )
+
+                    setAdminMessage(
+                        source = "pending shopkeepers listener",
+                        text = readableError
+                    )
+
+                    return@addSnapshotListener
+                }
+
+                _pendingShopkeepers.value = snapshot?.documents
+                    ?.map { doc ->
+                        doc.toAdminUser()
+                    }
+                    ?.filter { user ->
+                        !user.isBlocked && !user.isDeleted
+                    }
+                    ?.sortedByDescending { it.createdAt }
+                    ?: emptyList()
+
+                clearMessageIfSource("pending shopkeepers listener")
             }
     }
 
@@ -652,6 +688,7 @@ class AdminViewModel @Inject constructor(
                     ).await()
 
                     _message.value = "Shopkeeper moved to pending"
+                    refreshUsers()
                     return@launch
                 }
 
@@ -737,6 +774,8 @@ class AdminViewModel @Inject constructor(
                 ).await()
 
                 _message.value = "Shopkeeper approved and shop created"
+                refreshShops()
+                refreshUsers()
 
             } catch (e: Exception) {
                 val readableError = e.readableAdminError()
@@ -817,6 +856,8 @@ class AdminViewModel @Inject constructor(
                 } else {
                     "Shop approval removed and hidden from users"
                 }
+                refreshShops()
+                refreshUsers()
 
             } catch (e: Exception) {
                 val readableError = e.readableAdminError()
@@ -875,6 +916,7 @@ class AdminViewModel @Inject constructor(
                 } else {
                     "Shop marked as closed"
                 }
+                refreshShops()
 
             } catch (e: Exception) {
                 val readableError = e.readableAdminError()
@@ -953,6 +995,7 @@ class AdminViewModel @Inject constructor(
                 } else {
                     "Shop hidden from users"
                 }
+                refreshShops()
             } catch (e: Exception) {
                 val readableError = e.readableAdminError()
 
@@ -1041,6 +1084,8 @@ class AdminViewModel @Inject constructor(
                 } else {
                     "Shop unblocked and visible to users"
                 }
+                refreshShops()
+                refreshUsers()
             } catch (e: Exception) {
                 val readableError = e.readableAdminError()
 
@@ -1128,6 +1173,8 @@ class AdminViewModel @Inject constructor(
                 batch.commit().await()
 
                 _message.value = "Shop deleted and hidden from users"
+                refreshShops()
+                refreshUsers()
             } catch (e: Exception) {
                 val readableError = e.readableAdminError()
 
@@ -1167,6 +1214,7 @@ class AdminViewModel @Inject constructor(
                     .await()
 
                 _message.value = "Pending request removed"
+                refreshUsers()
 
             } catch (e: Exception) {
                 val readableError = e.readableAdminError()
@@ -1260,6 +1308,10 @@ class AdminViewModel @Inject constructor(
                 } else {
                     "User unblocked successfully"
                 }
+                refreshUsers()
+                if (role == "shopkeeper" && shopId.isNotBlank()) {
+                    refreshShops()
+                }
 
             } catch (e: Exception) {
                 val readableError = e.readableAdminError()
@@ -1322,6 +1374,7 @@ class AdminViewModel @Inject constructor(
                     .await()
 
                 _message.value = "User role updated to $cleanRole"
+                refreshUsers()
 
             } catch (e: Exception) {
                 val readableError = e.readableAdminError()
@@ -1355,6 +1408,7 @@ class AdminViewModel @Inject constructor(
                 orderedShops.add(0, selectedShop)
 
                 updateShopDisplayOrders(orderedShops)
+                refreshShops()
 
                 _message.value = "Shop moved to top"
             } catch (e: Exception) {
@@ -1390,6 +1444,7 @@ class AdminViewModel @Inject constructor(
                 orderedShops[currentIndex] = temp
 
                 updateShopDisplayOrders(orderedShops)
+                refreshShops()
 
                 _message.value = "Shop moved up"
             } catch (e: Exception) {
@@ -1425,6 +1480,7 @@ class AdminViewModel @Inject constructor(
                 orderedShops[currentIndex] = temp
 
                 updateShopDisplayOrders(orderedShops)
+                refreshShops()
 
                 _message.value = "Shop moved down"
             } catch (e: Exception) {
@@ -1738,8 +1794,7 @@ class AdminViewModel @Inject constructor(
 
     override fun onCleared() {
         super.onCleared()
-        shopsListener?.remove()
-        usersListener?.remove()
+        pendingShopkeepersListener?.remove()
         clearShopReportListeners()
     }
 

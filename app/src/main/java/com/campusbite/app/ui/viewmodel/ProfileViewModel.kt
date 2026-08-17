@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import javax.inject.Inject
+import com.google.firebase.firestore.ListenerRegistration
 
 @HiltViewModel
 class ProfileViewModel @Inject constructor(
@@ -43,6 +44,7 @@ class ProfileViewModel @Inject constructor(
         "preparing",
         "ready"
     )
+    private var userProfileListener: ListenerRegistration? = null
 
     init {
         fetchUserDetails()
@@ -51,7 +53,7 @@ class ProfileViewModel @Inject constructor(
     private fun fetchUserDetails() {
         val uid = auth.currentUser?.uid ?: return
 
-        firestore.collection("users")
+        userProfileListener = firestore.collection("users")
             .document(uid)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
@@ -456,5 +458,11 @@ class ProfileViewModel @Inject constructor(
 
     fun clearMessage() {
         _message.value = null
+    }
+
+    override fun onCleared() {
+        userProfileListener?.remove()
+        userProfileListener = null
+        super.onCleared()
     }
 }
