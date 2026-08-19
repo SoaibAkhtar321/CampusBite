@@ -136,6 +136,13 @@ service cloud.firestore {
           && resource.data.shopId == userShopId()
           && request.resource.data.shopId == resource.data.shopId
           && request.resource.data.itemId == resource.data.itemId
+          && (
+            request.resource.data.price == resource.data.price
+            || (
+              request.resource.data.price is number
+              && request.resource.data.price > 0
+            )
+          )
         );
       allow delete: if isAdmin()
         || (isShopkeeper() && resource.data.shopId == userShopId());

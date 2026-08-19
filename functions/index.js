@@ -310,6 +310,13 @@ function validateCreateOrderRequest(data) {
     );
   }
 
+  if (!CLIENT_REQUEST_ID_REGEX.test(clientRequestId)) {
+    throw new HttpsError(
+      "invalid-argument",
+      "clientRequestId format is invalid."
+    );
+  }
+
   if (!shopId) {
     throw new HttpsError("invalid-argument", "shopId is required.");
   }
@@ -318,16 +325,35 @@ function validateCreateOrderRequest(data) {
     throw new HttpsError("invalid-argument", "pickupSlot is required.");
   }
 
+  if (!PICKUP_SLOT_REGEX.test(pickupSlot)) {
+    throw new HttpsError("invalid-argument", "pickupSlot format is invalid.");
+  }
+
   if (!pickupDate) {
     throw new HttpsError("invalid-argument", "pickupDate is required.");
+  }
+
+  if (!PICKUP_DATE_REGEX.test(pickupDate) || !isValidCalendarDate(pickupDate)) {
+    throw new HttpsError("invalid-argument", "pickupDate format is invalid.");
   }
 
   if (!paymentMethod) {
     throw new HttpsError("invalid-argument", "paymentMethod is required.");
   }
 
+  if (!VALID_PAYMENT_METHODS.includes(paymentMethod)) {
+    throw new HttpsError("invalid-argument", "paymentMethod is invalid.");
+  }
+
   if (!upiPayerName) {
     throw new HttpsError("invalid-argument", "upiPayerName is required.");
+  }
+
+  if (upiPayerName.length > MAX_UPI_PAYER_NAME_LENGTH) {
+    throw new HttpsError(
+      "invalid-argument",
+      `upiPayerName must not exceed ${MAX_UPI_PAYER_NAME_LENGTH} characters.`
+    );
   }
 
   if (!items || items.length === 0) {
@@ -349,6 +375,7 @@ function validateCreateOrderRequest(data) {
   const cleanedItems = items.map((item, index) => {
     const itemId = cleanString(item?.itemId);
     const quantity = Number(item?.quantity);
+    const cookingNote = cleanString(item?.cookingNote);
 
     if (!itemId) {
       throw new HttpsError(
@@ -366,16 +393,28 @@ function validateCreateOrderRequest(data) {
 
     seenItemIds.add(itemId);
 
-    if (!Number.isInteger(quantity) || quantity <= 0) {
+    if (
+      !Number.isInteger(quantity) ||
+      quantity <= 0 ||
+      quantity > MAX_ITEM_QUANTITY
+    ) {
       throw new HttpsError(
         "invalid-argument",
-        `items[${index}].quantity must be a positive integer.`
+        `items[${index}].quantity must be a positive integer no greater than ${MAX_ITEM_QUANTITY}.`
+      );
+    }
+
+    if (cookingNote.length > MAX_COOKING_NOTE_LENGTH) {
+      throw new HttpsError(
+        "invalid-argument",
+        `items[${index}].cookingNote must not exceed ${MAX_COOKING_NOTE_LENGTH} characters.`
       );
     }
 
     return {
       itemId,
       quantity,
+      cookingNote,
     };
   });
 
@@ -1056,7 +1095,7 @@ exports.createOrder = onCall(
 
           const unitPrice = Number(menuItem.price);
 
-          if (!Number.isFinite(unitPrice) || unitPrice < 0) {
+          if (!Number.isFinite(unitPrice) || unitPrice <= 0) {
             throw new HttpsError(
               "failed-precondition",
               `Menu item ${requestedItem.itemId} has an invalid price.`
@@ -1073,7 +1112,7 @@ exports.createOrder = onCall(
             quantity: requestedItem.quantity,
             prepTimeMinutes: Number(menuItem.prepTimeMinutes || 0),
             shopId,
-            cookingNote: "",
+            cookingNote: requestedItem.cookingNote,
           });
         }
 
