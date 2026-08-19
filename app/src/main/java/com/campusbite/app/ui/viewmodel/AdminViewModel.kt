@@ -488,7 +488,7 @@ class AdminViewModel @Inject constructor(
                 reportActiveOrders = snapshot?.documents
                     ?.mapNotNull { doc ->
                         try {
-                            doc.toObject(Order::class.java)
+                            Order.from(doc)
                         } catch (e: Exception) {
                             Log.e(
                                 ADMIN_TAG,
@@ -527,7 +527,7 @@ class AdminViewModel @Inject constructor(
                 reportRecentOrders = snapshot?.documents
                     ?.mapNotNull { doc ->
                         try {
-                            doc.toObject(Order::class.java)
+                            Order.from(doc)
                         } catch (e: Exception) {
                             Log.e(
                                 ADMIN_TAG,

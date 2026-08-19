@@ -179,6 +179,14 @@ class ShopkeeperViewModel @Inject constructor(
 
         activeOrdersListener = firestore.collection("orders")
             .whereEqualTo("shopId", shopId)
+            .whereIn(
+                "status",
+                listOf(
+                    OrderStatusValue.PENDING,
+                    OrderStatusValue.PREPARING,
+                    OrderStatusValue.READY
+                )
+            )
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
                     error.printStackTrace()
@@ -191,13 +199,6 @@ class ShopkeeperViewModel @Inject constructor(
 
                 val activeOrders = snapshot?.documents
                     ?.mapNotNull { doc -> doc.toOrderOrNull() }
-                    ?.filter { order ->
-                        order.status.lowercase() in listOf(
-                            OrderStatusValue.PENDING,
-                            OrderStatusValue.PREPARING,
-                            OrderStatusValue.READY
-                        )
-                    }
                     ?.sortedBy { it.createdAt }
                     ?: emptyList()
 
@@ -240,8 +241,7 @@ class ShopkeeperViewModel @Inject constructor(
 
     private fun DocumentSnapshot.toOrderOrNull(): Order? {
         return try {
-            val order = toObject(Order::class.java) ?: return null
-
+            val order = Order.from(this)
             if (order.orderId.isBlank()) {
                 order.copy(orderId = id)
             } else {
