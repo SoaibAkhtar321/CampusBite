@@ -1607,21 +1607,47 @@ exports.updateShopAnalyticsOnOrderChange = onDocumentUpdated(
       updates.cancelledOrders = FieldValue.increment(1);
     }
 
-    const batch = db.batch();
+    // Idempotency guard: Firestore/Eventarc triggers are at-least-once, not
+    // exactly-once. event.id is the stable identifier of this logical event
+    // and is unchanged across redeliveries/retries of the same event, so it
+    // is used as the dedup key. The marker doc is created (not set) inside
+    // the same transaction as the increments, so a duplicate delivery either
+    // observes the marker already present (and applies no increments) or
+    // creates it and applies increments exactly once — never both/neither.
+    const eventId = event.id;
+    const processedEventRef = db
+      .collection("processedAnalyticsEvents")
+      .doc(eventId);
 
-    batch.set(dailyRef, updates, {
-      merge: true,
+    await db.runTransaction(async (tx) => {
+      const processedSnap = await tx.get(processedEventRef);
+
+      if (processedSnap.exists) {
+        logger.info("Analytics event already processed; skipping", {
+          orderId,
+          eventId,
+        });
+        return;
+      }
+
+      tx.create(processedEventRef, {
+        orderId,
+        shopId,
+        processedAt: Date.now(),
+      });
+
+      tx.set(dailyRef, updates, {
+        merge: true,
+      });
+
+      tx.set(monthlyRef, updates, {
+        merge: true,
+      });
+
+      tx.set(lifetimeRef, updates, {
+        merge: true,
+      });
     });
-
-    batch.set(monthlyRef, updates, {
-      merge: true,
-    });
-
-    batch.set(lifetimeRef, updates, {
-      merge: true,
-    });
-
-    await batch.commit();
 
     logger.info("Shop analytics updated", {
       orderId,
