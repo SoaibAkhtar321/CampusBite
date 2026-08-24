@@ -441,6 +441,21 @@ private fun HomeContentList(
     cartViewModel: CartViewModel,
     onNavigateToShopDetail: (String) -> Unit
 ) {
+    val orderedShops = remember(shops) {
+        shops.sortedWith(
+            compareBy<Shop> { it.displayOrder }
+                .thenBy { it.name.lowercase() }
+        )
+    }
+
+    val itemsByShopId = remember(filteredItems) {
+        filteredItems.groupBy { it.shopId }
+    }
+
+    val cartItemsByItemId = remember(cartItems) {
+        cartItems.associateBy { it.itemId }
+    }
+
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(bottom = bottomContentPadding)
@@ -534,13 +549,6 @@ private fun HomeContentList(
                 EmptyMenuState(hasFilters = isFilterActive)
             }
         } else {
-            val orderedShops = shops.sortedWith(
-                compareBy<Shop> { it.displayOrder }
-                    .thenBy { it.name.lowercase() }
-            )
-
-            val itemsByShopId = filteredItems.groupBy { it.shopId }
-
             orderedShops.forEach { shop ->
                 val shopItems = itemsByShopId[shop.shopId].orEmpty()
 
@@ -555,9 +563,7 @@ private fun HomeContentList(
                         items = shopItems,
                         key = { it.itemId }
                     ) { menuItem ->
-                        val matchingCartItem = cartItems.firstOrNull {
-                            it.itemId == menuItem.itemId
-                        }
+                        val matchingCartItem = cartItemsByItemId[menuItem.itemId]
 
                         MenuItemCard(
                             menuItem = menuItem,
