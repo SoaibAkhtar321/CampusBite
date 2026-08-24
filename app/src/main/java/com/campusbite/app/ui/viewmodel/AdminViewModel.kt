@@ -687,8 +687,15 @@ class AdminViewModel @Inject constructor(
                         )
                     ).await()
 
+                    _users.value = _users.value.map { user ->
+                        if (user.docId == userDocId) {
+                            user.copy(isApproved = false)
+                        } else {
+                            user
+                        }
+                    }
+
                     _message.value = "Shopkeeper moved to pending"
-                    refreshUsers()
                     return@launch
                 }
 
@@ -704,7 +711,11 @@ class AdminViewModel @Inject constructor(
                 val shopSnapshot = shopRef.get().await()
                 val now = System.currentTimeMillis()
 
+                val patchedShop: AdminShop
+
                 if (!shopSnapshot.exists()) {
+                    val nextDisplayOrder = getNextShopDisplayOrder()
+
                     val shopData = mapOf(
                         "shopId" to finalShopId,
                         "name" to name,
@@ -733,13 +744,28 @@ class AdminViewModel @Inject constructor(
                         "maxOrdersPerSlot" to 5,
                         "closedSlots" to emptyList<String>(),
 
-                        "displayOrder" to getNextShopDisplayOrder(),
+                        "displayOrder" to nextDisplayOrder,
 
                         "createdAt" to now,
                         "updatedAt" to now
                     )
 
                     shopRef.set(shopData).await()
+
+                    patchedShop = AdminShop(
+                        docId = finalShopId,
+                        shopId = finalShopId,
+                        name = name,
+                        ownerUid = uid,
+                        isOpen = false,
+                        isApproved = true,
+                        isBlocked = false,
+                        isDeleted = false,
+                        isVisible = true,
+                        visibilityStatus = "visible",
+                        hiddenReason = "",
+                        displayOrder = nextDisplayOrder
+                    )
                 } else {
                     val existingDisplayOrder = shopSnapshot.getLong("displayOrder")?.toInt()
                         ?: getNextShopDisplayOrder()
@@ -761,6 +787,17 @@ class AdminViewModel @Inject constructor(
                             "updatedAt" to now
                         )
                     ).await()
+
+                    patchedShop = shopSnapshot.toAdminShop().copy(
+                        isApproved = true,
+                        isBlocked = false,
+                        isDeleted = false,
+                        isVisible = true,
+                        visibilityStatus = "visible",
+                        hiddenReason = "",
+                        ownerUid = uid,
+                        displayOrder = existingDisplayOrder
+                    )
                 }
 
                 userRef.update(
@@ -773,9 +810,33 @@ class AdminViewModel @Inject constructor(
                     )
                 ).await()
 
+                val shopAlreadyPresent = _shops.value.any { it.docId == patchedShop.docId }
+
+                _shops.value = if (shopAlreadyPresent) {
+                    _shops.value.map { shop ->
+                        if (shop.docId == patchedShop.docId) patchedShop else shop
+                    }
+                } else {
+                    (_shops.value + patchedShop).sortedWith(
+                        compareBy<AdminShop> { it.displayOrder }
+                            .thenBy { it.name.lowercase() }
+                    )
+                }
+
+                _users.value = _users.value.map { user ->
+                    if (user.docId == userDocId) {
+                        user.copy(
+                            isApproved = true,
+                            isBlocked = false,
+                            isDeleted = false,
+                            shopId = finalShopId
+                        )
+                    } else {
+                        user
+                    }
+                }
+
                 _message.value = "Shopkeeper approved and shop created"
-                refreshShops()
-                refreshUsers()
 
             } catch (e: Exception) {
                 val readableError = e.readableAdminError()
@@ -832,6 +893,8 @@ class AdminViewModel @Inject constructor(
                     )
                 )
 
+                val affectedUserDocIds = mutableListOf<String>()
+
                 if (finalShopId.isNotBlank()) {
                     val usersSnapshot = firestore.collection("users")
                         .whereEqualTo("shopId", finalShopId)
@@ -846,18 +909,41 @@ class AdminViewModel @Inject constructor(
                                 "updatedAt" to now
                             )
                         )
+                        affectedUserDocIds.add(userDoc.id)
                     }
                 }
 
                 batch.commit().await()
+
+                _shops.value = _shops.value.map { shop ->
+                    if (shop.docId == finalShopDocId) {
+                        shop.copy(
+                            isApproved = approved,
+                            isVisible = approved,
+                            isOpen = false,
+                            visibilityStatus = if (approved) "visible" else "approval_removed",
+                            hiddenReason = if (approved) "" else "Shop approval removed by admin"
+                        )
+                    } else {
+                        shop
+                    }
+                }
+
+                if (affectedUserDocIds.isNotEmpty()) {
+                    _users.value = _users.value.map { user ->
+                        if (user.docId in affectedUserDocIds) {
+                            user.copy(isApproved = approved)
+                        } else {
+                            user
+                        }
+                    }
+                }
 
                 _message.value = if (approved) {
                     "Shop approved successfully"
                 } else {
                     "Shop approval removed and hidden from users"
                 }
-                refreshShops()
-                refreshUsers()
 
             } catch (e: Exception) {
                 val readableError = e.readableAdminError()
@@ -911,12 +997,19 @@ class AdminViewModel @Inject constructor(
                     )
                 ).await()
 
+                _shops.value = _shops.value.map { shop ->
+                    if (shop.docId == shopDocId) {
+                        shop.copy(isOpen = open)
+                    } else {
+                        shop
+                    }
+                }
+
                 _message.value = if (open) {
                     "Shop marked as open"
                 } else {
                     "Shop marked as closed"
                 }
-                refreshShops()
 
             } catch (e: Exception) {
                 val readableError = e.readableAdminError()
@@ -990,12 +1083,32 @@ class AdminViewModel @Inject constructor(
 
                 shopRef.update(updateData).await()
 
+                _shops.value = _shops.value.map { shop ->
+                    if (shop.docId == finalShopDocId) {
+                        if (visible) {
+                            shop.copy(
+                                isVisible = true,
+                                visibilityStatus = "visible",
+                                hiddenReason = ""
+                            )
+                        } else {
+                            shop.copy(
+                                isVisible = false,
+                                isOpen = false,
+                                visibilityStatus = "temporarily_hidden",
+                                hiddenReason = reason.ifBlank { "Temporarily hidden by admin" }
+                            )
+                        }
+                    } else {
+                        shop
+                    }
+                }
+
                 _message.value = if (visible) {
                     "Shop is now visible to users"
                 } else {
                     "Shop hidden from users"
                 }
-                refreshShops()
             } catch (e: Exception) {
                 val readableError = e.readableAdminError()
 
@@ -1066,6 +1179,8 @@ class AdminViewModel @Inject constructor(
                     .get()
                     .await()
 
+                val affectedUserDocIds = usersSnapshot.documents.map { it.id }
+
                 usersSnapshot.documents.forEach { userDoc ->
                     batch.update(
                         userDoc.reference,
@@ -1079,13 +1194,50 @@ class AdminViewModel @Inject constructor(
 
                 batch.commit().await()
 
+                _shops.value = _shops.value.map { shop ->
+                    if (shop.docId == finalShopDocId) {
+                        if (blocked) {
+                            shop.copy(
+                                isBlocked = true,
+                                isApproved = false,
+                                isVisible = false,
+                                isOpen = false,
+                                visibilityStatus = "blocked",
+                                hiddenReason = "Shop blocked by admin"
+                            )
+                        } else {
+                            shop.copy(
+                                isBlocked = false,
+                                isApproved = true,
+                                isVisible = true,
+                                isOpen = false,
+                                visibilityStatus = "visible",
+                                hiddenReason = ""
+                            )
+                        }
+                    } else {
+                        shop
+                    }
+                }
+
+                if (affectedUserDocIds.isNotEmpty()) {
+                    _users.value = _users.value.map { user ->
+                        if (user.docId in affectedUserDocIds) {
+                            user.copy(
+                                isApproved = !blocked,
+                                isBlocked = blocked
+                            )
+                        } else {
+                            user
+                        }
+                    }
+                }
+
                 _message.value = if (blocked) {
                     "Shop blocked and hidden from users"
                 } else {
                     "Shop unblocked and visible to users"
                 }
-                refreshShops()
-                refreshUsers()
             } catch (e: Exception) {
                 val readableError = e.readableAdminError()
 
@@ -1140,6 +1292,8 @@ class AdminViewModel @Inject constructor(
                     .get()
                     .await()
 
+                val affectedUserDocIds = usersSnapshot.documents.map { it.id }
+
                 usersSnapshot.documents.forEach { userDoc ->
                     batch.update(
                         userDoc.reference,
@@ -1172,9 +1326,41 @@ class AdminViewModel @Inject constructor(
 
                 batch.commit().await()
 
+                _shops.value = _shops.value.map { shop ->
+                    if (shop.docId == finalShopDocId) {
+                        shop.copy(
+                            isOpen = false,
+                            isApproved = false,
+                            isBlocked = true,
+                            isDeleted = true,
+                            isVisible = false,
+                            visibilityStatus = "deleted",
+                            hiddenReason = "Shop deleted by admin"
+                        )
+                    } else {
+                        shop
+                    }
+                }
+
+                if (affectedUserDocIds.isNotEmpty()) {
+                    _users.value = _users.value.map { user ->
+                        if (user.docId in affectedUserDocIds) {
+                            user.copy(
+                                role = "shopkeeper",
+                                isApproved = false,
+                                isBlocked = true,
+                                isDeleted = true
+                            )
+                        } else {
+                            user
+                        }
+                    }.sortedWith(
+                        compareBy<AdminUser> { it.role }
+                            .thenBy { it.name.lowercase() }
+                    )
+                }
+
                 _message.value = "Shop deleted and hidden from users"
-                refreshShops()
-                refreshUsers()
             } catch (e: Exception) {
                 val readableError = e.readableAdminError()
 
@@ -1213,8 +1399,24 @@ class AdminViewModel @Inject constructor(
                     )
                     .await()
 
+                _users.value = _users.value.map { user ->
+                    if (user.docId == userDocId) {
+                        user.copy(
+                            role = "student",
+                            isApproved = true,
+                            isBlocked = false,
+                            isDeleted = false,
+                            shopId = ""
+                        )
+                    } else {
+                        user
+                    }
+                }.sortedWith(
+                    compareBy<AdminUser> { it.role }
+                        .thenBy { it.name.lowercase() }
+                )
+
                 _message.value = "Pending request removed"
-                refreshUsers()
 
             } catch (e: Exception) {
                 val readableError = e.readableAdminError()
@@ -1303,14 +1505,49 @@ class AdminViewModel @Inject constructor(
 
                 batch.commit().await()
 
+                _users.value = _users.value.map { user ->
+                    if (user.docId == userDocId) {
+                        user.copy(
+                            isBlocked = blocked,
+                            isApproved = if (role == "shopkeeper") !blocked else true
+                        )
+                    } else {
+                        user
+                    }
+                }
+
+                if (role == "shopkeeper" && shopId.isNotBlank()) {
+                    _shops.value = _shops.value.map { shop ->
+                        if (shop.docId == shopId) {
+                            if (blocked) {
+                                shop.copy(
+                                    isBlocked = true,
+                                    isApproved = false,
+                                    isVisible = false,
+                                    isOpen = false,
+                                    visibilityStatus = "blocked",
+                                    hiddenReason = "Shopkeeper blocked by admin"
+                                )
+                            } else {
+                                shop.copy(
+                                    isBlocked = false,
+                                    isApproved = true,
+                                    isVisible = true,
+                                    isOpen = false,
+                                    visibilityStatus = "visible",
+                                    hiddenReason = ""
+                                )
+                            }
+                        } else {
+                            shop
+                        }
+                    }
+                }
+
                 _message.value = if (blocked) {
                     "User blocked successfully"
                 } else {
                     "User unblocked successfully"
-                }
-                refreshUsers()
-                if (role == "shopkeeper" && shopId.isNotBlank()) {
-                    refreshShops()
                 }
 
             } catch (e: Exception) {
@@ -1373,8 +1610,24 @@ class AdminViewModel @Inject constructor(
                     .update(updates)
                     .await()
 
+                _users.value = _users.value.map { user ->
+                    if (user.docId == userDocId) {
+                        user.copy(
+                            role = updates["role"] as String,
+                            isApproved = updates["isApproved"] as? Boolean ?: user.isApproved,
+                            isBlocked = updates["isBlocked"] as? Boolean ?: user.isBlocked,
+                            isDeleted = updates["isDeleted"] as? Boolean ?: user.isDeleted,
+                            shopId = updates["shopId"] as? String ?: user.shopId
+                        )
+                    } else {
+                        user
+                    }
+                }.sortedWith(
+                    compareBy<AdminUser> { it.role }
+                        .thenBy { it.name.lowercase() }
+                )
+
                 _message.value = "User role updated to $cleanRole"
-                refreshUsers()
 
             } catch (e: Exception) {
                 val readableError = e.readableAdminError()
@@ -1408,7 +1661,22 @@ class AdminViewModel @Inject constructor(
                 orderedShops.add(0, selectedShop)
 
                 updateShopDisplayOrders(orderedShops)
-                refreshShops()
+
+                val displayOrderById = orderedShops
+                    .mapIndexed { index, s -> s.docId to (index + 1) * 10 }
+                    .toMap()
+
+                _shops.value = _shops.value.map { s ->
+                    val newDisplayOrder = displayOrderById[s.docId]
+                    if (newDisplayOrder != null) {
+                        s.copy(displayOrder = newDisplayOrder)
+                    } else {
+                        s
+                    }
+                }.sortedWith(
+                    compareBy<AdminShop> { it.displayOrder }
+                        .thenBy { it.name.lowercase() }
+                )
 
                 _message.value = "Shop moved to top"
             } catch (e: Exception) {
@@ -1444,7 +1712,22 @@ class AdminViewModel @Inject constructor(
                 orderedShops[currentIndex] = temp
 
                 updateShopDisplayOrders(orderedShops)
-                refreshShops()
+
+                val displayOrderById = orderedShops
+                    .mapIndexed { index, s -> s.docId to (index + 1) * 10 }
+                    .toMap()
+
+                _shops.value = _shops.value.map { s ->
+                    val newDisplayOrder = displayOrderById[s.docId]
+                    if (newDisplayOrder != null) {
+                        s.copy(displayOrder = newDisplayOrder)
+                    } else {
+                        s
+                    }
+                }.sortedWith(
+                    compareBy<AdminShop> { it.displayOrder }
+                        .thenBy { it.name.lowercase() }
+                )
 
                 _message.value = "Shop moved up"
             } catch (e: Exception) {
@@ -1480,7 +1763,22 @@ class AdminViewModel @Inject constructor(
                 orderedShops[currentIndex] = temp
 
                 updateShopDisplayOrders(orderedShops)
-                refreshShops()
+
+                val displayOrderById = orderedShops
+                    .mapIndexed { index, s -> s.docId to (index + 1) * 10 }
+                    .toMap()
+
+                _shops.value = _shops.value.map { s ->
+                    val newDisplayOrder = displayOrderById[s.docId]
+                    if (newDisplayOrder != null) {
+                        s.copy(displayOrder = newDisplayOrder)
+                    } else {
+                        s
+                    }
+                }.sortedWith(
+                    compareBy<AdminShop> { it.displayOrder }
+                        .thenBy { it.name.lowercase() }
+                )
 
                 _message.value = "Shop moved down"
             } catch (e: Exception) {

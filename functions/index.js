@@ -1249,6 +1249,35 @@ exports.sendOrderStatusNotificationToStudent = onDocumentUpdated(
       return;
     }
 
+    // Idempotency guard: Cloud Functions/Eventarc triggers are at-least-once,
+    // not exactly-once. event.id is the stable identifier of this logical
+    // event and is unchanged across redeliveries/retries, so it is used as
+    // the dedup key. The marker is created atomically before the FCM send;
+    // a redelivered event finds the marker already present and returns
+    // without sending a duplicate notification.
+    const eventId = event.id;
+    const processedEventRef = db
+      .collection("processedNotificationEvents")
+      .doc(eventId);
+
+    try {
+      await processedEventRef.create({
+        orderId,
+        studentId,
+        status: afterStatus,
+        processedAt: Date.now(),
+      });
+    } catch (err) {
+      if (err.code === 6) {
+        logger.info("Student notification event already processed; skipping", {
+          orderId,
+          eventId,
+        });
+        return;
+      }
+      throw err;
+    }
+
     const studentSnap = await db.collection("users").doc(studentId).get();
 
     if (!studentSnap.exists) {
@@ -1319,6 +1348,34 @@ exports.sendNewOrderNotificationToShopkeeper = onDocumentCreated(
         orderId,
       });
       return;
+    }
+
+    // Idempotency guard: Cloud Functions/Eventarc triggers are at-least-once,
+    // not exactly-once. event.id is the stable identifier of this logical
+    // event and is unchanged across redeliveries/retries, so it is used as
+    // the dedup key. The marker is created atomically before the FCM send;
+    // a redelivered event finds the marker already present and returns
+    // without sending a duplicate notification.
+    const eventId = event.id;
+    const processedEventRef = db
+      .collection("processedNotificationEvents")
+      .doc(eventId);
+
+    try {
+      await processedEventRef.create({
+        orderId,
+        shopId,
+        processedAt: Date.now(),
+      });
+    } catch (err) {
+      if (err.code === 6) {
+        logger.info("Shopkeeper notification event already processed; skipping", {
+          orderId,
+          eventId,
+        });
+        return;
+      }
+      throw err;
     }
 
     const shopkeepersSnap = await db
