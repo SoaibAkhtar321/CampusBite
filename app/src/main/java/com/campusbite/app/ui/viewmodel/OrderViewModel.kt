@@ -443,6 +443,7 @@ class OrderViewModel @Inject constructor(
         userOrdersListener = firestore.collection("orders")
             .whereEqualTo("studentId", userId)
             .orderBy("createdAt", com.google.firebase.firestore.Query.Direction.DESCENDING)
+            .limit(1)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
                     Log.e("OrderVM", "User orders listener error", error)
