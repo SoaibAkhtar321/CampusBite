@@ -18,7 +18,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import androidx.lifecycle.lifecycleScope
 import androidx.navigation.compose.rememberNavController
+import com.campusbite.app.data.local.FcmTokenSyncPrefs
 import com.campusbite.app.ui.navigation.NavGraph
 import com.campusbite.app.ui.theme.CampusBiteTheme
 import com.google.firebase.auth.FirebaseAuth
@@ -26,6 +28,7 @@ import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.messaging.FirebaseMessaging
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.launch
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
@@ -40,6 +43,10 @@ class MainActivity : ComponentActivity() {
 
     private val messaging: FirebaseMessaging by lazy {
         FirebaseMessaging.getInstance()
+    }
+
+    private val fcmTokenSyncPrefs: FcmTokenSyncPrefs by lazy {
+        FcmTokenSyncPrefs(applicationContext)
     }
 
     private val authStateListener = FirebaseAuth.AuthStateListener { firebaseAuth ->
@@ -142,7 +149,18 @@ class MainActivity : ComponentActivity() {
     private fun fetchAndSaveFcmToken(userId: String) {
         messaging.token
             .addOnSuccessListener { token ->
-                saveFcmTokenToFirestore(userId, token)
+                lifecycleScope.launch {
+                    val alreadySynced = fcmTokenSyncPrefs.isAlreadySynced(
+                        uid = userId,
+                        token = token
+                    )
+
+                    if (alreadySynced) {
+                        return@launch
+                    }
+
+                    saveFcmTokenToFirestore(userId, token)
+                }
             }
             .addOnFailureListener { error ->
                 Log.e(TAG, "Failed to fetch FCM token", error)
@@ -162,6 +180,11 @@ class MainActivity : ComponentActivity() {
                     "fcmTokenUpdatedAt" to FieldValue.serverTimestamp()
                 )
             )
+            .addOnSuccessListener {
+                lifecycleScope.launch {
+                    fcmTokenSyncPrefs.markSynced(uid = userId, token = token)
+                }
+            }
             .addOnFailureListener { error ->
                 Log.e(TAG, "Failed to save FCM token", error)
             }
