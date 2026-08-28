@@ -479,11 +479,13 @@ private fun PendingShopkeepersTab(
     }
 
 
-    val filteredUsers = pendingShopkeepers.filter { user ->
-        matchesUserSearch(
-            user = user,
-            query = query
-        )
+    val filteredUsers = remember(pendingShopkeepers, query) {
+        pendingShopkeepers.filter { user ->
+            matchesUserSearch(
+                user = user,
+                query = query
+            )
+        }
     }
 
     Column(
@@ -662,13 +664,15 @@ private fun ShopsTab(
     }
 
 
-    val filteredShops = shops.filter { shop ->
-        val q = query.trim().lowercase()
+    val filteredShops = remember(shops, query) {
+        shops.filter { shop ->
+            val q = query.trim().lowercase()
 
-        q.isBlank() ||
-                shop.name.lowercase().contains(q) ||
-                shop.shopId.lowercase().contains(q) ||
-                shop.ownerUid.lowercase().contains(q)
+            q.isBlank() ||
+                    shop.name.lowercase().contains(q) ||
+                    shop.shopId.lowercase().contains(q) ||
+                    shop.ownerUid.lowercase().contains(q)
+        }
     }
 
     Column(
@@ -1073,11 +1077,13 @@ private fun UsersTab(
     }
 
 
-    val filteredUsers = users.filter { user ->
-        matchesUserSearch(
-            user = user,
-            query = query
-        )
+    val filteredUsers = remember(users, query) {
+        users.filter { user ->
+            matchesUserSearch(
+                user = user,
+                query = query
+            )
+        }
     }
 
     Column(
