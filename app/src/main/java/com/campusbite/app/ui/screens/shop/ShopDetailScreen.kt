@@ -55,6 +55,7 @@ fun ShopDetailScreen(
     val menuItems by viewModel.menuItems.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val cartItems by cartViewModel.cartItems.collectAsState()
+    val cartItemsById = remember(cartItems) { cartItems.associateBy { it.itemId } }
     val showDialog by cartViewModel.showShopConflict.collectAsState()
 
     val normalizedId = shopId.trim().lowercase()
@@ -196,7 +197,7 @@ fun ShopDetailScreen(
                         items(shopMenuItems, key = { it.itemId }) { item ->
                             ShopMenuItemCard(
                                 menuItem = item,
-                                quantity = cartItems.find { it.itemId == item.itemId }?.quantity ?: 0,
+                                quantity = cartItemsById[item.itemId]?.quantity ?: 0,
                                 isShopOpen = shop?.isOpen == true,
                                 onAddClick = { cartViewModel.addItem(item) },
                                 onRemoveClick = { cartViewModel.removeItem(item.itemId) }
