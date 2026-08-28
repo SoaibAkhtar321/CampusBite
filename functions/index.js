@@ -11,6 +11,18 @@ admin.initializeApp();
 
 const db = admin.firestore();
 const FieldValue = admin.firestore.FieldValue;
+const Timestamp = admin.firestore.Timestamp;
+
+// TTL for idempotency-marker collections (processedNotificationEvents,
+// processedAnalyticsEvents). These docs exist only to dedup at-least-once
+// Cloud Functions/Eventarc retries and are never read again after that
+// short window, so they are expired automatically via a Firestore TTL
+// policy on `expiresAt` rather than kept forever or cleaned up manually.
+const PROCESSED_EVENT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+function processedEventExpiresAt() {
+  return Timestamp.fromMillis(Date.now() + PROCESSED_EVENT_TTL_MS);
+}
 
 const REGION = "us-central1";
 const ORDER_NOTIFICATION_CHANNEL_ID = "campusbite_order_alerts_v2";
@@ -1262,6 +1274,7 @@ exports.sendOrderStatusNotificationToStudent = onDocumentUpdated(
         studentId,
         status: afterStatus,
         processedAt: Date.now(),
+        expiresAt: processedEventExpiresAt(),
       });
     } catch (err) {
       if (err.code === 6) {
@@ -1362,6 +1375,7 @@ exports.sendNewOrderNotificationToShopkeeper = onDocumentCreated(
         orderId,
         shopId,
         processedAt: Date.now(),
+        expiresAt: processedEventExpiresAt(),
       });
     } catch (err) {
       if (err.code === 6) {
@@ -1687,6 +1701,7 @@ exports.updateShopAnalyticsOnOrderChange = onDocumentUpdated(
         orderId,
         shopId,
         processedAt: Date.now(),
+        expiresAt: processedEventExpiresAt(),
       });
 
       tx.set(dailyRef, updates, {
