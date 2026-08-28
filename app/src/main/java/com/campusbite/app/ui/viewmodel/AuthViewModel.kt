@@ -33,10 +33,24 @@ class AuthViewModel @Inject constructor(
             val result = authRepository.signInWithGoogle(idToken)
 
             if (result.isSuccess) {
-                val profileExists = result.getOrNull() ?: false
+                val session = result.getOrNull()
 
-                if (profileExists) {
-                    navigateByUserRole()
+                if (session != null) {
+                    _userRole.value = session.role
+
+                    _authState.value = when (session.role) {
+                        "admin" -> AuthState.AdminSuccess
+
+                        "shopkeeper" -> {
+                            if (session.isApproved) {
+                                AuthState.ShopkeeperSuccess
+                            } else {
+                                AuthState.ShopkeeperPending
+                            }
+                        }
+
+                        else -> AuthState.StudentSuccess
+                    }
                 } else {
                     _authState.value = AuthState.GoogleProfileRequired
                 }
@@ -104,34 +118,6 @@ class AuthViewModel @Inject constructor(
         return true
     }
 
-    private suspend fun navigateByUserRole() {
-        val isBlocked = authRepository.isUserBlocked()
-
-        if (isBlocked) {
-            _authState.value = AuthState.Blocked
-            return
-        }
-
-        val role = authRepository.getUserRole()
-        val isApproved = authRepository.isShopkeeperApproved()
-
-        _userRole.value = role
-
-        _authState.value = when (role) {
-            "admin" -> AuthState.AdminSuccess
-
-            "shopkeeper" -> {
-                if (isApproved) {
-                    AuthState.ShopkeeperSuccess
-                } else {
-                    AuthState.ShopkeeperPending
-                }
-            }
-
-            else -> AuthState.StudentSuccess
-        }
-    }
-
     fun logout() {
         authRepository.logout()
         _authState.value = AuthState.Idle
@@ -159,6 +145,38 @@ class AuthViewModel @Inject constructor(
     suspend fun hasCompletedProfile(): Boolean {
         return authRepository.hasCompletedProfile()
     }
+
+    /**
+     * Single-read replacement for the splash-screen sequence of
+     * hasCompletedProfile() + getUserRole() + isShopkeeperApproved().
+     * Fetches users/{uid} once and returns the destination to navigate to.
+     */
+    suspend fun resolveStartupDestination(): StartupDestination {
+        val session = authRepository.getUserSessionSnapshot()
+            ?: return StartupDestination.CompleteProfile
+
+        return when (session.role) {
+            "admin" -> StartupDestination.Admin
+
+            "shopkeeper" -> {
+                if (session.isApproved) {
+                    StartupDestination.ShopkeeperApproved
+                } else {
+                    StartupDestination.ShopkeeperPending
+                }
+            }
+
+            else -> StartupDestination.Student
+        }
+    }
+}
+
+sealed class StartupDestination {
+    object CompleteProfile : StartupDestination()
+    object Admin : StartupDestination()
+    object ShopkeeperApproved : StartupDestination()
+    object ShopkeeperPending : StartupDestination()
+    object Student : StartupDestination()
 }
 
 sealed class AuthState {

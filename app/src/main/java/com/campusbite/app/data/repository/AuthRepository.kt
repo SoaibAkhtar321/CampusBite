@@ -16,7 +16,61 @@ class AuthRepository @Inject constructor(
 ) {
     val currentUser get() = auth.currentUser
 
-    suspend fun signInWithGoogle(idToken: String): Result<Boolean> {
+    /**
+     * Consolidated view of a users/{uid} document, derived from a single
+     * Firestore read, for startup/session and login decision checkpoints.
+     * Field semantics mirror getUserRole()/isShopkeeperApproved()/isUserBlocked().
+     */
+    data class UserSessionSnapshot(
+        val isBlocked: Boolean,
+        val role: String,
+        val isApproved: Boolean
+    )
+
+    private fun userSessionSnapshotFrom(
+        userDoc: com.google.firebase.firestore.DocumentSnapshot
+    ): UserSessionSnapshot {
+        val role = userDoc.getString("role") ?: "student"
+        val isApproved = if (role != "shopkeeper") {
+            true
+        } else {
+            userDoc.getBoolean("isApproved") ?: false
+        }
+
+        return UserSessionSnapshot(
+            isBlocked = userDoc.getBoolean("isBlocked") ?: false,
+            role = role,
+            isApproved = isApproved
+        )
+    }
+
+    /**
+     * Single-read replacement for calling hasCompletedProfile() + getUserRole()
+     * + isShopkeeperApproved() back-to-back for the current user. Returns null
+     * if there is no signed-in user, the profile document does not exist, or
+     * the read failed — the same fallback condition hasCompletedProfile()
+     * signalled with `false` before.
+     */
+    suspend fun getUserSessionSnapshot(): UserSessionSnapshot? {
+        val uid = auth.currentUser?.uid ?: return null
+
+        return try {
+            val userDoc = firestore.collection("users")
+                .document(uid)
+                .get()
+                .await()
+
+            if (!userDoc.exists()) {
+                return null
+            }
+
+            userSessionSnapshotFrom(userDoc)
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    suspend fun signInWithGoogle(idToken: String): Result<UserSessionSnapshot?> {
         return try {
             val credential = GoogleAuthProvider.getCredential(idToken, null)
 
@@ -29,16 +83,16 @@ class AuthRepository @Inject constructor(
                 .await()
 
             if (!userDoc.exists()) {
-                return Result.success(false)
+                return Result.success(null)
             }
 
-            val isBlocked = userDoc.getBoolean("isBlocked") ?: false
+            val session = userSessionSnapshotFrom(userDoc)
 
-            if (isBlocked) {
+            if (session.isBlocked) {
                 return Result.failure(Exception("Your account has been blocked by admin."))
             }
 
-            Result.success(true)
+            Result.success(session)
         } catch (e: Exception) {
             Result.failure(e)
         }

@@ -18,6 +18,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.campusbite.app.ui.viewmodel.AuthViewModel
+import com.campusbite.app.ui.viewmodel.StartupDestination
 import kotlinx.coroutines.delay
 
 @Composable
@@ -39,31 +40,24 @@ fun SplashScreen(
                 return@LaunchedEffect
             }
 
-            val hasCompletedProfile = viewModel.hasCompletedProfile()
+            when (viewModel.resolveStartupDestination()) {
+                StartupDestination.CompleteProfile -> {
+                    onNavigateToCompleteProfile()
+                }
 
-            if (!hasCompletedProfile) {
-                onNavigateToCompleteProfile()
-                return@LaunchedEffect
-            }
-
-            val role = viewModel.getUserRole()
-
-            when (role) {
-                "admin" -> {
+                StartupDestination.Admin -> {
                     onNavigateToAdmin()
                 }
 
-                "shopkeeper" -> {
-                    val isApproved = viewModel.isShopkeeperApproved()
-
-                    if (isApproved) {
-                        onNavigateToShopkeeper()
-                    } else {
-                        onNavigateToPending()
-                    }
+                StartupDestination.ShopkeeperApproved -> {
+                    onNavigateToShopkeeper()
                 }
 
-                else -> {
+                StartupDestination.ShopkeeperPending -> {
+                    onNavigateToPending()
+                }
+
+                StartupDestination.Student -> {
                     onNavigateToStudent()
                 }
             }
