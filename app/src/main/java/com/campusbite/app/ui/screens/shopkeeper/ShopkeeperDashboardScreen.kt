@@ -153,29 +153,39 @@ fun ShopkeeperDashboardScreen(
         mutableStateOf(false)
     }
 
-    val activeOrders = orders.filter { order ->
-        order.status.lowercase() in listOf(
-            OrderStatusValue.PENDING,
-            OrderStatusValue.PREPARING,
-            OrderStatusValue.READY
-        )
+    val activeOrders = remember(orders) {
+        orders.filter { order ->
+            order.status.lowercase() in listOf(
+                OrderStatusValue.PENDING,
+                OrderStatusValue.PREPARING,
+                OrderStatusValue.READY
+            )
+        }
     }
 
-    val refundPendingOrders = orders.filter { order ->
-        order.status.lowercase() == OrderStatusValue.CANCELLED &&
-                order.refundStatus.lowercase() == RefundStatusValue.REFUND_PENDING
+    val refundPendingOrders = remember(orders) {
+        orders.filter { order ->
+            order.status.lowercase() == OrderStatusValue.CANCELLED &&
+                    order.refundStatus.lowercase() == RefundStatusValue.REFUND_PENDING
+        }
     }
 
-    val pendingCount = activeOrders.count {
-        it.status.lowercase() == OrderStatusValue.PENDING
+    val pendingCount = remember(activeOrders) {
+        activeOrders.count {
+            it.status.lowercase() == OrderStatusValue.PENDING
+        }
     }
 
-    val preparingCount = activeOrders.count {
-        it.status.lowercase() == OrderStatusValue.PREPARING
+    val preparingCount = remember(activeOrders) {
+        activeOrders.count {
+            it.status.lowercase() == OrderStatusValue.PREPARING
+        }
     }
 
-    val readyCount = activeOrders.count {
-        it.status.lowercase() == OrderStatusValue.READY
+    val readyCount = remember(activeOrders) {
+        activeOrders.count {
+            it.status.lowercase() == OrderStatusValue.READY
+        }
     }
 
     Scaffold(
@@ -1641,7 +1651,7 @@ private fun CancelOrderDialog(
             }
         }
     )
-} 
+}
 
 
 @Composable
