@@ -1467,13 +1467,40 @@ exports.sendNewOrderNotificationToShopkeeper = onDocumentCreated(
       return;
     }
 
+    // Group by userId before writing: multiple invalid tokens can belong to
+    // the same shopkeeper (multi-device), so this avoids issuing several
+    // sequential Firestore updates against the same user doc (which was
+    // also wasteful when a single user had 2+ invalid tokens, since each
+    // update only saw the pre-update snapshot's `user` object passed in
+    // from the original query results, not any change from a prior write
+    // in the same loop). Firestore's arrayRemove is safe to pass every
+    // invalid token for that user in one call.
+    const invalidTokensByUser = new Map();
+
     for (const token of invalidTokens) {
       const owner = tokenOwners.find((item) => item.token === token);
 
-      if (owner) {
-        await removeInvalidTokensFromUser(owner.userId, owner.user, [token]);
+      if (!owner) {
+        continue;
+      }
+
+      const existing = invalidTokensByUser.get(owner.userId);
+
+      if (existing) {
+        existing.tokens.push(token);
+      } else {
+        invalidTokensByUser.set(owner.userId, {
+          user: owner.user,
+          tokens: [token],
+        });
       }
     }
+
+    await Promise.all(
+      Array.from(invalidTokensByUser.entries()).map(([userId, entry]) =>
+        removeInvalidTokensFromUser(userId, entry.user, entry.tokens)
+      )
+    );
   }
 );
 
