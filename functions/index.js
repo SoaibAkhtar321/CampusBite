@@ -1057,11 +1057,7 @@ exports.createOrder = onCall(
           );
         }
 
-        const menuItemSnaps = [];
-
-        for (const ref of menuItemRefs) {
-          menuItemSnaps.push(await tx.get(ref));
-        }
+        const menuItemSnaps = await tx.getAll(...menuItemRefs);
 
         let totalPrice = 0;
         const orderItems = [];
