@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.campusbite.app.data.model.Shop
 import com.campusbite.app.data.model.User
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.AggregateSource
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -14,10 +15,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
-import java.text.SimpleDateFormat
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
-import java.util.Date
+import java.util.Calendar
 import java.util.Locale
 import javax.inject.Inject
 
@@ -157,44 +157,40 @@ class ShopkeeperProfileViewModel @Inject constructor(
 
         viewModelScope.launch {
             try {
-                val snapshot = firestore.collection("orders")
+                // Local calendar-day boundaries in the device's default timezone,
+                // matching the previous "yyyy-MM-dd" (Locale.getDefault()) string-prefix
+                // comparison semantics exactly, without downloading every order doc.
+                val startOfDayCalendar = Calendar.getInstance().apply {
+                    set(Calendar.HOUR_OF_DAY, 0)
+                    set(Calendar.MINUTE, 0)
+                    set(Calendar.SECOND, 0)
+                    set(Calendar.MILLISECOND, 0)
+                }
+                val startOfDayMillis = startOfDayCalendar.timeInMillis
+                val endOfDayMillis = startOfDayCalendar.apply {
+                    add(Calendar.DAY_OF_MONTH, 1)
+                }.timeInMillis
+
+                val pendingCountSnapshot = firestore.collection("orders")
                     .whereEqualTo("shopId", shopId)
-                    .get()
+                    .whereIn("status", listOf("pending", "accepted", "preparing"))
+                    .count()
+                    .get(AggregateSource.SERVER)
                     .await()
 
-                val todayPrefix = SimpleDateFormat(
-                    "yyyy-MM-dd",
-                    Locale.getDefault()
-                ).format(Date())
-
-                var pending = 0
-                var completedToday = 0
-
-                for (doc in snapshot.documents) {
-                    val status = doc.getString("status")?.lowercase().orEmpty()
-                    val createdAtMillis = doc.getLong("createdAt") ?: 0L
-
-                    val createdDate = SimpleDateFormat(
-                        "yyyy-MM-dd",
-                        Locale.getDefault()
-                    ).format(Date(createdAtMillis))
-
-                    if (status in listOf("pending", "accepted", "preparing")) {
-                        pending++
-                    }
-
-                    if (
-                        createdDate == todayPrefix &&
-                        status in listOf("completed", "picked_up")
-                    ) {
-                        completedToday++
-                    }
-                }
+                val completedTodayCountSnapshot = firestore.collection("orders")
+                    .whereEqualTo("shopId", shopId)
+                    .whereIn("status", listOf("completed", "picked_up"))
+                    .whereGreaterThanOrEqualTo("createdAt", startOfDayMillis)
+                    .whereLessThan("createdAt", endOfDayMillis)
+                    .count()
+                    .get(AggregateSource.SERVER)
+                    .await()
 
                 _uiState.update {
                     it.copy(
-                        pendingOrdersCount = pending,
-                        completedTodayCount = completedToday
+                        pendingOrdersCount = pendingCountSnapshot.count.toInt(),
+                        completedTodayCount = completedTodayCountSnapshot.count.toInt()
                     )
                 }
             } catch (_: Exception) {
