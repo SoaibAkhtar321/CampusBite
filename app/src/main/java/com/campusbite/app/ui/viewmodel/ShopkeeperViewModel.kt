@@ -96,6 +96,21 @@ class ShopkeeperViewModel @Inject constructor(
     private var monthAnalyticsListener: ListenerRegistration? = null
     private var lifetimeAnalyticsListener: ListenerRegistration? = null
 
+    // Tracks whether each live analytics listener has delivered at least one
+    // snapshot. Used by loadAnalytics() to skip the redundant direct .get()
+    // reads once the listeners (started in listenToAnalytics()) are already
+    // keeping todayAnalytics/monthAnalytics/lifetimeAnalytics current — while
+    // still falling back to a direct read if a listener hasn't fired yet, so
+    // the Analytics screen never has to show zero/stale values while waiting.
+    private var hasTodayAnalyticsSnapshot = false
+    private var hasMonthAnalyticsSnapshot = false
+    private var hasLifetimeAnalyticsSnapshot = false
+
+    private val analyticsListenersReady: Boolean
+        get() = hasTodayAnalyticsSnapshot &&
+                hasMonthAnalyticsSnapshot &&
+                hasLifetimeAnalyticsSnapshot
+
     private var todayAnalytics = ShopkeeperAnalyticsSnapshot()
     private var monthAnalytics = ShopkeeperAnalyticsSnapshot()
     private var lifetimeAnalytics = ShopkeeperAnalyticsSnapshot()
@@ -303,6 +318,7 @@ class ShopkeeperViewModel @Inject constructor(
                 }
 
                 todayAnalytics = snapshot.toShopkeeperAnalyticsSnapshot()
+                hasTodayAnalyticsSnapshot = true
                 updateSalesSummary()
             }
 
@@ -314,6 +330,7 @@ class ShopkeeperViewModel @Inject constructor(
                 }
 
                 monthAnalytics = snapshot.toShopkeeperAnalyticsSnapshot()
+                hasMonthAnalyticsSnapshot = true
                 updateSalesSummary()
             }
 
@@ -325,6 +342,7 @@ class ShopkeeperViewModel @Inject constructor(
                 }
 
                 lifetimeAnalytics = snapshot.toShopkeeperAnalyticsSnapshot()
+                hasLifetimeAnalyticsSnapshot = true
                 updateSalesSummary()
             }
     }
@@ -347,26 +365,39 @@ class ShopkeeperViewModel @Inject constructor(
                     return@launch
                 }
 
-                val today = LocalDate.now().toString()
-                val currentMonth = YearMonth.now().toString()
+                // The 3 analytics documents are already kept current by the
+                // live listeners started in listenToAnalytics() (running
+                // since this ViewModel was created). Once all 3 have
+                // delivered their first snapshot, re-reading them here with
+                // one-off .get() calls would just fetch the same data the
+                // listeners already pushed into todayAnalytics/monthAnalytics/
+                // lifetimeAnalytics — so skip the redundant reads and reuse
+                // that in-memory data instead. If a listener hasn't fired yet
+                // (e.g. this is called before its first snapshot arrives),
+                // fall back to a direct read so the screen never shows a
+                // zero/stale value while waiting for the listener.
+                if (!analyticsListenersReady) {
+                    val today = LocalDate.now().toString()
+                    val currentMonth = YearMonth.now().toString()
 
-                val todaySnapshot = dailyAnalyticsRef(
-                    shopId = finalShopId,
-                    date = today
-                ).get().await()
+                    val todaySnapshot = dailyAnalyticsRef(
+                        shopId = finalShopId,
+                        date = today
+                    ).get().await()
 
-                val monthSnapshot = monthlyAnalyticsRef(
-                    shopId = finalShopId,
-                    month = currentMonth
-                ).get().await()
+                    val monthSnapshot = monthlyAnalyticsRef(
+                        shopId = finalShopId,
+                        month = currentMonth
+                    ).get().await()
 
-                val lifetimeSnapshot = lifetimeAnalyticsRef(
-                    shopId = finalShopId
-                ).get().await()
+                    val lifetimeSnapshot = lifetimeAnalyticsRef(
+                        shopId = finalShopId
+                    ).get().await()
 
-                todayAnalytics = todaySnapshot.toShopkeeperAnalyticsSnapshot()
-                monthAnalytics = monthSnapshot.toShopkeeperAnalyticsSnapshot()
-                lifetimeAnalytics = lifetimeSnapshot.toShopkeeperAnalyticsSnapshot()
+                    todayAnalytics = todaySnapshot.toShopkeeperAnalyticsSnapshot()
+                    monthAnalytics = monthSnapshot.toShopkeeperAnalyticsSnapshot()
+                    lifetimeAnalytics = lifetimeSnapshot.toShopkeeperAnalyticsSnapshot()
+                }
 
                 updateAnalyticsStateFromCurrentData(
                     isLoading = false,

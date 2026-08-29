@@ -46,6 +46,15 @@ class ProfileViewModel @Inject constructor(
     )
     private var userProfileListener: ListenerRegistration? = null
 
+    // Tracks the shopId last fetched via fetchShopDetails(), so repeated
+    // emissions of the users/{uid} listener that don't change shopId (e.g.
+    // local-then-server delivery of the same write, or unrelated field
+    // updates such as FCM token sync) don't trigger a redundant shop
+    // document read. Shop-setting changes made from this session already
+    // update _upiId/_openingTime/etc. directly (see updateShopSettings),
+    // so they don't depend on this refetch path.
+    private var lastFetchedShopId: String? = null
+
     init {
         fetchUserDetails()
     }
@@ -66,7 +75,8 @@ class ProfileViewModel @Inject constructor(
 
                 val shopId = user?.shopId.orEmpty()
 
-                if (shopId.isNotBlank()) {
+                if (shopId.isNotBlank() && shopId != lastFetchedShopId) {
+                    lastFetchedShopId = shopId
                     fetchShopDetails(shopId)
                 }
             }

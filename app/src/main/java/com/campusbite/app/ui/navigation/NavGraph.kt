@@ -39,6 +39,7 @@ import com.campusbite.app.ui.viewmodel.AuthViewModel
 import com.campusbite.app.ui.viewmodel.CartViewModel
 import com.campusbite.app.ui.viewmodel.HomeViewModel
 import com.campusbite.app.ui.viewmodel.OrderViewModel
+import com.campusbite.app.ui.viewmodel.ShopkeeperViewModel
 import kotlinx.coroutines.delay
 
 @Composable
@@ -300,11 +301,25 @@ fun NavGraph(
                 )
             }
 
-            composable(Routes.SHOPKEEPER_ANALYTICS) {
+            composable(Routes.SHOPKEEPER_ANALYTICS) { backStackEntry ->
+                // Shares the ShopkeeperViewModel instance (and its live
+                // Firestore listeners) with SHOPKEEPER_DASHBOARD instead of
+                // spinning up a second full set of listeners, mirroring the
+                // HomeViewModel/STUDENT_HOME pattern used by SHOP_DETAIL/CART
+                // above. SHOPKEEPER_ANALYTICS is only ever navigated to from
+                // SHOPKEEPER_DASHBOARD (see onNavigateToAnalytics below), so
+                // that entry is guaranteed to be on the back stack here.
+                val parentEntry = remember(backStackEntry) {
+                    navController.getBackStackEntry(Routes.SHOPKEEPER_DASHBOARD)
+                }
+
+                val shopkeeperViewModel: ShopkeeperViewModel = hiltViewModel(parentEntry)
+
                 ShopkeeperAnalyticsScreen(
                     onNavigateBack = {
                         navController.popBackStack()
-                    }
+                    },
+                    viewModel = shopkeeperViewModel
                 )
             }
 
