@@ -33,8 +33,6 @@ import kotlinx.coroutines.tasks.await
 import java.time.LocalDate
 import java.time.YearMonth
 import javax.inject.Inject
-import com.google.firebase.firestore.SetOptions
-import com.google.firebase.firestore.Transaction
 
 data class ShopkeeperSalesSummary(
     val todayOrders: Int = 0,
@@ -413,53 +411,6 @@ class ShopkeeperViewModel @Inject constructor(
                 )
             }
         }
-    }
-
-    private fun incrementCancelledAnalytics(
-        transaction: Transaction,
-        shopId: String,
-        pickupDate: String,
-        month: String
-    ) {
-        val dailyRef = firestore.collection("shopAnalytics")
-            .document(shopId)
-            .collection("daily")
-            .document(pickupDate)
-
-        val monthlyRef = firestore.collection("shopAnalytics")
-            .document(shopId)
-            .collection("monthly")
-            .document(month)
-
-        val lifetimeRef = firestore.collection("shopAnalytics")
-            .document(shopId)
-            .collection("lifetime")
-            .document("summary")
-
-        val now = System.currentTimeMillis()
-
-        val updateData = mapOf(
-            "cancelledOrders" to FieldValue.increment(1),
-            "updatedAt" to now
-        )
-
-        transaction.set(
-            dailyRef,
-            updateData,
-            SetOptions.merge()
-        )
-
-        transaction.set(
-            monthlyRef,
-            updateData,
-            SetOptions.merge()
-        )
-
-        transaction.set(
-            lifetimeRef,
-            updateData,
-            SetOptions.merge()
-        )
     }
 
     private suspend fun resolveShopIdForAnalytics(): String {

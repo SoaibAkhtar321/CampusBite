@@ -11,12 +11,10 @@ import com.campusbite.app.util.PaymentStatusValue
 import com.campusbite.app.util.RefundStatusValue
 import com.google.firebase.firestore.DocumentReference
 import com.google.firebase.firestore.DocumentSnapshot
-import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FirebaseFirestoreException
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.Query
-import com.google.firebase.firestore.SetOptions
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -1973,23 +1971,6 @@ class AdminViewModel @Inject constructor(
                         )
                     )
 
-                    val orderShopId = orderDoc.getString("shopId").orEmpty()
-
-                    val pickupDate = orderDoc.getString("pickupDate")
-                        ?.takeIf { it.isNotBlank() }
-                        ?: LocalDate.now().toString()
-
-                    val month = pickupDate.take(7)
-
-                    if (orderShopId.isNotBlank()) {
-                        incrementCancelledAnalytics(
-                            transaction = transaction,
-                            shopId = orderShopId,
-                            pickupDate = pickupDate,
-                            month = month
-                        )
-                    }
-
                     null
                 }.await()
 
@@ -2053,36 +2034,6 @@ class AdminViewModel @Inject constructor(
                 }
             )
         }
-    }
-
-    private fun incrementCancelledAnalytics(
-        transaction: com.google.firebase.firestore.Transaction,
-        shopId: String,
-        pickupDate: String,
-        month: String
-    ) {
-        val dailyRef = dailyAnalyticsRef(
-            shopId = shopId,
-            date = pickupDate
-        )
-
-        val monthlyRef = monthlyAnalyticsRef(
-            shopId = shopId,
-            month = month
-        )
-
-        val lifetimeRef = lifetimeAnalyticsRef(
-            shopId = shopId
-        )
-
-        val update = mapOf(
-            "cancelledOrders" to FieldValue.increment(1),
-            "updatedAt" to FieldValue.serverTimestamp()
-        )
-
-        transaction.set(dailyRef, update, SetOptions.merge())
-        transaction.set(monthlyRef, update, SetOptions.merge())
-        transaction.set(lifetimeRef, update, SetOptions.merge())
     }
 
     fun clearMessage() {
