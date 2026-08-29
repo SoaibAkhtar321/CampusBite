@@ -727,22 +727,19 @@ class OrderViewModel @Inject constructor(
                     return@launch
                 }
 
-                val availableSlots = mutableListOf<String>()
+                val availabilityBySlot = slotAvailabilityRepository.getSlotAvailabilityBatch(
+                    shopId = canonicalShopId,
+                    date = today,
+                    slots = generatedSlots,
+                    maxOrders = maxOrdersPerSlot
+                )
 
-                for (slotText in generatedSlots) {
-                    val availability = slotAvailabilityRepository.getSlotAvailability(
-                        shopId = canonicalShopId,
-                        date = today,
-                        slot = slotText,
-                        maxOrders = maxOrdersPerSlot
-                    )
+                val availableSlots = generatedSlots.filter { slotText ->
+                    val availability = availabilityBySlot[slotText]
+                    val closed = closedSlots.contains(slotText) || availability?.isClosed == true
+                    val hasCapacity = (availability?.orderCount ?: 0) < (availability?.maxOrders ?: maxOrdersPerSlot)
 
-                    val closed = closedSlots.contains(slotText) || availability.isClosed
-                    val hasCapacity = availability.orderCount < availability.maxOrders
-
-                    if (!closed && hasCapacity) {
-                        availableSlots.add(slotText)
-                    }
+                    !closed && hasCapacity
                 }
 
                 _slotUiState.value = SlotUiState(
@@ -828,6 +825,7 @@ class OrderViewModel @Inject constructor(
             ?.filterIsInstance<String>()
             ?: emptyList()
     }
+
     private fun getOrderStateKey(order: Order): String {
         return "${order.status.lowercase()}|${order.refundStatus.lowercase()}"
     }

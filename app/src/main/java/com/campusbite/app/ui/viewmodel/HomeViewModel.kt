@@ -333,6 +333,14 @@ class HomeViewModel @Inject constructor(
     ): List<MenuItem> {
         val processedQuery = query.lowercase().trim()
 
+        // Build the shopId -> lowercase name lookup once per filter pass
+        // instead of doing a linear scan of _shops.value (via getShopName)
+        // for every menu item. This was an O(items * shops) scan on every
+        // keystroke/category/price change; the map makes each lookup O(1).
+        val shopNameById = _shops.value.associate { shop ->
+            shop.shopId to shop.name.lowercase()
+        }
+
         return menuItems.filter { item ->
             val itemCategory = item.category.lowercase().trim()
             val selectedCategory = category.lowercase().trim()
@@ -347,7 +355,7 @@ class HomeViewModel @Inject constructor(
                 item.price >= range.start &&
                         item.price <= range.endInclusive
 
-            val shopName = getShopName(item.shopId).lowercase()
+            val shopName = shopNameById[item.shopId].orEmpty()
 
             val matchesSearch =
                 processedQuery.isEmpty() ||
