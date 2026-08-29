@@ -7,6 +7,7 @@ import com.campusbite.app.data.model.User
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.AggregateSource
 import com.google.firebase.firestore.DocumentSnapshot
+import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -326,18 +327,15 @@ class ShopkeeperProfileViewModel @Inject constructor(
     fun unblockSlot(slot: String) {
         val shopId = _uiState.value.shop?.shopId ?: return
 
-        val updatedSlots = _uiState.value.closedSlots
-            .filterNot { it == slot }
-
         viewModelScope.launch {
             try {
                 firestore.collection("shops")
                     .document(shopId)
-                    .update("closedSlots", updatedSlots)
+                    .update("closedSlots", FieldValue.arrayRemove(slot))
                     .await()
 
                 _uiState.update {
-                    it.copy(closedSlots = updatedSlots)
+                    it.copy(closedSlots = it.closedSlots.filterNot { s -> s == slot })
                 }
             } catch (e: Exception) {
                 _uiState.update {
@@ -359,17 +357,19 @@ class ShopkeeperProfileViewModel @Inject constructor(
         val nextSlot = allSlots.firstOrNull { it !in closedSlots }
             ?: return
 
-        val updatedSlots = closedSlots + nextSlot
-
         viewModelScope.launch {
             try {
                 firestore.collection("shops")
                     .document(shop.shopId)
-                    .update("closedSlots", updatedSlots)
+                    .update("closedSlots", FieldValue.arrayUnion(nextSlot))
                     .await()
 
                 _uiState.update {
-                    it.copy(closedSlots = updatedSlots)
+                    if (nextSlot in it.closedSlots) {
+                        it
+                    } else {
+                        it.copy(closedSlots = it.closedSlots + nextSlot)
+                    }
                 }
             } catch (e: Exception) {
                 _uiState.update {

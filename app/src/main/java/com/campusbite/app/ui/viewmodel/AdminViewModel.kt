@@ -284,18 +284,6 @@ class AdminViewModel @Inject constructor(
         }
     }
 
-    private fun refreshShops() {
-        viewModelScope.launch {
-            loadShops()
-        }
-    }
-
-    private fun refreshUsers() {
-        viewModelScope.launch {
-            loadUsers()
-        }
-    }
-
     private fun listenToPendingShopkeepers() {
         pendingShopkeepersListener?.remove()
 
@@ -708,70 +696,37 @@ class AdminViewModel @Inject constructor(
                 val shopRef = firestore.collection("shops")
                     .document(finalShopId)
 
-                val shopSnapshot = shopRef.get().await()
                 val now = System.currentTimeMillis()
 
-                val patchedShop: AdminShop
+                // Computed once, outside the transaction, so a transaction
+                // retry doesn't re-issue this separate collection scan.
+                // Only used as a fallback when a shop doc is being created,
+                // or when an existing shop doc is somehow missing its own
+                // displayOrder. Finding 28 (making this O(1)) is deferred.
+                val fallbackDisplayOrder = getNextShopDisplayOrder()
 
-                if (!shopSnapshot.exists()) {
-                    val nextDisplayOrder = getNextShopDisplayOrder()
+                // Existence-check + create/update of the shop doc, together
+                // with the user's approval update, are done atomically so two
+                // concurrent approvals of the same user can't race each other
+                // between the read and the write.
+                val patchedShop = firestore.runTransaction { transaction ->
+                    val shopSnapshot = transaction.get(shopRef)
 
-                    val shopData = mapOf(
-                        "shopId" to finalShopId,
-                        "name" to name,
-                        "description" to "",
+                    val shop: AdminShop
 
-                        "ownerUid" to uid,
-                        "ownerEmail" to email,
-                        "ownerPhone" to phone,
+                    if (!shopSnapshot.exists()) {
+                        val shopData = mapOf(
+                            "shopId" to finalShopId,
+                            "name" to name,
+                            "description" to "",
 
-                        "phone" to phone,
+                            "ownerUid" to uid,
+                            "ownerEmail" to email,
+                            "ownerPhone" to phone,
 
-                        "isOpen" to false,
-                        "isApproved" to true,
-                        "isBlocked" to false,
-                        "isDeleted" to false,
-                        "isVisible" to true,
-                        "visibilityStatus" to "visible",
-                        "hiddenReason" to "",
-                        "hiddenAt" to 0L,
+                            "phone" to phone,
 
-                        "upiId" to "",
-
-                        "openingTime" to "08:00",
-                        "closingTime" to "20:00",
-
-                        "maxOrdersPerSlot" to 5,
-                        "closedSlots" to emptyList<String>(),
-
-                        "displayOrder" to nextDisplayOrder,
-
-                        "createdAt" to now,
-                        "updatedAt" to now
-                    )
-
-                    shopRef.set(shopData).await()
-
-                    patchedShop = AdminShop(
-                        docId = finalShopId,
-                        shopId = finalShopId,
-                        name = name,
-                        ownerUid = uid,
-                        isOpen = false,
-                        isApproved = true,
-                        isBlocked = false,
-                        isDeleted = false,
-                        isVisible = true,
-                        visibilityStatus = "visible",
-                        hiddenReason = "",
-                        displayOrder = nextDisplayOrder
-                    )
-                } else {
-                    val existingDisplayOrder = shopSnapshot.getLong("displayOrder")?.toInt()
-                        ?: getNextShopDisplayOrder()
-
-                    shopRef.update(
-                        mapOf(
+                            "isOpen" to false,
                             "isApproved" to true,
                             "isBlocked" to false,
                             "isDeleted" to false,
@@ -779,36 +734,85 @@ class AdminViewModel @Inject constructor(
                             "visibilityStatus" to "visible",
                             "hiddenReason" to "",
                             "hiddenAt" to 0L,
-                            "ownerUid" to uid,
-                            "ownerEmail" to email,
-                            "ownerPhone" to phone,
-                            "phone" to phone,
-                            "displayOrder" to existingDisplayOrder,
+
+                            "upiId" to "",
+
+                            "openingTime" to "08:00",
+                            "closingTime" to "20:00",
+
+                            "maxOrdersPerSlot" to 5,
+                            "closedSlots" to emptyList<String>(),
+
+                            "displayOrder" to fallbackDisplayOrder,
+
+                            "createdAt" to now,
                             "updatedAt" to now
                         )
-                    ).await()
 
-                    patchedShop = shopSnapshot.toAdminShop().copy(
-                        isApproved = true,
-                        isBlocked = false,
-                        isDeleted = false,
-                        isVisible = true,
-                        visibilityStatus = "visible",
-                        hiddenReason = "",
-                        ownerUid = uid,
-                        displayOrder = existingDisplayOrder
-                    )
-                }
+                        transaction.set(shopRef, shopData)
 
-                userRef.update(
-                    mapOf(
-                        "isApproved" to true,
-                        "isBlocked" to false,
-                        "isDeleted" to false,
-                        "shopId" to finalShopId,
-                        "updatedAt" to now
+                        shop = AdminShop(
+                            docId = finalShopId,
+                            shopId = finalShopId,
+                            name = name,
+                            ownerUid = uid,
+                            isOpen = false,
+                            isApproved = true,
+                            isBlocked = false,
+                            isDeleted = false,
+                            isVisible = true,
+                            visibilityStatus = "visible",
+                            hiddenReason = "",
+                            displayOrder = fallbackDisplayOrder
+                        )
+                    } else {
+                        val existingDisplayOrder = shopSnapshot.getLong("displayOrder")?.toInt()
+                            ?: fallbackDisplayOrder
+
+                        transaction.update(
+                            shopRef,
+                            mapOf(
+                                "isApproved" to true,
+                                "isBlocked" to false,
+                                "isDeleted" to false,
+                                "isVisible" to true,
+                                "visibilityStatus" to "visible",
+                                "hiddenReason" to "",
+                                "hiddenAt" to 0L,
+                                "ownerUid" to uid,
+                                "ownerEmail" to email,
+                                "ownerPhone" to phone,
+                                "phone" to phone,
+                                "displayOrder" to existingDisplayOrder,
+                                "updatedAt" to now
+                            )
+                        )
+
+                        shop = shopSnapshot.toAdminShop().copy(
+                            isApproved = true,
+                            isBlocked = false,
+                            isDeleted = false,
+                            isVisible = true,
+                            visibilityStatus = "visible",
+                            hiddenReason = "",
+                            ownerUid = uid,
+                            displayOrder = existingDisplayOrder
+                        )
+                    }
+
+                    transaction.update(
+                        userRef,
+                        mapOf(
+                            "isApproved" to true,
+                            "isBlocked" to false,
+                            "isDeleted" to false,
+                            "shopId" to finalShopId,
+                            "updatedAt" to now
+                        )
                     )
-                ).await()
+
+                    shop
+                }.await()
 
                 val shopAlreadyPresent = _shops.value.any { it.docId == patchedShop.docId }
 
