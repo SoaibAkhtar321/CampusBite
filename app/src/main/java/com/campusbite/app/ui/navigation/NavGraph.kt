@@ -35,6 +35,7 @@ import com.campusbite.app.ui.screens.shopkeeper.ShopkeeperAnalyticsScreen
 import com.campusbite.app.ui.screens.shopkeeper.ShopkeeperDashboardScreen
 import com.campusbite.app.ui.screens.shopkeeper.ShopkeeperOrderHistoryScreen
 import com.campusbite.app.ui.screens.splash.SplashScreen
+import com.campusbite.app.ui.viewmodel.AdminViewModel
 import com.campusbite.app.ui.viewmodel.AuthViewModel
 import com.campusbite.app.ui.viewmodel.CartViewModel
 import com.campusbite.app.ui.viewmodel.HomeViewModel
@@ -344,11 +345,27 @@ fun NavGraph(
             ) { backStackEntry ->
                 val shopId = backStackEntry.arguments?.getString("shopId").orEmpty()
 
+                // Shares the AdminViewModel instance (and its live Firestore
+                // listeners) with ADMIN_DASHBOARD instead of spinning up a
+                // second instance whose init{} re-runs the full shops/users
+                // loads and the pending-shopkeepers listener, mirroring the
+                // HomeViewModel/STUDENT_HOME and ShopkeeperViewModel/
+                // SHOPKEEPER_DASHBOARD patterns above. ADMIN_SHOP_REPORT is
+                // only ever navigated to from ADMIN_DASHBOARD (see
+                // onNavigateToShopReport below), so that entry is guaranteed
+                // to be on the back stack here.
+                val parentEntry = remember(backStackEntry) {
+                    navController.getBackStackEntry(Routes.ADMIN_DASHBOARD)
+                }
+
+                val adminViewModel: AdminViewModel = hiltViewModel(parentEntry)
+
                 AdminShopReportScreen(
                     shopId = shopId,
                     onNavigateBack = {
                         navController.popBackStack()
-                    }
+                    },
+                    viewModel = adminViewModel
                 )
             }
 

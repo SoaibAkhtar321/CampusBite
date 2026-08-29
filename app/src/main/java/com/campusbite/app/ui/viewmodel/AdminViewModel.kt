@@ -1813,11 +1813,17 @@ class AdminViewModel @Inject constructor(
         orderedShops: List<AdminShop>
     ) {
         val batch = firestore.batch()
+        var hasChanges = false
 
+        // moveShopUp/moveShopDown only swap two adjacent shops, so most
+        // shops in `orderedShops` keep the same index (and therefore the
+        // same computed displayOrder) they already had. Only queue a write
+        // for a shop whose displayOrder value actually changes, instead of
+        // rewriting every active shop's document on every single move.
         orderedShops.forEachIndexed { index, shop ->
             val newDisplayOrder = (index + 1) * 10
 
-            if (shop.docId.isNotBlank()) {
+            if (shop.docId.isNotBlank() && shop.displayOrder != newDisplayOrder) {
                 val shopRef = firestore.collection("shops")
                     .document(shop.docId)
 
@@ -1826,10 +1832,14 @@ class AdminViewModel @Inject constructor(
                     "displayOrder",
                     newDisplayOrder
                 )
+
+                hasChanges = true
             }
         }
 
-        batch.commit().await()
+        if (hasChanges) {
+            batch.commit().await()
+        }
     }
 
     private suspend fun getNextShopDisplayOrder(): Int {
