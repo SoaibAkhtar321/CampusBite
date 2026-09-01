@@ -96,6 +96,12 @@ class OrderViewModel @Inject constructor(
     private var userOrdersListener: ListenerRegistration? = null
     private var shopAvailabilityListener: ListenerRegistration? = null
 
+    // Monotonically increasing generation id for listenToShopAvailability().
+    // Every call bumps this before doing any async work; a coroutine whose
+    // captured id no longer matches this field has been superseded by a
+    // newer call and must not register a listener or write shared state.
+    private var shopAvailabilityRequestId = 0
+
     private val lastKnownOrderStates = mutableMapOf<String, String>()
     private val lastNotifiedOrderStates = mutableMapOf<String, String>()
 
@@ -112,7 +118,15 @@ class OrderViewModel @Inject constructor(
     )
 
     fun listenToShopAvailability(shopId: String) {
+        // Bump the generation id first and drop whatever listener is
+        // currently active. Any earlier in-flight call's coroutine will see
+        // this new id via the check below and refuse to (re)register a
+        // listener or write state, no matter when its suspended lookup
+        // eventually resolves.
+        val requestId = ++shopAvailabilityRequestId
+
         shopAvailabilityListener?.remove()
+        shopAvailabilityListener = null
 
         if (shopId.isBlank()) {
             _selectedShop.value = null
@@ -124,15 +138,31 @@ class OrderViewModel @Inject constructor(
             try {
                 val actualDoc = getShopDocumentByIdOrField(shopId)
 
+                if (requestId != shopAvailabilityRequestId) {
+                    // Superseded by a newer listenToShopAvailability() call
+                    // while this one was awaiting the shop lookup. Do not
+                    // register a listener or touch shared state for a stale
+                    // request.
+                    return@launch
+                }
+
                 if (actualDoc == null || !actualDoc.exists()) {
                     _selectedShop.value = null
                     _slotUiState.value = SlotUiState(message = "Shop details not found.")
                     return@launch
                 }
 
-                shopAvailabilityListener = firestore.collection("shops")
+                val newListener = firestore.collection("shops")
                     .document(actualDoc.id)
                     .addSnapshotListener { snapshot, error ->
+                        if (requestId != shopAvailabilityRequestId) {
+                            // A newer request has since taken over. This
+                            // listener is being/has been removed below; this
+                            // guard just prevents a lingering in-flight
+                            // callback from overwriting current state.
+                            return@addSnapshotListener
+                        }
+
                         if (error != null) {
                             Log.e("OrderVM", "Shop availability listener failed", error)
                             _selectedShop.value = null
@@ -171,10 +201,24 @@ class OrderViewModel @Inject constructor(
                             _slotUiState.value = SlotUiState(message = getClosedMessage(shop))
                         }
                     }
+
+                if (requestId != shopAvailabilityRequestId) {
+                    // A newer request started in the (effectively empty, but
+                    // guarded defensively) window between the lookup check
+                    // above and addSnapshotListener() registering. Don't
+                    // leave this listener orphaned — remove it immediately
+                    // instead of publishing it as the active listener.
+                    newListener.remove()
+                    return@launch
+                }
+
+                shopAvailabilityListener = newListener
             } catch (e: Exception) {
-                Log.e("OrderVM", "Failed to start shop availability listener", e)
-                _selectedShop.value = null
-                _slotUiState.value = SlotUiState(message = "Failed to check shop availability.")
+                if (requestId == shopAvailabilityRequestId) {
+                    Log.e("OrderVM", "Failed to start shop availability listener", e)
+                    _selectedShop.value = null
+                    _slotUiState.value = SlotUiState(message = "Failed to check shop availability.")
+                }
             }
         }
     }

@@ -456,6 +456,21 @@ function getMaxOrdersPerSlot(shop) {
     : DEFAULT_MAX_ORDERS_PER_SLOT;
 }
 
+// Mirrors the client-side Shop.canAcceptOrders check (isApproved && isOpen
+// && !isBlocked && !isDeleted) and the firestore.rules shopIsOrderable()
+// helper. createOrder is the only server-side gate on order creation
+// (rules deny client-side order creates outright), so this check must live
+// here — relying on the client hiding closed/blocked/unapproved shops from
+// the UI is not a trust boundary.
+function isShopOrderable(shop) {
+  return (
+    shop?.isApproved === true &&
+    shop?.isOpen === true &&
+    shop?.isBlocked !== true &&
+    shop?.isDeleted !== true
+  );
+}
+
 function isSlotClosed(shop, slotData, pickupSlot) {
   const closedSlots = Array.isArray(shop?.closedSlots) ? shop.closedSlots : [];
 
@@ -1049,6 +1064,14 @@ exports.createOrder = onCall(
         }
 
         const shop = shopSnap.data();
+
+        if (!isShopOrderable(shop)) {
+          throw new HttpsError(
+            "failed-precondition",
+            "This shop is not currently accepting orders."
+          );
+        }
+
         const maxOrdersPerSlot = getMaxOrdersPerSlot(shop);
 
         const slotSnap = await tx.get(slotRef);

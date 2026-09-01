@@ -115,6 +115,13 @@ class AdminViewModel @Inject constructor(
     private var shopReportMonthAnalyticsListener: ListenerRegistration? = null
     private var shopReportLifetimeAnalyticsListener: ListenerRegistration? = null
 
+    // Monotonically increasing generation id for loadShopReport(). Every call
+    // bumps this before doing any async work; a coroutine or listener
+    // callback whose captured id no longer matches this field belongs to a
+    // superseded request and must not register listeners or write shared
+    // report state.
+    private var shopReportRequestId = 0
+
     private var currentReportShop: AdminShop? = null
     private var reportRecentOrders: List<Order> = emptyList()
     private var reportActiveOrders: List<Order> = emptyList()
@@ -321,6 +328,12 @@ class AdminViewModel @Inject constructor(
     }
 
     fun loadShopReport(shopId: String) {
+        // Bump the generation id first and drop any listeners from a
+        // previous (possibly still-loading) request. An earlier call's
+        // coroutine will see this new id via the checks below and refuse to
+        // register listeners or write report state for its now-stale shop,
+        // no matter when its suspended lookup eventually resolves.
+        val requestId = ++shopReportRequestId
         clearShopReportListeners()
 
         if (shopId.isBlank()) {
@@ -358,6 +371,14 @@ class AdminViewModel @Inject constructor(
                         .firstOrNull()
                 }
 
+                if (requestId != shopReportRequestId) {
+                    // Superseded by a newer loadShopReport() call while this
+                    // one was awaiting the shop lookup. Do not register
+                    // listeners or touch shared report state for a stale
+                    // request.
+                    return@launch
+                }
+
                 if (shopDoc == null || !shopDoc.exists()) {
                     _shopReportState.value = AdminShopReportState(
                         error = "Shop not found. shopId used: $shopId"
@@ -368,9 +389,14 @@ class AdminViewModel @Inject constructor(
                 currentReportShop = shopDoc.toAdminShop()
 
                 startShopReportListeners(
-                    shop = currentReportShop!!
+                    shop = currentReportShop!!,
+                    requestId = requestId
                 )
             } catch (e: Exception) {
+                if (requestId != shopReportRequestId) {
+                    return@launch
+                }
+
                 val readableError = e.readableAdminError()
 
                 Log.e(
@@ -387,15 +413,25 @@ class AdminViewModel @Inject constructor(
     }
 
     private fun startShopReportListeners(
-        shop: AdminShop
+        shop: AdminShop,
+        requestId: Int
     ) {
+        // Defensive: the caller already checks this before invoking us, but
+        // guard here too so a stale call can never register any of the 5
+        // listeners below.
+        if (requestId != shopReportRequestId) {
+            return
+        }
+
         val today = LocalDate.now().toString()
         val currentMonth = YearMonth.now().toString()
 
-        shopReportTodayAnalyticsListener = dailyAnalyticsRef(
+        val todayListener = dailyAnalyticsRef(
             shopId = shop.shopId,
             date = today
         ).addSnapshotListener { snapshot, error ->
+            if (requestId != shopReportRequestId) return@addSnapshotListener
+
             if (error != null) {
                 val readableError = error.readableAdminError()
 
@@ -412,10 +448,18 @@ class AdminViewModel @Inject constructor(
             updateShopReportState()
         }
 
-        shopReportMonthAnalyticsListener = monthlyAnalyticsRef(
+        if (requestId != shopReportRequestId) {
+            todayListener.remove()
+            return
+        }
+        shopReportTodayAnalyticsListener = todayListener
+
+        val monthListener = monthlyAnalyticsRef(
             shopId = shop.shopId,
             month = currentMonth
         ).addSnapshotListener { snapshot, error ->
+            if (requestId != shopReportRequestId) return@addSnapshotListener
+
             if (error != null) {
                 val readableError = error.readableAdminError()
 
@@ -432,9 +476,17 @@ class AdminViewModel @Inject constructor(
             updateShopReportState()
         }
 
-        shopReportLifetimeAnalyticsListener = lifetimeAnalyticsRef(
+        if (requestId != shopReportRequestId) {
+            monthListener.remove()
+            return
+        }
+        shopReportMonthAnalyticsListener = monthListener
+
+        val lifetimeListener = lifetimeAnalyticsRef(
             shopId = shop.shopId
         ).addSnapshotListener { snapshot, error ->
+            if (requestId != shopReportRequestId) return@addSnapshotListener
+
             if (error != null) {
                 val readableError = error.readableAdminError()
 
@@ -451,10 +503,18 @@ class AdminViewModel @Inject constructor(
             updateShopReportState()
         }
 
-        shopReportActiveOrdersListener = firestore.collection("orders")
+        if (requestId != shopReportRequestId) {
+            lifetimeListener.remove()
+            return
+        }
+        shopReportLifetimeAnalyticsListener = lifetimeListener
+
+        val activeOrdersListener = firestore.collection("orders")
             .whereEqualTo("shopId", shop.shopId)
             .whereIn("status", listOf("pending", "preparing", "ready"))
             .addSnapshotListener { snapshot, error ->
+                if (requestId != shopReportRequestId) return@addSnapshotListener
+
                 if (error != null) {
                     val readableError = error.readableAdminError()
 
@@ -489,11 +549,19 @@ class AdminViewModel @Inject constructor(
                 updateShopReportState()
             }
 
-        shopReportRecentOrdersListener = firestore.collection("orders")
+        if (requestId != shopReportRequestId) {
+            activeOrdersListener.remove()
+            return
+        }
+        shopReportActiveOrdersListener = activeOrdersListener
+
+        val recentOrdersListener = firestore.collection("orders")
             .whereEqualTo("shopId", shop.shopId)
             .orderBy("createdAt", Query.Direction.DESCENDING)
             .limit(50)
             .addSnapshotListener { snapshot, error ->
+                if (requestId != shopReportRequestId) return@addSnapshotListener
+
                 if (error != null) {
                     val readableError = error.readableAdminError()
 
@@ -527,6 +595,12 @@ class AdminViewModel @Inject constructor(
 
                 updateShopReportState()
             }
+
+        if (requestId != shopReportRequestId) {
+            recentOrdersListener.remove()
+            return
+        }
+        shopReportRecentOrdersListener = recentOrdersListener
     }
 
     private fun updateShopReportState() {
