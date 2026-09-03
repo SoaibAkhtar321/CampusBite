@@ -48,16 +48,6 @@
         { "fieldPath": "shopId", "order": "ASCENDING" },
         { "fieldPath": "isAvailable", "order": "ASCENDING" }
       ]
-    },
-    {
-      "collectionGroup": "shops",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "isApproved", "order": "ASCENDING" },
-        { "fieldPath": "isBlocked", "order": "ASCENDING" },
-        { "fieldPath": "isDeleted", "order": "ASCENDING" },
-        { "fieldPath": "displayOrder", "order": "ASCENDING" }
-      ]
     }
   ],
   "fieldOverrides": []
