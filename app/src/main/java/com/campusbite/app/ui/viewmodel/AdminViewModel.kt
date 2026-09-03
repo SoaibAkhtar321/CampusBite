@@ -1920,14 +1920,15 @@ class AdminViewModel @Inject constructor(
 
     private suspend fun getNextShopDisplayOrder(): Int {
         val snapshot = firestore.collection("shops")
+            .orderBy("displayOrder", Query.Direction.DESCENDING)
+            .limit(1)
             .get()
             .await()
 
         val maxOrder = snapshot.documents
-            .mapNotNull { doc ->
-                doc.getLong("displayOrder")?.toInt()
-            }
-            .maxOrNull()
+            .firstOrNull()
+            ?.getLong("displayOrder")
+            ?.toInt()
             ?: 0
 
         return maxOrder + 10

@@ -31,7 +31,7 @@
 #   - Order        : read  -> AdminViewModel.kt, ShopkeeperViewModel.kt
 #   - OrderItem    : read  -> nested field inside Order
 #   - Shop         : read  -> HomeViewModel.kt, ShopkeeperProfileViewModel.kt
-#   - MenuItem     : read  -> HomeViewModel.kt, ShopkeeperViewModel.kt, ShopRepository.kt
+#   - MenuItem     : read  -> HomeViewModel.kt, ShopkeeperViewModel.kt
 #                    write -> ShopkeeperViewModel.kt (.set(newItem) / .set(menuItem))
 #   - User         : read  -> ProfileViewModel.kt, ShopkeeperProfileViewModel.kt
 #                    write -> AuthRepository.kt (.set(user))
