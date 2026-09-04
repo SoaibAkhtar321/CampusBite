@@ -56,7 +56,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -143,11 +143,11 @@ fun ShopkeeperDashboardScreen(
     onNavigateToAnalytics: () -> Unit,
     viewModel: ShopkeeperViewModel = hiltViewModel()
 ) {
-    val orders by viewModel.orders.collectAsState()
-    val salesSummary by viewModel.salesSummary.collectAsState()
-    val isLoading by viewModel.isLoading.collectAsState()
-    val shopOpen by viewModel.shopOpen.collectAsState()
-    val closedSlots by viewModel.closedSlots.collectAsState()
+    val orders by viewModel.orders.collectAsStateWithLifecycle()
+    val salesSummary by viewModel.salesSummary.collectAsStateWithLifecycle()
+    val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
+    val shopOpen by viewModel.shopOpen.collectAsStateWithLifecycle()
+    val closedSlots by viewModel.closedSlots.collectAsStateWithLifecycle()
 
     var showRefundPending by remember {
         mutableStateOf(false)

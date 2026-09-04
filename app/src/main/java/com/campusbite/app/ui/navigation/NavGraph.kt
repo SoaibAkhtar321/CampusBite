@@ -414,6 +414,9 @@ fun NavGraph(
                 )
             }
 
+            // Intentional future scaffolding — Edit Shop Info screen is not
+            // yet implemented and this route is not currently reachable
+            // from any navigation action. Keep as-is (Finding 50).
             composable(Routes.EDIT_SHOP) {
                 Box(
                     modifier = Modifier.fillMaxSize(),

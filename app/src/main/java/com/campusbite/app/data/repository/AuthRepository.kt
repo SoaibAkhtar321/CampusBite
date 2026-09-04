@@ -19,7 +19,7 @@ class AuthRepository @Inject constructor(
     /**
      * Consolidated view of a users/{uid} document, derived from a single
      * Firestore read, for startup/session and login decision checkpoints.
-     * Field semantics mirror getUserRole()/isShopkeeperApproved()/isUserBlocked().
+     * Field semantics mirror getUserRole()/isShopkeeperApproved().
      */
     data class UserSessionSnapshot(
         val isBlocked: Boolean,
@@ -200,20 +200,6 @@ class AuthRepository @Inject constructor(
         }
     }
 
-    suspend fun isUserBlocked(): Boolean {
-        return try {
-            val uid = auth.currentUser?.uid ?: return false
-
-            val snapshot = firestore.collection("users")
-                .document(uid)
-                .get()
-                .await()
-
-            snapshot.getBoolean("isBlocked") ?: false
-        } catch (e: Exception) {
-            false
-        }
-    }
     suspend fun hasCompletedProfile(): Boolean {
         return try {
             val uid = auth.currentUser?.uid ?: return false

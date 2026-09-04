@@ -24,6 +24,9 @@ object Routes {
     const val ADMIN_SHOP_REPORT = "admin_shop_report/{shopId}"
 
     const val STUDENT_PROFILE = "student_profile"
+
+    // Intentional future scaffolding for an upcoming Edit Shop feature.
+    // Not yet wired to any navigation action (Finding 50).
     const val EDIT_SHOP = "edit_shop"
 
     fun shopDetail(shopId: String): String {

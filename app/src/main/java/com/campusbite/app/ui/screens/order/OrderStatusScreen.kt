@@ -57,7 +57,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -136,7 +136,7 @@ fun OrderStatusScreen(
     viewModel: OrderViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
-    val order by viewModel.currentOrder.collectAsState()
+    val order by viewModel.currentOrder.collectAsStateWithLifecycle()
 
     LaunchedEffect(orderId) {
         viewModel.listenToOrderById(orderId)

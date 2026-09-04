@@ -21,6 +21,7 @@ import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material.icons.filled.Store
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -51,12 +52,12 @@ fun ShopDetailScreen(
     viewModel: HomeViewModel = hiltViewModel(),
     cartViewModel: CartViewModel = hiltViewModel()
 ) {
-    val shops by viewModel.shops.collectAsState()
-    val menuItems by viewModel.menuItems.collectAsState()
-    val isLoading by viewModel.isLoading.collectAsState()
-    val cartItems by cartViewModel.cartItems.collectAsState()
+    val shops by viewModel.shops.collectAsStateWithLifecycle()
+    val menuItems by viewModel.menuItems.collectAsStateWithLifecycle()
+    val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
+    val cartItems by cartViewModel.cartItems.collectAsStateWithLifecycle()
     val cartItemsById = remember(cartItems) { cartItems.associateBy { it.itemId } }
-    val showDialog by cartViewModel.showShopConflict.collectAsState()
+    val showDialog by cartViewModel.showShopConflict.collectAsStateWithLifecycle()
 
     val normalizedId = shopId.trim().lowercase()
 

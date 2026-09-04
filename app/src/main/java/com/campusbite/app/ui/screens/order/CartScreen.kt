@@ -53,7 +53,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -107,11 +107,11 @@ fun CartScreen(
     orderViewModel: OrderViewModel = hiltViewModel(),
     homeViewModel: HomeViewModel? = null
 ) {
-    val cartItems by cartViewModel.cartItems.collectAsState()
-    val currentShopId by cartViewModel.currentShopId.collectAsState()
-    val orderState by orderViewModel.orderState.collectAsState()
-    val selectedShop by orderViewModel.selectedShop.collectAsState()
-    val slotUiState by orderViewModel.slotUiState.collectAsState()
+    val cartItems by cartViewModel.cartItems.collectAsStateWithLifecycle()
+    val currentShopId by cartViewModel.currentShopId.collectAsStateWithLifecycle()
+    val orderState by orderViewModel.orderState.collectAsStateWithLifecycle()
+    val selectedShop by orderViewModel.selectedShop.collectAsStateWithLifecycle()
+    val slotUiState by orderViewModel.slotUiState.collectAsStateWithLifecycle()
 
     val availableSlots = slotUiState.slots
     val isLoadingSlots = slotUiState.isLoading

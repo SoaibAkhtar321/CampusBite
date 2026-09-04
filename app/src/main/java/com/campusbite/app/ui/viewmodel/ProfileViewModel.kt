@@ -38,6 +38,19 @@ class ProfileViewModel @Inject constructor(
     private val _message = MutableStateFlow<String?>(null)
     val message = _message.asStateFlow()
 
+    // Raw users/{uid} field mirrors (as opposed to the typed User in
+    // _userProfile) for screens that need the same phone-field fallback
+    // chain (phone/phoneNumber/mobile) StudentProfileScreen relied on
+    // before its Firestore listener was folded into this ViewModel.
+    private val _firestoreName = MutableStateFlow("")
+    val firestoreName = _firestoreName.asStateFlow()
+
+    private val _firestoreEmail = MutableStateFlow("")
+    val firestoreEmail = _firestoreEmail.asStateFlow()
+
+    private val _firestorePhone = MutableStateFlow("")
+    val firestorePhone = _firestorePhone.asStateFlow()
+
     private val activeStatuses = listOf(
         "pending",
         "accepted",
@@ -72,6 +85,15 @@ class ProfileViewModel @Inject constructor(
 
                 val user = snapshot?.toObject(User::class.java)
                 _userProfile.value = user
+
+                if (snapshot != null && snapshot.exists()) {
+                    _firestoreName.value = snapshot.getString("name").orEmpty()
+                    _firestoreEmail.value = snapshot.getString("email").orEmpty()
+                    _firestorePhone.value = snapshot.getString("phone")
+                        ?: snapshot.getString("phoneNumber")
+                                ?: snapshot.getString("mobile")
+                                ?: ""
+                }
 
                 val shopId = user?.shopId.orEmpty()
 

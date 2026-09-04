@@ -71,6 +71,7 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -157,20 +158,20 @@ fun HomeScreen(
     cartViewModel: CartViewModel = hiltViewModel(),
     orderViewModel: OrderViewModel = hiltViewModel()
 ) {
-    val shops by viewModel.shops.collectAsState()
-    val isDataReady by viewModel.isDataReady.collectAsState()
-    val isLoading by viewModel.isLoading.collectAsState()
-    val isLoadingMore by viewModel.isLoadingMore.collectAsState()
-    val canLoadMore by viewModel.canLoadMore.collectAsState()
-    val selectedCategory by viewModel.selectedCategory.collectAsState()
-    val searchQuery by viewModel.searchQuery.collectAsState()
-    val priceRange by viewModel.priceRange.collectAsState()
-    val filteredItems by viewModel.filteredItems.collectAsState()
+    val shops by viewModel.shops.collectAsStateWithLifecycle()
+    val isDataReady by viewModel.isDataReady.collectAsStateWithLifecycle()
+    val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
+    val isLoadingMore by viewModel.isLoadingMore.collectAsStateWithLifecycle()
+    val canLoadMore by viewModel.canLoadMore.collectAsStateWithLifecycle()
+    val selectedCategory by viewModel.selectedCategory.collectAsStateWithLifecycle()
+    val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
+    val priceRange by viewModel.priceRange.collectAsStateWithLifecycle()
+    val filteredItems by viewModel.filteredItems.collectAsStateWithLifecycle()
 
-    val cartItems by cartViewModel.cartItems.collectAsState()
-    val showDialog by cartViewModel.showShopConflict.collectAsState()
+    val cartItems by cartViewModel.cartItems.collectAsStateWithLifecycle()
+    val showDialog by cartViewModel.showShopConflict.collectAsStateWithLifecycle()
 
-    val activeOrder by orderViewModel.activeOrder.collectAsState()
+    val activeOrder by orderViewModel.activeOrder.collectAsStateWithLifecycle()
 
     var showExitDialog by remember { mutableStateOf(false) }
     var showFilterSheet by remember { mutableStateOf(false) }

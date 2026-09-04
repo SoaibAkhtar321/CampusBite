@@ -41,7 +41,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -77,11 +77,11 @@ fun AdminDashboardScreen(
     onNavigateToShopReport: (String) -> Unit,
     viewModel: AdminViewModel = hiltViewModel()
 ) {
-    val shops by viewModel.shops.collectAsState()
-    val users by viewModel.users.collectAsState()
-    val pendingShopkeepers by viewModel.pendingShopkeepers.collectAsState()
-    val isLoading by viewModel.isLoading.collectAsState()
-    val message by viewModel.message.collectAsState()
+    val shops by viewModel.shops.collectAsStateWithLifecycle()
+    val users by viewModel.users.collectAsStateWithLifecycle()
+    val pendingShopkeepers by viewModel.pendingShopkeepers.collectAsStateWithLifecycle()
+    val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
+    val message by viewModel.message.collectAsStateWithLifecycle()
 
 
     var tabIndex by remember {

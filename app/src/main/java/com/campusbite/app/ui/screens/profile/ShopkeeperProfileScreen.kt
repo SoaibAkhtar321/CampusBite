@@ -49,7 +49,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -84,12 +84,12 @@ fun ShopkeeperProfileScreen(
     onLogout: () -> Unit,
     viewModel: ProfileViewModel = hiltViewModel()
 ) {
-    val userProfile by viewModel.userProfile.collectAsState()
-    val currentUpiId by viewModel.upiId.collectAsState()
-    val openingTime by viewModel.openingTime.collectAsState()
-    val closingTime by viewModel.closingTime.collectAsState()
-    val maxOrdersPerSlot by viewModel.maxOrdersPerSlot.collectAsState()
-    val message by viewModel.message.collectAsState()
+    val userProfile by viewModel.userProfile.collectAsStateWithLifecycle()
+    val currentUpiId by viewModel.upiId.collectAsStateWithLifecycle()
+    val openingTime by viewModel.openingTime.collectAsStateWithLifecycle()
+    val closingTime by viewModel.closingTime.collectAsStateWithLifecycle()
+    val maxOrdersPerSlot by viewModel.maxOrdersPerSlot.collectAsStateWithLifecycle()
+    val message by viewModel.message.collectAsStateWithLifecycle()
 
     val context = LocalContext.current
 

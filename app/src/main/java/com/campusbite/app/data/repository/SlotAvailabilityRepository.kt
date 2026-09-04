@@ -2,6 +2,9 @@ package com.campusbite.app.data.repository
 
 import com.campusbite.app.data.model.SlotAvailability
 import com.google.firebase.firestore.FirebaseFirestore
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.tasks.await
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -53,11 +56,16 @@ class SlotAvailabilityRepository @Inject constructor(
      * Batched equivalent of calling [getSlotAvailability] once per slot in a
      * loop. Each slot in a loadAvailableSlots() call was previously a
      * separate sequential Firestore document .get() (up to ~12 round trips
-     * for a 3-hour window at 15-minute intervals); this fetches all of them
-     * in a single Firestore getAll() batch call, cutting that down to one
-     * network round trip while reading the exact same documents. Returns a
-     * map keyed by the original slot label so callers can look up results
-     * in generation order.
+     * for a 3-hour window at 15-minute intervals). The Android Firestore
+     * client SDK (unlike the server/Admin SDK) has no multi-DocumentReference
+     * getAll(), so this instead fires all per-document .get() calls
+     * concurrently via coroutines and awaits them together, reading the
+     * exact same documents while collapsing the wait to one round trip's
+     * worth of latency instead of ~12 sequential ones. Returns a map keyed
+     * by the original slot label so callers can look up results in
+     * generation order. Non-existent slot documents still fall through to
+     * the default "fully available" [SlotAvailability] via
+     * [snapshotToSlotAvailability], same as [getSlotAvailability].
      */
     suspend fun getSlotAvailabilityBatch(
         shopId: String,
@@ -71,24 +79,24 @@ class SlotAvailabilityRepository @Inject constructor(
             buildSlotId(shopId = shopId, date = date, slot = slot)
         }
 
-        val docRefs = slotIdToSlot.keys.map { slotId ->
-            firestore.collection("slotAvailability").document(slotId)
-        }
+        return coroutineScope {
+            slotIdToSlot.map { (slotId, slot) ->
+                async {
+                    val snapshot = firestore.collection("slotAvailability")
+                        .document(slotId)
+                        .get()
+                        .await()
 
-        val snapshots = firestore.getAll(*docRefs.toTypedArray()).await()
-
-        return snapshots.associate { snapshot ->
-            val slotId = snapshot.id
-            val slot = slotIdToSlot.getValue(slotId)
-
-            slot to snapshotToSlotAvailability(
-                snapshot = snapshot,
-                slotId = slotId,
-                shopId = shopId,
-                date = date,
-                slot = slot,
-                maxOrders = maxOrders
-            )
+                    slot to snapshotToSlotAvailability(
+                        snapshot = snapshot,
+                        slotId = slotId,
+                        shopId = shopId,
+                        date = date,
+                        slot = slot,
+                        maxOrders = maxOrders
+                    )
+                }
+            }.awaitAll().toMap()
         }
     }
 

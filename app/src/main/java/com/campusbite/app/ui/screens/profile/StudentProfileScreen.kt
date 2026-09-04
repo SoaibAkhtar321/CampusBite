@@ -45,13 +45,12 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -68,7 +67,6 @@ import com.campusbite.app.ui.viewmodel.ProfileViewModel
 import com.campusbite.app.util.OrderStatusValue
 import com.campusbite.app.util.RefundStatusValue
 import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.firestore.FirebaseFirestore
 import java.time.LocalDate
 
 private val BrandOrange = Color(0xFFFF6B00)
@@ -97,16 +95,15 @@ fun StudentProfileScreen(
     var showEditProfileDialog by remember { mutableStateOf(false) }
     var notificationsEnabled by remember { mutableStateOf(true) }
 
-    var firestoreName by remember { mutableStateOf("") }
-    var firestoreEmail by remember { mutableStateOf("") }
-    var firestorePhone by remember { mutableStateOf("") }
-
     var editName by remember { mutableStateOf("") }
     var editPhone by remember { mutableStateOf("") }
 
-    val activeOrders by orderViewModel.activeOrders.collectAsState()
-    val userOrders by orderViewModel.userOrders.collectAsState()
-    val profileMessage by profileViewModel.message.collectAsState()
+    val activeOrders by orderViewModel.activeOrders.collectAsStateWithLifecycle()
+    val userOrders by orderViewModel.userOrders.collectAsStateWithLifecycle()
+    val profileMessage by profileViewModel.message.collectAsStateWithLifecycle()
+    val firestoreName by profileViewModel.firestoreName.collectAsStateWithLifecycle()
+    val firestoreEmail by profileViewModel.firestoreEmail.collectAsStateWithLifecycle()
+    val firestorePhone by profileViewModel.firestorePhone.collectAsStateWithLifecycle()
 
     val today = LocalDate.now().toString()
 
@@ -122,33 +119,6 @@ fun StudentProfileScreen(
                         )
     }
 
-
-
-    DisposableEffect(currentUser?.uid) {
-        val uid = currentUser?.uid
-
-        if (uid.isNullOrBlank()) {
-            onDispose { }
-        } else {
-            val registration = FirebaseFirestore.getInstance()
-                .collection("users")
-                .document(uid)
-                .addSnapshotListener { snapshot, _ ->
-                    if (snapshot != null && snapshot.exists()) {
-                        firestoreName = snapshot.getString("name").orEmpty()
-                        firestoreEmail = snapshot.getString("email").orEmpty()
-                        firestorePhone = snapshot.getString("phone")
-                            ?: snapshot.getString("phoneNumber")
-                                    ?: snapshot.getString("mobile")
-                                    ?: ""
-                    }
-                }
-
-            onDispose {
-                registration.remove()
-            }
-        }
-    }
 
     LaunchedEffect(currentUser?.uid) {
         val uid = currentUser?.uid
